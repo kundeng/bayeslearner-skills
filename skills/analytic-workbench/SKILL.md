@@ -1,6 +1,6 @@
 ---
 name: analytic-workbench
-description: "ALWAYS use this skill for human-in-the-loop analytic workflows: exploratory notebook runs, Hydra-managed experiment sweeps, review/approval loops, and reproducibility layers such as DVC, Kedro, or MLflow. Use it when the user wants to set up or run an analysis pipeline, choose a tier, compare hyperparameters, build a comparison table, review outputs before approval, run the next stage, decide how marimo, Hydra, DVC, Kedro, MLflow, Dagster, or Prefect fit together, or evolve an analysis from exploratory work into a structured workbench. Trigger on phrases like analysis pipeline, reproducible analysis, human-in-the-loop, next stage, experiment sweep, hyperparameter comparison, comparison table, marimo, Hydra, DVC, Kedro, MLflow, Dagster, Prefect, analytic workbench, AutoML, PyCaret."
+description: "ALWAYS use this skill for human-in-the-loop analytic workflows: exploratory notebook runs, Tier 0 data exploration, Tier 1 structured analysis, folder normalization for analytics projects, Hydra-managed experiment sweeps, review/approval loops, and reproducibility layers such as DVC, Kedro, or MLflow. Use it when the user wants to set up or run an analysis pipeline, asks whether an analytic workflow maps to best practices, wants to normalize repo structure for analytics, wants to choose a tier, compare hyperparameters, build a comparison table, review outputs before approval, run the next stage, or decide how marimo, Hydra, DVC, Kedro, MLflow, Dagster, or Prefect fit together. Trigger on phrases like analysis pipeline, reproducible analysis, best practices, tier 0, tier 1, normalize folder structure, exploratory analysis, notebook workflow, human-in-the-loop, next stage, experiment sweep, hyperparameter comparison, comparison table, marimo, Hydra, DVC, Kedro, MLflow, Dagster, Prefect, analytic workbench, AutoML, PyCaret."
 ---
 
 # Analytic Workbench
@@ -8,6 +8,26 @@ description: "ALWAYS use this skill for human-in-the-loop analytic workflows: ex
 Human-directed, AI-operated analysis. The AI drives execution, self-reviews
 outputs, and presents artifacts for human approval. The human guides direction,
 edits interpretations, and decides what to try next.
+
+## Invoke Immediately When
+
+Use this skill at the start of the turn, not later, when the user asks for any
+combination of:
+
+- analytic workflow best practices
+- repo or folder normalization for analysis work
+- "Tier 0" exploration before formal code structure
+- "Tier 1" structuring after exploration
+- notebooks plus reproducible promotion later
+- MCP-backed or API-backed data exploration that feeds a notebook/report workflow
+
+If a domain skill also applies, pair them. For example:
+
+- Splunk analysis project -> `splunk-platform` + `analytic-workbench`
+- Spec-heavy analytics project -> `spec-driven-dev` + `analytic-workbench`
+
+Do not wait for the user to explicitly say "use analytic-workbench" when the
+workflow shape already matches this pattern.
 
 ---
 

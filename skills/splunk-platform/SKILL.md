@@ -1,6 +1,6 @@
 ---
 name: splunk-platform
-description: "Deep skill for Splunk development, administration, app/add-on engineering, dashboards, SDK/REST integrations, and AI-facing tooling. ALWAYS use this skill when the task involves splunklib, Splunk REST API, search/jobs or jobs/export patterns, Python SDK, JavaScript SDK, SPL discovery/admin searches, knowledge objects, UCC add-on development, Dashboard Studio, Simple XML, Splunk MCP integration, AppInspect/package validation, or platform deployment automation. Trigger on: Splunk SDK, splunklib, SPL, Splunk REST API, jobs/export, add-on, UCC, modular input, alert action, Dashboard Studio, Simple XML, appinspect, saved searches, knowledge objects, MCP, Splunk admin, Splunk Cloud, Splunk Enterprise, Splunk automation."
+description: "Deep skill for Splunk development, administration, app/add-on engineering, dashboards, SDK/REST integrations, and AI-facing tooling. ALWAYS use this skill when the task involves splunklib, Splunk REST API, search/jobs or jobs/export patterns, Python SDK, JavaScript SDK, SPL discovery/admin searches, knowledge objects, UCC add-on development, Dashboard Studio, Simple XML, Splunk MCP integration, AppInspect/package validation, or platform deployment automation. If the task is a Splunk analytics project, exploration workflow, MCP-backed data investigation, or reproducible analysis pipeline, pair this skill immediately with `analytic-workbench`. Trigger on: Splunk SDK, splunklib, SPL, Splunk REST API, jobs/export, add-on, UCC, modular input, alert action, Dashboard Studio, Simple XML, appinspect, saved searches, knowledge objects, MCP, Splunk admin, Splunk Cloud, Splunk Enterprise, Splunk automation, Splunk analytics, Tier 0 exploration, Tier 1 analysis."
 ---
 
 # Splunk Platform
@@ -8,6 +8,14 @@ description: "Deep skill for Splunk development, administration, app/add-on engi
 Use this as the default skill for Splunk work. It should answer most Splunk
 framework-selection questions directly and send you to exactly one or two
 reference files for implementation details.
+
+For Splunk analysis projects, this skill is the domain layer, not the whole
+workflow. Pair it with:
+
+- `analytic-workbench` for tiering, repo normalization, notebooks, review
+  loops, and reproducibility promotion
+- `spec-driven-dev` when the project already has specs or should move into a
+  formal requirements/design/tasks flow
 
 Read only the references that match the task:
 
@@ -34,6 +42,11 @@ Classify the task before you write code:
 
 If the task spans multiple areas, pick the primary deliverable first. A script
 that queries Splunk is external automation, not an add-on.
+
+If the user asks whether a Splunk analysis plan "maps to best practices", asks
+for "Tier 0" or "Tier 1", or wants to normalize an analytics repo around
+Splunk-backed exploration, invoke `analytic-workbench` immediately rather than
+answering from Splunk infrastructure guidance alone.
 
 ## Strong Defaults
 

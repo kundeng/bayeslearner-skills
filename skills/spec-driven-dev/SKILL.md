@@ -1,6 +1,6 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development workflow: requirements → design → tasks → implement loop. Use when planning features, implementing from specs, refining specs, or resuming work. Also use this for analytic and data-workflow specs when the user wants requirements/design/tasks for notebooks, experiment sweeps, Hamilton DAGs, review gates, or reproducible analysis promotion. Commands: spec-plan, spec-go, spec-task, spec-audit, spec-status, spec-merge, spec-reset, spec-help. IMPORTANT: Never edit requirements.md, design.md, tasks.md, or progress.txt without first reading this skill and the relevant references/doc."
+description: "Spec-driven development workflow: requirements → design → tasks → implement loop. Use when planning features, implementing from specs, refining specs, resuming work, or when an existing project already has spec files that may need to be moved into `.kiro/specs/` or `.windloop/specs/`. Also use this for analytic and data-workflow specs when the user wants requirements/design/tasks for notebooks, experiment sweeps, Hamilton DAGs, review gates, or reproducible analysis promotion. Trigger especially on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, `.kiro`, `.windloop`, or migrating analytic workflow specs into the proper layout. IMPORTANT: Never edit requirements.md, design.md, tasks.md, or progress.txt without first reading this skill and the relevant references/doc."
 ---
 
 ## Spec-Driven Development
@@ -15,6 +15,8 @@ This skill powers the windloop framework. Specs live in a **spec directory** —
 - Team collaboration requiring shared understanding and traceability
 - Resuming implementation across sessions
 - Analytic or data-science workflows that need spec-level structure before implementation or promotion
+- Projects that already contain requirements/design/tasks files or spec-like docs that need to be normalized into `.kiro/specs/<name>/` or `.windloop/specs/<name>/`
+- Requests that mention `spec-help`, `spec-plan`, or ask where analytic workflow specs should live
 
 ### When NOT to Use
 
@@ -202,6 +204,10 @@ When the project is analytic, notebook-heavy, or experiment-oriented:
 - Requirements should make approval gates, artifact outputs, and promotion criteria explicit.
 - Design should spell out the boundary between exploratory work and reproducible/promoted stages.
 - Tasks should separate experimentation, review/comparison, and promotion/hardening work.
+
+If the user is already asking for best-practice analytic workflow structure and
+there are existing spec files on disk, invoke this skill early rather than
+waiting until after implementation has begun.
 
 ### Common Pitfalls
 
