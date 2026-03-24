@@ -108,6 +108,18 @@ if __name__ == "__main__":
 - Put reusable logic in modules; keep notebooks as orchestration and review
   surfaces.
 
+**Validation rules:**
+
+- A notebook is not "validated" just because Python syntax parses or `import
+  marimo` succeeds.
+- Prefer verifying the notebook through marimo execution paths rather than
+  private/internal marimo APIs.
+- Treat `__generated_with` as informational, not proof that your current runtime
+  behaves the same way as the version that generated the file.
+- When fixing a notebook bug, confirm the actual user-facing failure mode first
+  (cell error, missing file, bad cwd, variable redefinition, widget mismatch),
+  then patch only that issue.
+
 ---
 
 ## 3. Interactive Exploration (Tier 1+) {#interactive-exploration}
@@ -203,19 +215,22 @@ def _(mo):
 
 
 @app.cell
-def _(pd, Path):
+def _(mo, pd, Path):
+    args = mo.cli_args()
+    runs_root = Path(args.get("runs_dir", "runs"))
     # Load comparison table
-    comp_path = Path("runs") / "comparison.csv"
+    comp_path = runs_root / "comparison.csv"
     if comp_path.exists():
         comparison = pd.read_csv(comp_path)
     else:
         comparison = pd.DataFrame({"status": ["No comparison table found"]})
     comparison
-    return comparison,
+    return comparison, runs_root
 
 
 @app.cell
 def _(mo, comparison):
+    run_selector = None
     if "run_id" in comparison.columns:
         run_selector = mo.ui.dropdown(
             options=comparison["run_id"].tolist(),
@@ -226,8 +241,9 @@ def _(mo, comparison):
 
 
 @app.cell
-def _(run_selector, json, Path, mo):
-    run_dir = Path("runs") / run_selector.value
+def _(run_selector, runs_root, json, mo):
+    mo.stop(run_selector is None, mo.md("No comparison table with `run_id` found."))
+    run_dir = runs_root / run_selector.value
     if not run_dir.exists():
         mo.md("Run directory not found")
     else:
@@ -246,6 +262,15 @@ def _(run_selector, json, Path, mo):
 
 Pattern: computation happens in pipeline scripts; app mode is for selection,
 inspection, and approval.
+
+Additional report-app rules:
+
+- Do not hardcode a single `run_id` unless the user explicitly wants a fixed
+  report for one run. Prefer a selector, CLI arg, or clearly declared default.
+- Resolve artifact paths carefully. marimo may be launched from a directory
+  other than the notebook's parent, so naive relative paths often break.
+- If data was pulled from a live external system, describe it as a run snapshot
+  rather than immutable raw input.
 
 ---
 
@@ -377,6 +402,13 @@ def _(mo, freq, window, priority):
 Pattern: use CLI args for batch defaults, but still expose widgets in notebook
 mode so an analyst can override and inspect results interactively.
 
+For run-backed report notebooks, a good default is:
+
+- accept `--run-id` through CLI args
+- fall back to a visible notebook-level default
+- render a clear error if the target run directory or expected files are missing
+- never silently substitute another dataset
+
 ---
 
 ## 8. App Deployment {#app-deployment}
@@ -497,10 +529,27 @@ calculations, or model fitting code to `src/<project>/analysis/` modules and
 call them through the notebook. If you find yourself writing more than a few
 lines of non-display code in a cell, it belongs in a module.
 
+**Syntax-only validation.** `ast.parse`, import checks, or library version
+prints do not prove that a marimo notebook actually runs. Validate the notebook
+through marimo-visible execution behavior before telling the user it is ready.
+
+**Using internal marimo APIs as contracts.** Private classes and methods may
+disappear between versions. Avoid building workflow guidance around internal
+APIs.
+
 **Direct data loading everywhere.** While it's sometimes acceptable to load data
 in a notebook cell for exploration, create a reusable function in an analysis
-module so the loading logic can be tested and reused. Use `Path("rawdata/...")`
-relative paths for consistency.
+module so the loading logic can be tested and reused. Prefer resolving input
+paths from an explicit base directory, CLI arg, or clearly declared notebook
+constant rather than assuming the notebook's working directory.
+
+**Assuming notebook cwd.** Paths that work when the agent runs a file from repo
+root may fail when marimo launches from elsewhere. Make run/artifact resolution
+explicit and user-visible.
+
+**Variable redefinition across cells.** marimo's graph model expects one clear
+binding path. Reusing the same variable name in multiple cells creates confusing
+cell errors and makes dependency flow harder to reason about.
 
 **Fat notebooks.** If your notebook has more than ~20 cells, it's likely doing
 too much. Split into separate notebooks (explore, report) or move logic to

@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Splunk Reproducible Analytics: Six Slides on Human/AI Failure Modes</title>
+  <style>
+    :root {
+      --bg: #120f0c;
+      --panel: #1b1713;
+      --panel-2: #241e19;
+      --paper: #f4ede2;
+      --ink: #f8f2e9;
+      --muted: #c6b7a7;
+      --line: rgba(255, 244, 228, 0.12);
+      --teal: #6ce2d3;
+      --amber: #f0af5b;
+      --rose: #ff8f88;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", serif;
+      --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", Helvetica, sans-serif;
+      --mono: "SF Mono", Menlo, Consolas, monospace;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(108,226,211,0.12), transparent 24%),
+        radial-gradient(circle at bottom right, rgba(240,175,91,0.10), transparent 26%),
+        linear-gradient(180deg, #0f0c09, #17130f 45%, #110e0b);
+      color: var(--ink);
+      font-family: var(--sans);
+      padding: 20px;
+    }
+
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .topbar, .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .topbar {
+      margin-bottom: 16px;
+    }
+
+    .deck {
+      position: relative;
+    }
+
+    .slide {
+      display: none;
+      min-height: 78vh;
+      background:
+        linear-gradient(135deg, rgba(108,226,211,0.06), transparent 22%),
+        linear-gradient(315deg, rgba(255,143,136,0.07), transparent 20%),
+        linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      box-shadow: var(--shadow);
+      padding: 44px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .slide.active { display: block; }
+
+    .kicker {
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: var(--serif);
+      line-height: 1.02;
+    }
+
+    h1 {
+      font-size: clamp(44px, 7vw, 86px);
+      max-width: 10ch;
+    }
+
+    h2 {
+      font-size: clamp(32px, 4vw, 58px);
+      margin-bottom: 20px;
+      max-width: 14ch;
+    }
+
+    h3 {
+      font-size: 20px;
+      margin-bottom: 8px;
+      color: var(--amber);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    p {
+      margin: 0 0 14px;
+      line-height: 1.65;
+      font-size: 18px;
+      max-width: 78ch;
+      color: #f6efe6;
+    }
+
+    .lede {
+      font-size: clamp(20px, 2.1vw, 30px);
+      max-width: 32ch;
+      color: #f5e8d5;
+      margin-top: 18px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 26px;
+      align-items: start;
+    }
+
+    .card, .quote, .timeline-item {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      border-radius: 18px;
+      padding: 18px;
+      backdrop-filter: blur(6px);
+    }
+
+    .card strong, .timeline-item strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--teal);
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .quote {
+      border-left: 5px solid var(--rose);
+      font-size: 18px;
+      line-height: 1.55;
+      color: #fff4ea;
+    }
+
+    .quote em {
+      display: block;
+      margin-top: 12px;
+      color: var(--muted);
+      font-style: normal;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+      line-height: 1.55;
+      font-size: 17px;
+    }
+
+    li { margin-bottom: 8px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.03);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(108,226,211,0.08);
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .stamp {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .big {
+      font-family: var(--serif);
+      font-size: clamp(42px, 6vw, 88px);
+      line-height: 0.95;
+      color: var(--amber);
+      margin-bottom: 8px;
+    }
+
+    .note {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .pill {
+      border-radius: 999px;
+      border: 1px solid rgba(108,226,211,0.18);
+      background: rgba(108,226,211,0.08);
+      padding: 8px 12px;
+      color: var(--teal);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .footer {
+      margin-top: 16px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.05);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      color: #ffe9c7;
+    }
+
+    @media (max-width: 900px) {
+      .slide { padding: 24px; min-height: auto; }
+      .grid.two, .grid.three, .split, .timeline-item { grid-template-columns: 1fr; }
+      body { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div>Recovered Claude context + second pull</div>
+      <div>Focus: marimo failures, stale knowledge, hallucination risk</div>
+    </div>
+
+    <main class="deck">
+      <section class="slide active">
+        <div class="kicker">Slide 1 of 6</div>
+        <h1>Splunk Reproducible Analytics</h1>
+        <p class="lede">This is not a victory deck. It is a compact case study in how an AI agent built useful things while also hallucinating readiness, carrying stale framework assumptions, and needing repeated human correction to stay honest.</p>
+        <div class="pills">
+          <div class="pill">Primary session: March 24, 2026</div>
+          <div class="pill">Recovered from raw JSONL</div>
+          <div class="pill">Secondary pull included later marimo errors</div>
+        </div>
+        <p class="note">Search across Claude history again found the same project session as the only strong match. The new material came from later parts of that same conversation: the notebook was not merely created, it later failed in real marimo usage, exposing weaknesses that the first summary had underweighted.</p>
+      </section>
+
+      <section class="slide">
+        <div class="kicker">Slide 2 of 6</div>
+        <h2>The Core Human/AI Pattern</h2>
+        <div class="split">
+          <div>
+            <p>The human kept pushing for operating truth. The AI kept pushing toward neat architecture and polished closure. The session improved whenever the human forced the AI to stop treating plausible stories as proven facts.</p>
+            <p>That pattern showed up everywhere: editor config, raw-versus-live data semantics, whether the pipeline had really run, whether the notebook actually worked, and whether the AI truly understood search head composition before presenting findings.</p>
+          </div>
+          <div class="grid">
+            <div class="quote">“I don't know you are editing my vscode settings...”<em>User</em></div>
+            <div class="quote">“Those data are NOT rawdata...”<em>User</em></div>
+            <div class="quote">“Did you actually have those pipelines and executed them?”<em>User</em></div>
+            <div class="quote">“I’ve been summarizing without fully understanding the composition.”<em>Assistant</em></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <div class="kicker">Slide 3 of 6</div>
+        <h2>Where The AI Hallucinated Or Overclaimed</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Mode</th>
+              <th>What the AI implied</th>
+              <th>What was actually true</th>
+              <th>Lesson</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Workflow readiness</td>
+              <td>The analysis pipeline sounded integrated and clean.</td>
+              <td>Some early work was still done through one-off inline scripts.</td>
+              <td>Never collapse exploratory success into workflow success.</td>
+            </tr>
+            <tr>
+              <td>Data semantics</td>
+              <td>Live Splunk pulls were treated like immutable raw inputs.</td>
+              <td>They were time-sensitive run snapshots from a live system.</td>
+              <td>Tooling categories matter; wrong names create wrong workflows.</td>
+            </tr>
+            <tr>
+              <td>Notebook verification</td>
+              <td>The notebook was described as ready after weak checks.</td>
+              <td>Later marimo usage exposed path issues and cell graph problems.</td>
+              <td>Syntax success is not runtime success.</td>
+            </tr>
+            <tr>
+              <td>Analytic understanding</td>
+              <td>The AI narrated search-head findings before fully understanding the data model mismatch.</td>
+              <td>It still needed to reconcile role-level SVC with consumer metrics.</td>
+              <td>Presentation should trail understanding, not outrun it.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="slide">
+        <div class="kicker">Slide 4 of 6</div>
+        <h2>The Marimo Notebook Was The Sharpest Diagnostic</h2>
+        <div class="grid two">
+          <div class="card">
+            <strong>Stale Knowledge</strong>
+            <p>The AI tried to validate the notebook through <code>marimo._ast.app.InternalApp.from_filename(...)</code>. That method did not exist in the local runtime. This is a classic stale-knowledge failure: the agent reached for an internal API shape it thought existed.</p>
+          </div>
+          <div class="card">
+            <strong>Validation Theater</strong>
+            <p>After the internal API failed, the fallback became <code>ast.parse</code> plus <code>import marimo</code> plus a version print. That only proved Python syntax and package presence, not that the notebook actually worked in marimo.</p>
+          </div>
+          <div class="card">
+            <strong>Missing Context</strong>
+            <p>The notebook initially hardcoded run paths in a way that depended on working directory assumptions. Real marimo execution later exposed that the environment model was incomplete.</p>
+          </div>
+          <div class="card">
+            <strong>Framework Semantics</strong>
+            <p>A later user-visible error showed marimo cell graph constraints: the notebook redefined variables across cells, which marimo rejected. This was not a Python problem. It was a framework-modeling problem.</p>
+          </div>
+        </div>
+        <p class="note">The notebook became the place where all three failure classes met: stale framework knowledge, weak validation, and incomplete runtime context.</p>
+      </section>
+
+      <section class="slide">
+        <div class="kicker">Slide 5 of 6</div>
+        <h2>What Changed After The Second Pull</h2>
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="stamp">19:31:59</div>
+            <div><strong>Internal API assumption breaks</strong>The attempted validation using <code>InternalApp.from_filename</code> fails with <code>AttributeError</code>. This is direct evidence that the first notebook “ready” claim rested on unstable knowledge.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="stamp">19:32:04</div>
+            <div><strong>Fallback check is too weak</strong>The AI reports “Syntax OK” and a marimo version. Useful, but nowhere near enough to establish notebook correctness.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="stamp">20:16:39</div>
+            <div><strong>User reports “same issue”</strong>The notebook still has a real runtime problem. The earlier fixes did not close the loop.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="stamp">20:41:39</div>
+            <div><strong>Marimo graph error surfaces</strong>The user sees: “This cell redefines variables from other cells.” The failure is now plainly in the notebook’s cell dependency design, not in data science logic.</div>
+          </div>
+        </div>
+        <p>That progression is the clearest lesson in the transcript: the AI kept proving proxies for success, while the human kept encountering actual success criteria.</p>
+      </section>
+
+      <section class="slide">
+        <div class="kicker">Slide 6 of 6</div>
+        <h2>What To Learn From This Session</h2>
+        <div class="grid three">
+          <div class="card">
+            <div class="big">1</div>
+            <h3>Do Not Trust Neat Narratives</h3>
+            <p>If the AI sounds highly organized, that is not evidence the system is highly correct. Good prose can hide unresolved uncertainty.</p>
+          </div>
+          <div class="card">
+            <div class="big">2</div>
+            <h3>Treat Frameworks As First-Class Context</h3>
+            <p>marimo has its own runtime rules: cell graph semantics, path behavior, and version-sensitive APIs. Notebook work needs framework-aware validation, not generic Python checks.</p>
+          </div>
+          <div class="card">
+            <div class="big">3</div>
+            <h3>Human Correction Was The Safety System</h3>
+            <p>The user repeatedly stopped invalid assumptions before they solidified into process. That was not friction around the work. It was the mechanism that made the work credible.</p>
+          </div>
+        </div>
+        <p>The final lesson is blunt: AI agents are strongest when they are fast, corrigible, and forced into contact with real execution. They are weakest when stale knowledge, missing runtime context, and weak validation combine with the temptation to sound finished before they are finished.</p>
+        <p class="note">This revised deck folds in the later notebook-specific failures and the skill updates they imply: do not use internal marimo APIs as contracts, do not equate syntax with notebook readiness, make run path resolution explicit, and respect marimo’s no-redefinition dataflow model.</p>
+      </section>
+    </main>
+
+    <div class="footer">
+      <div id="status">Slide 1 / 6</div>
+      <div class="controls">
+        <button id="prev" type="button">Previous</button>
+        <button id="next" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const statusEl = document.getElementById("status");
+    const prevBtn = document.getElementById("prev");
+    const nextBtn = document.getElementById("next");
+    let index = 0;
+
+    function render() {
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      statusEl.textContent = `Slide ${index + 1} / ${slides.length}`;
+      prevBtn.disabled = index === 0;
+      nextBtn.disabled = index === slides.length - 1;
+    }
+
+    prevBtn.addEventListener("click", () => {
+      if (index > 0) {
+        index -= 1;
+        render();
+      }
+    });
+
+    nextBtn.addEventListener("click", () => {
+      if (index < slides.length - 1) {
+        index += 1;
+        render();
+      }
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        if (index < slides.length - 1) {
+          index += 1;
+          render();
+        }
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        if (index > 0) {
+          index -= 1;
+          render();
+        }
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

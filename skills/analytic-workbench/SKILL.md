@@ -46,6 +46,21 @@ Config layer   ->  Computation layer  ->  Display layer
 Config never touches DataFrames, computation never renders UI, display never
 contains business logic. At Tier 1, the config layer may just be widget values.
 
+marimo-specific guardrails:
+
+- Do not claim a marimo notebook "works" from `ast.parse`, import success, or
+  syntax-only checks alone. Validate behavior through marimo itself or by
+  opening the notebook and checking cell execution/errors.
+- Do not rely on undocumented or internal marimo APIs for validation. Treat
+  internal modules and methods as unstable.
+- Keep notebook path resolution explicit and robust. marimo may run with a
+  different working directory than the agent expects.
+- Respect marimo's dataflow model: avoid redefining the same variable name in
+  multiple cells unless you intentionally refactor dependencies around it.
+- If the notebook narrative depends on live-system data semantics, verify those
+  semantics before presenting a polished report. A correct-looking notebook can
+  still encode the wrong story.
+
 ---
 
 ## References
