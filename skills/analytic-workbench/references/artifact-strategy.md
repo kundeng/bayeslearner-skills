@@ -46,7 +46,15 @@ runs/<run-id>/
 
 - All run artifacts live inside `runs/<run-id>/`. No separate `outputs/figures/`
   or `data/processed/` directories at the project root.
-- `rawdata/` holds immutable source data. It is never written to by a run.
+- `rawdata/` holds frozen file inputs that the analysis treats as given. This
+  includes user-provided files, manually staged exports, or deliberately
+  promoted snapshots from an external system.
+- The first extract from a live API, database, warehouse, or MCP server is not
+  automatically `rawdata/`. It begins life as an acquisition artifact of a
+  specific run. Only move or copy it into `rawdata/` once you want that exact
+  snapshot to become a stable reusable input.
+- `rawdata/` is never written to implicitly by a run. Promotion into `rawdata/`
+  should be an explicit step.
 - Each run folder is self-contained and independently meaningful.
 
 ---
@@ -96,7 +104,7 @@ hours because results won't materially change."
 
 ### Implementation
 
-Track freshness with a metadata file next to the data:
+Track freshness with a metadata file next to the frozen input snapshot:
 
 ```json
 // rawdata/incidents.meta.json
@@ -115,7 +123,7 @@ participates in the module's public API.
 
 ### DVC freshness (Tier 3)
 
-DVC handles this natively with frozen stages:
+DVC handles this natively when you intentionally materialize a frozen input snapshot:
 
 ```yaml
 stages:

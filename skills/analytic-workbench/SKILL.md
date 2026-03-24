@@ -115,7 +115,7 @@ project/
     config.yaml
     source/
     experiment/
-  rawdata/                     # Immutable source data (gitignored)
+  rawdata/                     # Frozen file inputs for analysis (gitignored)
   runs/                        # Per-run artifacts (gitignored)
     <run-id>/
       config.yaml
@@ -132,7 +132,13 @@ Key rules:
 
 - `src/<project_name>/` is an installable package (`pip install -e .`).
 - `notebooks/` is outside `src/` — not importable, not part of the package.
-- `rawdata/` is immutable and gitignored. `runs/` is gitignored.
+- `rawdata/` is immutable and gitignored. It is for frozen file inputs that the
+  analysis treats as given: user-provided files, manually staged extracts, or
+  explicitly promoted snapshots.
+- The first pull from a live external system is not automatically `rawdata/`.
+  Treat that as a run artifact or acquisition output first. Promote it into
+  `rawdata/` only when you intend to reuse it as a stable input snapshot.
+- `runs/` is gitignored.
 - No `data/processed/` or `outputs/figures/` — artifacts live inside `runs/<run-id>/`.
 - Even at Tier 1, analysis code belongs in `src/<project_name>/analysis/`, not
   in notebook cells. Move exploratory code to modules within the same session.
