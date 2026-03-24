@@ -1,0 +1,26 @@
+[
+  {
+    "query": "Create a spec for a Hamilton-based analysis pipeline with exploratory notebooks first, then promotion to a reproducible Hydra-driven stage.",
+    "should_trigger": true
+  },
+  {
+    "query": "Refine the requirements, design, and tasks for a multi-step feature before we implement it.",
+    "should_trigger": true
+  },
+  {
+    "query": "Resume the next spec task for a data workflow that has human review gates and comparison artifacts.",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up a human-in-the-loop analytic workflow with marimo, Hamilton, and Hydra, and tell me which tier to use.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a Word document memo with a title page and table of contents.",
+    "should_trigger": false
+  },
+  {
+    "query": "Make a quick one-file bug fix in this script.",
+    "should_trigger": false
+  }
+]

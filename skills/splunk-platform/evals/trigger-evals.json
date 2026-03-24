@@ -1,0 +1,34 @@
+[
+  {
+    "query": "Write a Python CLI using splunklib to run a saved search and export results to CSV.",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me choose between Dashboard Studio and Simple XML for a new Splunk dashboard, and explain the tradeoffs.",
+    "should_trigger": true
+  },
+  {
+    "query": "Build a Splunk technical add-on with UCC, modular inputs, and an OAuth-backed account page.",
+    "should_trigger": true
+  },
+  {
+    "query": "Design an MCP server that exposes safe, read-only Splunk search tools to an LLM.",
+    "should_trigger": true
+  },
+  {
+    "query": "Use Ansible to upgrade a distributed Splunk deployment and roll out updated apps safely.",
+    "should_trigger": true
+  },
+  {
+    "query": "Create a Word document memo with a title page and a table of contents.",
+    "should_trigger": false
+  },
+  {
+    "query": "Build a React landing page for a coffee shop and make it look premium.",
+    "should_trigger": false
+  },
+  {
+    "query": "Scrape a website for product prices and save them to CSV.",
+    "should_trigger": false
+  }
+]

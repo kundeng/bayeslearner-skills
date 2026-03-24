@@ -1,0 +1,35 @@
+{
+  "skill_name": "vibe-frontend-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Restyle a generic mobile login screen for a coffee subscription app. Keep the flow simple, but make it feel warm, tactile, and premium without hurting usability. Include email and password fields, a login button, and a forgot-password action.",
+      "expected_output": "A complete auth screen with clear form grouping, touch-safe fields and actions, a stronger visual point of view, and code or design guidance that explains the hierarchy and interaction choices instead of only adding decoration.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Design and implement a product listing card for an e-commerce site that works on both mobile and desktop. Show product image, name, price, and an add-to-cart action. It should feel sharper and more editorial than default component-library UI.",
+      "expected_output": "A responsive product card with disciplined spacing, coherent type and shape choices, realistic interaction states, and a visual system that feels intentional rather than generic.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Refactor a basic signup form with name, email, password, and confirm password into something that feels polished and trustworthy. Include password strength feedback, mismatched-password error states, and make sure it would fit naturally inside a real product design system.",
+      "expected_output": "A signup flow with grouped fields, password-strength and error states, preserved semantics and accessibility, and design decisions that balance stronger visual taste with a reusable system.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I have a messy React dashboard with inconsistent spacing, ad hoc colors, and no obvious design system. Vibe code it into something sharper and easier to use. Tell me if you think I should introduce a reusable visual system or just polish the page locally.",
+      "expected_output": "A response that interprets the vague frontend request, improves structure before decoration, and explicitly handles the design-system decision by either asking the user or stating a justified assumption about introducing reusable tokens and rules.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Make this data-heavy admin table feel cleaner and more premium, but keep it fast for operators who live in it all day. It needs filtering, bulk actions, and obvious loading and error states.",
+      "expected_output": "A response or implementation that selects suitable list/action/data-display patterns, preserves operator efficiency, and translates the vibe request into concrete hierarchy, command visibility, and dense-data decisions.",
+      "files": []
+    }
+  ]
+}

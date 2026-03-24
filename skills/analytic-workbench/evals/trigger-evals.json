@@ -1,0 +1,86 @@
+[
+  {
+    "query": "Set up a human-in-the-loop analysis pipeline for this project with quick exploratory runs first and more reproducible stages later.",
+    "should_trigger": true
+  },
+  {
+    "query": "Run the next stale DVC stage, then review the outputs and tell me if they are ready for approval.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to compare several parameter settings systematically and keep a comparison table for the runs.",
+    "should_trigger": true
+  },
+  {
+    "query": "Explain whether we should use marimo, Kedro, and DVC for this analytic workflow.",
+    "should_trigger": true
+  },
+  {
+    "query": "Run a PyCaret AutoML comparison across these features and show me the leaderboard.",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up a forecasting pipeline with Prophet and compare it against a statsmodels ARIMA baseline.",
+    "should_trigger": true
+  },
+  {
+    "query": "Review my last experiment run and tell me if the metrics look reasonable before I approve.",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up Hydra config composition with experiment configs and multirun sweeps for this analysis.",
+    "should_trigger": true
+  },
+  {
+    "query": "Build a Kedro pipeline for feature engineering and wire it into a marimo review notebook.",
+    "should_trigger": true
+  },
+  {
+    "query": "Run a Hydra multirun sweep over learning rates and batch sizes, then build a comparison table.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to evolve this exploratory notebook into a reproducible analysis workbench.",
+    "should_trigger": true
+  },
+  {
+    "query": "How should I structure the src/ package for this analysis project?",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up the pyproject.toml for an analytic workbench with Hydra, Kedro, and marimo.",
+    "should_trigger": true
+  },
+  {
+    "query": "Add MLflow experiment tracking to my existing Kedro pipeline.",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up a handwired driver to run my analysis modules and save artifacts to runs/.",
+    "should_trigger": true
+  },
+  {
+    "query": "Create a Word document memo with a title page and table of contents.",
+    "should_trigger": false
+  },
+  {
+    "query": "Help me scrape a website and save the results to CSV.",
+    "should_trigger": false
+  },
+  {
+    "query": "Deploy this Flask app to AWS Lambda.",
+    "should_trigger": false
+  },
+  {
+    "query": "Build a REST API for user authentication.",
+    "should_trigger": false
+  },
+  {
+    "query": "Create a React dashboard with Tailwind CSS.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a Python script to rename files in a directory.",
+    "should_trigger": false
+  }
+]
