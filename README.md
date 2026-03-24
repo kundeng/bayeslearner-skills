@@ -42,6 +42,7 @@ skills/
   splunk-platform/
   vibe-frontend-design/
   wise-scraper/
+  workflow-guardrails/
 ```
 
 Important:
@@ -59,6 +60,7 @@ Important:
 - `splunk-platform`
 - `vibe-frontend-design`
 - `wise-scraper`
+- `workflow-guardrails`
 
 ## Source Model
 
