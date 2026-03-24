@@ -38,8 +38,9 @@ Creates `requirements.md`, `design.md`, `tasks.md`, `progress.txt` in a new spec
 ```
 /spec-plan incident-analysis-pipeline create
 ```
-Use the same spec flow, but read `references/analytic-work.md` and pair with the
-`analytic-workbench` skill for notebook, sweep, DAG, and reproducibility choices.
+Use the same spec flow, but read `references/analytic-work.md` and make the
+design explicit about notebook workflow, experiment comparison, review gates,
+and reproducibility promotion.
 
 **Refine existing spec:**
 ```

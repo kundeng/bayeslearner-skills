@@ -21,11 +21,6 @@ combination of:
 - notebooks plus reproducible promotion later
 - MCP-backed or API-backed data exploration that feeds a notebook/report workflow
 
-If a domain skill also applies, pair them. For example:
-
-- Splunk analysis project -> `splunk-platform` + `analytic-workbench`
-- Spec-heavy analytics project -> `spec-driven-dev` + `analytic-workbench`
-
 Do not wait for the user to explicitly say "use analytic-workbench" when the
 workflow shape already matches this pattern.
 
