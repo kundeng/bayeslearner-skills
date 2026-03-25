@@ -1,6 +1,16 @@
 ---
 name: vibe-frontend-design
-description: Design and implement distinctive, production-grade screen UI for vibe-coding workflows: loose prompts, taste-driven iteration, and fast frontend polishing that still respects usability, layout discipline, and real code constraints. Use this skill whenever the user wants a frontend to feel more polished, modern, premium, cohesive, bold, or simply "better", including landing pages, dashboards, app screens, forms, lists, onboarding, settings, and component restyling. Also use it for vague requests like "make this UI nicer", "give this more personality", "make it feel expensive", or "vibe code this screen." Preserve existing design systems when they are good; introduce a clearer visual and interaction system when they are weak or absent.
+description: >
+  Design and implement distinctive, production-grade screen UI for vibe-coding
+  workflows: loose prompts, taste-driven iteration, and fast frontend polishing
+  that still respects usability, layout discipline, and real code constraints.
+  Use this skill whenever the user wants a frontend to feel more polished,
+  modern, premium, cohesive, bold, or simply "better", including landing pages,
+  dashboards, app screens, forms, lists, onboarding, settings, and component
+  restyling. Also use it for vague requests like "make this UI nicer", "give
+  this more personality", "make it feel expensive", or "vibe code this screen."
+  Preserve existing design systems when they are good; introduce a clearer
+  visual and interaction system when they are weak or absent.
 metadata:
   author: kundeng
   version: "1.0.0"
