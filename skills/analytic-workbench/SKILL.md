@@ -113,7 +113,7 @@ Meaning:
 - **Hypothesize**: state likely drivers before over-engineering
 - **Model or Analyze**: run the next sensible baseline, test, or comparison
 - **Review**: present findings early for correction
-- **Promote**: move worth-keeping work into reusable modules, config, runs, and review surfaces
+- **Promote**: move worth-keeping work into reusable modules, config, runs, review surfaces, and the runbook
 
 If a phase stalls, back up rather than push through:
 
@@ -133,6 +133,55 @@ Four operators keep planning, execution, and review aligned:
 
 When `.aw/stages/` exists, operators update the stage folder and
 `.aw/status.json` rather than inventing separate bookkeeping.
+
+## Runbook
+
+The runbook (`runbook.md` at the repo root) is the human-readable reproduction
+guide for the project. It is derived from the project structure — configs, scripts,
+notebooks, runs — not maintained as a separate log.
+
+### When to generate
+
+Generate or update the runbook at **promote time**: when the analysis reaches a
+milestone, when the user asks for a handoff document, or when `aw-plan advance`
+moves to a new stage. The runbook is a snapshot of "how to reproduce everything
+up to this point."
+
+### What it contains
+
+The runbook should read as a step-by-step guide that a human (or a new agent)
+can follow to reproduce the full pipeline from scratch:
+
+1. **Prerequisites** — environment setup, data acquisition, external tools
+2. **Pipeline overview** — ASCII diagram showing the data flow from raw inputs
+   to final outputs
+3. **Numbered steps** — one section per major pipeline step, each with:
+   - what happens (plain English)
+   - the exact command to run
+   - expected runtime
+   - what to inspect afterward (files produced, expected values)
+4. **Configuration reference** — table of config files and what they control
+5. **Key directories** — table of paths, contents, and whether git-tracked
+6. **Troubleshooting** — known failure modes and fixes
+
+### How it relates to existing artifacts
+
+The runbook does not duplicate what `config.yaml` and `metrics.json` already
+capture per run. Instead it ties them together into a narrative:
+
+- `config.yaml` says *what parameters* a run used → the runbook says *which
+  command produced that run and why*
+- `metrics.json` says *what the results were* → the runbook says *what results
+  to expect and what "correct" looks like*
+- The notebook says *how to explore results* → the runbook says *how to open
+  the notebook and what sections to look at*
+
+### Keeping it current
+
+The runbook is a promote-time artifact, not an append-only log. When the
+pipeline changes, update the runbook to match — do not accumulate stale
+instructions. If `.aw/` bookkeeping is active, note the runbook's last-updated
+timestamp in `.aw/status.json`.
 
 ## Detecting the Current Stage
 

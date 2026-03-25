@@ -9,12 +9,13 @@ approves work through the chosen surface.
 ## Table of Contents
 1. [The Notebook as Review Surface](#notebook-review)
 2. [Review by Stage](#review-by-stage)
-3. [Self-Review Expectations](#self-review)
-4. [State Machine (Stage 3+)](#state-machine)
-5. [Formal Workflow (Stage 3+)](#formal-workflow)
-6. [Data Access Rules](#data-access)
-7. [Narrative Rules](#narrative)
-8. [When Full Formality Is Worth It](#when-formal)
+3. [Runbook as Review Surface](#runbook)
+4. [Self-Review Expectations](#self-review)
+5. [State Machine (Stage 3+)](#state-machine)
+6. [Formal Workflow (Stage 3+)](#formal-workflow)
+7. [Data Access Rules](#data-access)
+8. [Narrative Rules](#narrative)
+9. [When Full Formality Is Worth It](#when-formal)
 
 ---
 
@@ -78,7 +79,56 @@ compares metrics, and inspects figures — all within the notebook.
 
 ---
 
-## 3. Self-Review Expectations {#self-review}
+## 3. Runbook as Reviewability Artifact {#runbook}
+
+The repo-level runbook (`runbook.md` at the project root) is the reproduction
+guide for the entire pipeline. It is generated at promote time — not maintained
+as a running log — by reading the project structure: configs, scripts,
+notebooks, runs, and directory layout.
+
+The runbook answers: "I just cloned this repo. How do I reproduce everything
+from scratch?" It is the primary reviewability artifact because a human who can
+reproduce the pipeline can verify any claim in it.
+
+### What makes a good runbook
+
+See `SKILL.md § Runbook` for the full specification. Key sections:
+
+1. **Prerequisites** — env setup, data acquisition, external tools
+2. **Pipeline overview** — ASCII diagram of the data flow
+3. **Numbered steps** — one per major pipeline step, each with the exact
+   command, expected runtime, and what to inspect afterward (including expected
+   results so the human knows what "correct" looks like)
+4. **Configuration reference** — table of config files and what they control
+5. **Key directories** — paths, contents, git-tracked or not
+6. **Troubleshooting** — known failure modes and fixes
+
+### When to generate or update
+
+- At stage promotion (`aw-plan advance`)
+- When the user asks for a handoff document
+- When the pipeline structure changes materially (new scripts, new configs,
+  new data sources)
+
+The runbook is not an append-only log. When the pipeline changes, rewrite
+the affected sections to match current state.
+
+### Relationship to the review surface
+
+The notebook or Quarto report is where the human *inspects results*. The
+runbook is where the human *understands how those results were produced*. Both
+are needed for a complete review:
+
+- Runbook → "how to get from raw data to these artifacts"
+- Notebook/report → "what do the artifacts show and what do they mean"
+
+During `aw-review`, summarize the runbook's pipeline steps in chat so the
+human can see the reproduction path without opening a file. The full runbook
+lives at the repo root for detailed reference.
+
+---
+
+## 4. Self-Review Expectations {#self-review}
 
 Before presenting any stage to the human, the AI verifies:
 
@@ -106,7 +156,7 @@ contains:
 
 ---
 
-## 4. State Machine (Stage 3+) {#state-machine}
+## 5. State Machine (Stage 3+) {#state-machine}
 
 Every stage moves through a lifecycle:
 
@@ -124,7 +174,7 @@ Rules:
 
 ---
 
-## 5. Formal Workflow (Stage 3+) {#formal-workflow}
+## 6. Formal Workflow (Stage 3+) {#formal-workflow}
 
 Follow this sequence for each stale stage:
 
@@ -144,7 +194,7 @@ starting points — add or omit fields as your project needs.
 
 ---
 
-## 6. Data Access Rules {#data-access}
+## 7. Data Access Rules {#data-access}
 
 Use small CLI tools in `src/<project>/tools/` for external systems. Each tool
 should:
@@ -164,7 +214,7 @@ rather than as an inline ad hoc snippet in chat.
 
 ---
 
-## 7. Narrative Rules {#narrative}
+## 8. Narrative Rules {#narrative}
 
 The final report should read from saved artifacts only:
 
@@ -189,7 +239,7 @@ useful, such as:
 
 ---
 
-## 8. When Full Formality Is Worth It {#when-formal}
+## 9. When Full Formality Is Worth It {#when-formal}
 
 Use the full Stage 3+ review workflow when:
 
