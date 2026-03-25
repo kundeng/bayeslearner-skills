@@ -1,9 +1,13 @@
 # Hydra Config Reference
 
-Hydra is the **config layer** of the analytic workbench at Tier 2+. It owns
+Hydra is the **config layer** of the analytic workbench at Stage 2+. It owns
 config composition, CLI overrides, and experiment sweeps. It produces a frozen
-`DictConfig` that the handwired driver (or Kedro at Tier 3) consumes as a
+`DictConfig` that the handwired driver (or Kedro at Stage 3) consumes as a
 plain dict. Hydra never touches DataFrames, figures, or business logic.
+
+Most important rule: Stage 2 is an additive wiring upgrade over Stage 1.
+Hydra should improve config injection and run management without changing the
+underlying computation contract.
 
 ## Table of Contents
 1. [Basic Structure](#basic-structure)
@@ -13,7 +17,7 @@ plain dict. Hydra never touches DataFrames, figures, or business logic.
 5. [Multirun Sweeps](#multirun)
 6. [Output Directory Conventions](#output-dirs)
 7. [Integration with Analysis Modules](#integration)
-8. [Integration with Kedro (Tier 3)](#kedro-integration)
+8. [Integration with Kedro (Stage 3)](#kedro-integration)
 
 ---
 
@@ -308,11 +312,18 @@ The key pattern:
 3. The handwired driver calls analysis functions in DAG order
 4. Artifacts are saved to the Hydra output directory
 
+Enforcement points:
+
+- keep the Stage 1 runner boundary or an equivalent stable entrypoint
+- convert config to plain Python objects near the boundary
+- do not pass `DictConfig` or Hydra runtime objects deep into analysis modules
+- keep notebooks, plain runners, and Hydra runners able to call the same core functions
+
 ---
 
-## 8. Integration with Kedro (Tier 3) {#kedro-integration}
+## 8. Integration with Kedro (Stage 3) {#kedro-integration}
 
-At Tier 3, if you add Kedro for pipeline DAG execution and data catalog, Hydra
+At Stage 3, if you add Kedro for pipeline DAG execution and data catalog, Hydra
 still owns config composition and sweeps. Pass Hydra's composed config to Kedro
 via `extra_params`:
 

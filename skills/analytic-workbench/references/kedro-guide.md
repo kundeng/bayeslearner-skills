@@ -1,15 +1,15 @@
-# Kedro Guide (Tier 3 Option)
+# Kedro Guide (Stage 3 Option)
 
-Kedro is one of two options at Tier 3 for adding pipeline structure to the
+Kedro is one of two options at Stage 3 for adding pipeline structure to the
 analytic workbench. It replaces the handwired driver with a DAG runner, adds a
 data catalog for managing I/O, and provides pipeline visualization via
 `kedro viz`.
 
-**Kedro does NOT replace Hydra.** Hydra (Tier 2+) owns config composition,
+**Kedro does NOT replace Hydra.** Hydra (Stage 2+) owns config composition,
 CLI overrides, and `--multirun` sweeps. Kedro receives config from Hydra via
 `extra_params` and handles pipeline execution, data catalog, and visualization.
 
-The other Tier 3 option is DVC (see `references/dvc-guide.md`). You can use
+The other Stage 3 option is DVC (see `references/dvc-guide.md`). You can use
 Kedro alone, DVC alone, or both together. They are complementary.
 
 ## Table of Contents
@@ -121,7 +121,7 @@ def create_pipeline(**kwargs) -> Pipeline:
 
 Key points:
 
-- `func` is your existing analysis function — unchanged from Tier 1.
+- `func` is your existing analysis function — unchanged from Stage 1.
 - `inputs` uses parameter names that match the function signature.
 - `params:` prefix reads from Kedro's parameter store (populated by Hydra).
 - `outputs` names become available as inputs to downstream nodes.
@@ -231,7 +231,7 @@ values, and node metadata. Use it to:
 
 ## 7. Config: Hydra Delegates to Kedro {#config}
 
-Hydra owns config composition, sweeps, and experiment configs. At Tier 3, pass
+Hydra owns config composition, sweeps, and experiment configs. At Stage 3, pass
 Hydra's composed config to Kedro via `extra_params`:
 
 ```python
@@ -357,7 +357,7 @@ Pattern: use mode A for review, mode B for interactive exploration.
 
 ## 10. Integration with DVC {#dvc-integration}
 
-At Tier 3, DVC can wrap Kedro runs for caching and versioning:
+At Stage 3, DVC can wrap Kedro runs for caching and versioning:
 
 ```yaml
 # dvc.yaml
@@ -386,18 +386,18 @@ execution and data catalog. They coexist well.
 src/
   my_project/
     __init__.py
-    analysis/                # Pure functions (unchanged from Tier 1)
+    analysis/                # Pure functions (unchanged from Stage 1)
       __init__.py
       baseline.py
       features.py
-    pipelines/               # Kedro pipeline definitions (Tier 3)
+    pipelines/               # Kedro pipeline definitions (Stage 3)
       __init__.py
       baseline/
         __init__.py
         pipeline.py
     scripts/
-      run.py                 # Hydra runner (Tier 2, still works)
-      run_kedro.py           # Hydra + Kedro runner (Tier 3)
+      run.py                 # Hydra runner (Stage 2, still works)
+      run_kedro.py           # Hydra + Kedro runner (Stage 3)
       sweep.py
       build_comparison.py
     tools/
@@ -415,21 +415,21 @@ conf/
     credentials.yml          # Kedro credentials (gitignored)
 ```
 
-Key: `analysis/` modules are pure functions that work at any tier.
+Key: `analysis/` modules are pure functions that work at any stage.
 `pipelines/` wires them into Kedro DAGs. Analysis code never imports Kedro.
 
 ---
 
 ## 12. When to Add Kedro {#when-to-add}
 
-Add Kedro at Tier 3 when at least one of these becomes painful without it:
+Add Kedro at Stage 3 when at least one of these becomes painful without it:
 
 - The handwired driver is growing long and hard to maintain
 - You want a data catalog to manage I/O declaratively
 - You want pipeline visualization for communication or debugging
 - You need partial pipeline execution (`--from-nodes`, `--to-nodes`)
 
-If none of that hurts yet, stay at Tier 2 with Hydra + handwired driver.
+If none of that hurts yet, stay at Stage 2 with Hydra + handwired driver.
 
 ---
 

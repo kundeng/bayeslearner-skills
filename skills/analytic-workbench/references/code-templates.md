@@ -6,12 +6,12 @@ Copy and adapt these to bootstrap a new project.
 ## Table of Contents
 1. [Project Scaffold](#scaffold)
 2. [Analysis Module (DAG-Friendly Naming)](#module)
-3. [Handwired Driver (Tier 1)](#handwired-driver)
-4. [Hydra Runner (Tier 2+)](#hydra-runner)
+3. [Handwired Driver (Stage 1)](#handwired-driver)
+4. [Hydra Runner (Stage 2+)](#hydra-runner)
 5. [marimo Exploration Notebook](#explore-notebook)
 6. [marimo Report App](#report-app)
-7. [Kedro Pipeline (Tier 3 Option)](#kedro-pipeline)
-8. [Kedro Sweep Runner (Tier 3 Option)](#sweep-runner)
+7. [Kedro Pipeline (Stage 3 Option)](#kedro-pipeline)
+8. [Kedro Sweep Runner (Stage 3 Option)](#sweep-runner)
 9. [Comparison Table Builder](#comparison-builder)
 10. [Freshness-Aware Data Loader](#data-loader)
 11. [pyproject.toml](#pyproject)
@@ -120,7 +120,7 @@ Notice:
 
 ---
 
-## 3. Handwired Driver (Tier 1) {#handwired-driver}
+## 3. Handwired Driver (Stage 1) {#handwired-driver}
 
 The driver calls analysis functions in DAG order. Every step visible, every
 dependency explicit. No framework dependency.
@@ -180,10 +180,11 @@ if __name__ == "__main__":
 
 ---
 
-## 4. Hydra Runner (Tier 2+) {#hydra-runner}
+## 4. Hydra Runner (Stage 2+) {#hydra-runner}
 
-At Tier 2, Hydra composes config from YAML + CLI overrides and the handwired
-driver executes analysis functions in DAG order.
+At Stage 2, Hydra composes config from YAML + CLI overrides while preserving
+the Stage 1 computation contract. It changes config injection and output-dir
+wiring, not the analysis code shape.
 
 ```python
 # src/my_project/scripts/run.py
@@ -235,6 +236,13 @@ def main(cfg: DictConfig) -> float:
 if __name__ == "__main__":
     main()
 ```
+
+Preferred pattern:
+
+- keep Stage 1 analysis modules unchanged
+- if a Stage 1 `run(params, output_dir)` function already exists, prefer
+  wrapping it instead of duplicating pipeline logic inside the Hydra entrypoint
+- keep Hydra objects at the boundary and pass plain values downstream
 
 ```bash
 # Single run
@@ -465,9 +473,9 @@ Run: `marimo run notebooks/report.py`
 
 ---
 
-## 8. Kedro Pipeline (Tier 3 Option) {#kedro-pipeline}
+## 7. Kedro Pipeline (Stage 3 Option) {#kedro-pipeline}
 
-At Tier 3, you can optionally replace the handwired driver with a Kedro
+At Stage 3, you can optionally replace the handwired driver with a Kedro
 pipeline. The analysis functions don't change — only the wiring. Hydra still
 owns config composition and sweeps.
 
@@ -562,7 +570,7 @@ kedro run --pipeline=baseline --params="baseline.resample_freq:30min"
 
 ---
 
-## 8. Kedro Sweep Runner (Tier 3 Option) {#sweep-runner}
+## 8. Kedro Sweep Runner (Stage 3 Option) {#sweep-runner}
 
 ```python
 # src/my_project/scripts/sweep.py

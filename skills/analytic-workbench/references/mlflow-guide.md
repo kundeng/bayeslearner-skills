@@ -1,11 +1,11 @@
-# MLflow Guide (Tier 4)
+# MLflow Guide (Stage 4)
 
 MLflow is the **experiment tracking and model lifecycle** layer for the analytic
-workbench at Tier 4. It replaces manual comparison tables with a tracking server,
+workbench at Stage 4. It replaces manual comparison tables with a tracking server,
 adds a model registry, and provides a comparison UI.
 
 Do not treat it as the whole workflow. The workflow is defined by
-`analytic-workbench`; MLflow is one layer inside Tier 4.
+`analytic-workbench`; MLflow is one layer inside Stage 4.
 
 ## Table of Contents
 1. [What MLflow Provides](#what-it-provides)
@@ -200,5 +200,5 @@ Add MLflow when at least one of these becomes painful without it:
 - You want automatic parameter/metric logging without custom scripts
 - Stakeholders want a web UI to browse experiments
 
-If none of that hurts yet, stay at Tier 3 with Kedro + DVC + manual
+If none of that hurts yet, stay at Stage 3 with Kedro + DVC + manual
 comparison tables.

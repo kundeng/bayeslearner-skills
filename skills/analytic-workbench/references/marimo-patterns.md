@@ -9,8 +9,8 @@ Notebooks live in `notebooks/` at the project root — outside `src/`.
 ## Table of Contents
 1. [Philosophy: marimo as Frontend](#philosophy)
 2. [Notebook Structure](#notebook-structure)
-3. [Interactive Exploration (Tier 1+)](#interactive-exploration)
-4. [Report App (Tier 2+)](#report-app)
+3. [Interactive Exploration (Stage 1+)](#interactive-exploration)
+4. [Report App (Stage 2+)](#report-app)
 5. [UI Elements for Parameter Tuning](#ui-elements)
 6. [State and Stateful Interactions](#state)
 7. [Script Mode and CLI Arguments](#script-mode)
@@ -25,11 +25,18 @@ Notebooks live in `notebooks/` at the project root — outside `src/`.
 
 A recommended best practice: **marimo displays, computation modules compute.**
 
+Compatibility rule:
+
+- Notebook surfaces should survive later-stage wiring upgrades.
+- Stage 2 should not require moving business logic back into notebooks.
+- A notebook should be able to call the same reusable functions whether config
+  comes from widget values, plain files, or Hydra-composed config.
+
 A well-structured marimo notebook can:
 
 - Gather parameters from UI widgets
-- Call reusable module functions directly at Tier 1-2, or load pipeline-produced
-  artifacts at Tier 3+
+- Call reusable module functions directly at Stage 1-2, or load
+  pipeline-produced artifacts at Stage 3+
 - Display those results (figures, tables, metrics, markdown)
 
 Alternatively, a marimo notebook can directly call reusable functions from
@@ -122,7 +129,7 @@ if __name__ == "__main__":
 
 ---
 
-## 3. Interactive Exploration (Tier 1+) {#interactive-exploration}
+## 3. Interactive Exploration (Stage 1+) {#interactive-exploration}
 
 When a UI element changes, marimo re-runs only the cells that depend on that
 widget's `.value`. The common pattern is: controls -> filtered data -> derived
@@ -187,7 +194,7 @@ so empty selections fail fast and the notebook stays readable.
 
 ---
 
-## 4. Report App (Tier 2+) {#report-app}
+## 4. Report App (Stage 2+) {#report-app}
 
 The report app loads pre-computed artifacts from `runs/`. It does **no
 computation** — only display and navigation.

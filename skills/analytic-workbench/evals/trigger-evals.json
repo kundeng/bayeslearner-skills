@@ -32,6 +32,14 @@
     "should_trigger": true
   },
   {
+    "query": "Help me design a causal analysis for whether traffic signals reduce accident severity, and explain the assumptions.",
+    "should_trigger": true
+  },
+  {
+    "query": "Add model interpretability to this analysis and show me which explanation artifacts would be appropriate.",
+    "should_trigger": true
+  },
+  {
     "query": "Build a Kedro pipeline for feature engineering and wire it into a marimo review notebook.",
     "should_trigger": true
   },

@@ -8,10 +8,10 @@ approves work through the chosen surface.
 
 ## Table of Contents
 1. [The Notebook as Review Surface](#notebook-review)
-2. [Review by Tier](#review-by-tier)
+2. [Review by Stage](#review-by-stage)
 3. [Self-Review Expectations](#self-review)
-4. [State Machine (Tier 3+)](#state-machine)
-5. [Formal Workflow (Tier 3+)](#formal-workflow)
+4. [State Machine (Stage 3+)](#state-machine)
+5. [Formal Workflow (Stage 3+)](#formal-workflow)
 6. [Data Access Rules](#data-access)
 7. [Narrative Rules](#narrative)
 8. [When Full Formality Is Worth It](#when-formal)
@@ -31,7 +31,7 @@ The chosen review surface should:
   staged sections in Quarto
 
 The human approval happens *through* the notebook interaction and conversation.
-At Tier 1-2, no separate review files are needed. The notebook + conversation
+At Stage 1-2, no separate review files are needed. The notebook + conversation
 *is* the review loop.
 
 ### Surface choice
@@ -61,15 +61,15 @@ become the review artifact. The document should make the workflow legible:
 
 ### Report notebook as review surface
 
-For Tier 2+, the report notebook (`notebooks/report.py`) loads pre-computed
+For Stage 2+, the report notebook (`notebooks/report.py`) loads pre-computed
 artifacts from `runs/` and presents them for review. The human selects runs,
 compares metrics, and inspects figures — all within the notebook.
 
 ---
 
-## 2. Review by Tier {#review-by-tier}
+## 2. Review by Stage {#review-by-stage}
 
-| Tier | Review surface | Approval mechanism |
+| Stage | Review surface | Approval mechanism |
 |------|---------------|-------------------|
 | **1** | Chat message with inline figures, exploration notebook, or Quarto EDA doc | Conversational ("looks good", "try X instead") |
 | **2** | marimo report app or Quarto report + comparison table | Conversational, optionally card.md |
@@ -91,8 +91,8 @@ Before presenting any stage to the human, the AI verifies:
 
 If blocking issues appear, fix them before presenting anything to the human.
 
-At Tier 1-2, this is a mental checklist the AI runs before speaking.
-At Tier 3+, write `review/<stage>/review.json` with pass/fail per check.
+At Stage 1-2, this is a mental checklist the AI runs before speaking.
+At Stage 3+, write `review/<stage>/review.json` with pass/fail per check.
 
 During EDA, do not wait for the end of the run to report discoveries. Provide
 interim updates whenever a meaningful step completes. A good interim update
@@ -106,7 +106,7 @@ contains:
 
 ---
 
-## 4. State Machine (Tier 3+) {#state-machine}
+## 4. State Machine (Stage 3+) {#state-machine}
 
 Every stage moves through a lifecycle:
 
@@ -124,11 +124,11 @@ Rules:
 
 ---
 
-## 5. Formal Workflow (Tier 3+) {#formal-workflow}
+## 5. Formal Workflow (Stage 3+) {#formal-workflow}
 
 Follow this sequence for each stale stage:
 
-1. Run the stage (handwired Tier 1 run, Kedro pipeline, or DVC repro) and produce explicit outputs.
+1. Run the stage (handwired Stage 1 run, Kedro pipeline, or DVC repro) and produce explicit outputs.
 2. Write `review/<stage>/manifest.json` describing params, inputs, outputs.
 3. Run self-review checks.
 4. Write `review/<stage>/review.json`.
@@ -171,7 +171,7 @@ The final report should read from saved artifacts only:
 - `rawdata/` — immutable source data
 - `runs/<run-id>/data/` — computed outputs
 - `runs/<run-id>/figures/` — visual artifacts
-- `review/<stage>/approval.json` — approved interpretation text (Tier 3+)
+- `review/<stage>/approval.json` — approved interpretation text (Stage 3+)
 
 Always materialize:
 
@@ -191,7 +191,7 @@ useful, such as:
 
 ## 8. When Full Formality Is Worth It {#when-formal}
 
-Use the full Tier 3+ review workflow when:
+Use the full Stage 3+ review workflow when:
 
 - Multiple runs need to be compared over time
 - The human wants explicit approval checkpoints

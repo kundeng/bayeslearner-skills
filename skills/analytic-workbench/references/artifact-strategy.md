@@ -90,7 +90,7 @@ This table answers:
 **Build it automatically** after every sweep with
 `python -m my_project.scripts.build_comparison runs/`.
 
-At Tier 4, MLflow replaces manual comparison tables. See `references/mlflow-guide.md`.
+At Stage 4, MLflow replaces manual comparison tables. See `references/mlflow-guide.md`.
 
 ---
 
@@ -121,7 +121,7 @@ The `src/<project>/analysis/data_loader.py` module (see `code-templates.md`)
 uses `_is_fresh()` helper functions prefixed with `_` while the public `raw_data_cached` function
 participates in the module's public API.
 
-### DVC freshness (Tier 3)
+### DVC freshness (Stage 3)
 
 DVC handles this natively when you intentionally materialize a frozen input snapshot:
 
@@ -140,7 +140,7 @@ Unfreeze when you want fresh data: `dvc repro --force extract`
 
 ## 4. DVC Integration Patterns {#dvc-integration}
 
-When to add DVC (Tier 3):
+When to add DVC (Stage 3):
 
 ### Stage caching — wrapping a Hydra script
 
