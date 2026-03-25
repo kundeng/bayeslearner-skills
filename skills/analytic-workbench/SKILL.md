@@ -14,12 +14,39 @@ workflow.
 ## Start Here
 
 1. Read `AGENTS.md` or `agents.md` if present
-2. Inspect the repo before changing structure
-3. Separate repo facts from agent assumptions
-4. Separate frozen inputs from live pulls
+2. If neither exists, create `AGENTS.md` and update `CLAUDE.md` (see below)
+3. Inspect the repo before changing structure
+4. Separate repo facts from agent assumptions
+5. Separate frozen inputs from live pulls
 
 Then establish per area: current mode, likely next mode, review surface, first
 boundary-sensitive change.
+
+### Fresh Repo Bootstrap
+
+When starting on a repo with no `AGENTS.md`, create one from the initial
+prompt and project context. The file anchors all agents to the same workflow
+contract.
+
+`AGENTS.md` should contain:
+
+- **Project purpose** — one-paragraph summary derived from the user's request
+- **Workflow** — state that this project uses the analytic workbench skill
+  with modes `probe → explore → experiment → operate`
+- **Current mode** — the mode established in the first `plan` declaration
+- **Conventions** — surface choices (marimo/qmd), module layout
+  (`src/<project>/analysis/`), artifact layout (`runs/`, `rawdata/`)
+- **Steering rules** — any project-specific constraints from the user's prompt
+  (e.g., data sources, review expectations, domain context)
+
+Then ensure `CLAUDE.md` exists and includes a pointer:
+
+```text
+See AGENTS.md for project workflow conventions and current mode.
+```
+
+If `CLAUDE.md` already exists, append the pointer rather than overwriting.
+Update `AGENTS.md` at promote time when modes or conventions change.
 
 ## Modes
 
