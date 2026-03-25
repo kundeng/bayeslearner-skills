@@ -67,12 +67,12 @@ where = ["src"]
 Install the project in editable mode:
 
 ```bash
-pip install -e ".[dev]"                          # Stage 1
-pip install -e ".[hydra,dev]"                    # Stage 2
-pip install -e ".[hydra,kedro,dev]"              # Stage 3 (with Kedro)
-pip install -e ".[hydra,dvc,dev]"                # Stage 3 (with DVC)
-pip install -e ".[hydra,kedro,dvc,dev]"          # Stage 3 (both)
-pip install -e ".[hydra,kedro,dvc,tracking,dev]" # Stage 4
+pip install -e ".[dev]"                          # explore
+pip install -e ".[hydra,dev]"                    # experiment
+pip install -e ".[hydra,kedro,dev]"              # experiment + Kedro
+pip install -e ".[hydra,dvc,dev]"                # experiment + DVC
+pip install -e ".[hydra,kedro,dvc,dev]"          # experiment + both
+pip install -e ".[hydra,kedro,dvc,tracking,dev]" # operate
 ```
 
 Generate a lockfile for reproducibility if your tool supports it (`uv lock`,
@@ -82,7 +82,7 @@ Generate a lockfile for reproducibility if your tool supports it (`uv lock`,
 
 ## 3. Base Dependencies {#base-deps}
 
-Always installed (Stage 1):
+Always installed (`explore`):
 
 | Package | Purpose |
 |---------|---------|
@@ -93,27 +93,27 @@ Always installed (Stage 1):
 | `matplotlib` | Figures and charts |
 | `pyyaml` | Config loading for handwired driver |
 
-Added at Stage 2:
+Added at `experiment`:
 
 | Package | Purpose |
 |---------|---------|
 | `hydra-core` | Config composition, CLI overrides, multirun sweeps |
 | `omegaconf` | Structured config (Hydra dependency, also useful standalone) |
 
-Added at Stage 3 (choose one or both):
+Added when Kedro is needed:
 
 | Package | Purpose |
 |---------|---------|
 | `kedro` | Pipeline DAG, data catalog |
 | `kedro-viz` | Interactive pipeline visualization |
 
-Also at Stage 3:
+Added when DVC is needed:
 
 | Package | Purpose |
 |---------|---------|
 | `dvc[s3]` | Stage caching, experiment tracking, remotes |
 
-Added at Stage 4:
+Added at `operate`:
 
 | Package | Purpose |
 |---------|---------|
@@ -187,15 +187,15 @@ Install as needed. Add to `[project.optional-dependencies]` in pyproject.toml.
 Bootstrap a new project:
 
 ```bash
-# Stage 1: plain modules + handwired driver
+# explore: plain modules + handwired driver
 mkdir -p src/my_project/analysis src/my_project/scripts src/my_project/tools \
          notebooks rawdata runs tests
 touch src/my_project/__init__.py src/my_project/analysis/__init__.py
 
-# Stage 2+: add Hydra config directory
+# experiment: add Hydra config directory
 mkdir -p conf/source conf/experiment
 
-# Stage 3 (if adding Kedro): add pipeline structure
+# experiment + Kedro: add pipeline structure
 mkdir -p src/my_project/pipelines conf/base conf/local
 ```
 

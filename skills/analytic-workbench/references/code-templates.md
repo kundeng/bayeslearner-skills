@@ -6,12 +6,12 @@ Copy and adapt these to bootstrap a new project.
 ## Table of Contents
 1. [Project Scaffold](#scaffold)
 2. [Analysis Module (DAG-Friendly Naming)](#module)
-3. [Handwired Driver (Stage 1)](#handwired-driver)
-4. [Hydra Runner (Stage 2+)](#hydra-runner)
+3. [Handwired Driver (`explore`)](#handwired-driver)
+4. [Hydra Runner (`experiment`+)](#hydra-runner)
 5. [marimo Exploration Notebook](#explore-notebook)
 6. [marimo Report App](#report-app)
-7. [Kedro Pipeline (Stage 3 Option)](#kedro-pipeline)
-8. [Kedro Sweep Runner (Stage 3 Option)](#sweep-runner)
+7. [Kedro Pipeline (with Kedro)](#kedro-pipeline)
+8. [Kedro Sweep Runner (with Kedro)](#sweep-runner)
 9. [Comparison Table Builder](#comparison-builder)
 10. [Freshness-Aware Data Loader](#data-loader)
 11. [pyproject.toml](#pyproject)
@@ -120,7 +120,7 @@ Notice:
 
 ---
 
-## 3. Handwired Driver (Stage 1) {#handwired-driver}
+## 3. Handwired Driver (`explore`) {#handwired-driver}
 
 The driver calls analysis functions in DAG order. Every step visible, every
 dependency explicit. No framework dependency.
@@ -180,10 +180,10 @@ if __name__ == "__main__":
 
 ---
 
-## 4. Hydra Runner (Stage 2+) {#hydra-runner}
+## 4. Hydra Runner (`experiment`+) {#hydra-runner}
 
-At Stage 2, Hydra composes config from YAML + CLI overrides while preserving
-the Stage 1 computation contract. It changes config injection and output-dir
+At `experiment`, Hydra composes config from YAML + CLI overrides while preserving
+the `explore` computation contract. It changes config injection and output-dir
 wiring, not the analysis code shape.
 
 ```python
@@ -239,8 +239,8 @@ if __name__ == "__main__":
 
 Preferred pattern:
 
-- keep Stage 1 analysis modules unchanged
-- if a Stage 1 `run(params, output_dir)` function already exists, prefer
+- keep `explore` analysis modules unchanged
+- if a `explore` `run(params, output_dir)` function already exists, prefer
   wrapping it instead of duplicating pipeline logic inside the Hydra entrypoint
 - keep Hydra objects at the boundary and pass plain values downstream
 
@@ -473,9 +473,9 @@ Run: `marimo run notebooks/report.py`
 
 ---
 
-## 7. Kedro Pipeline (Stage 3 Option) {#kedro-pipeline}
+## 7. Kedro Pipeline (with Kedro) {#kedro-pipeline}
 
-At Stage 3, you can optionally replace the handwired driver with a Kedro
+When adding Kedro, you can optionally replace the handwired driver with a Kedro
 pipeline. The analysis functions don't change — only the wiring. Hydra still
 owns config composition and sweeps.
 
@@ -570,7 +570,7 @@ kedro run --pipeline=baseline --params="baseline.resample_freq:30min"
 
 ---
 
-## 8. Kedro Sweep Runner (Stage 3 Option) {#sweep-runner}
+## 8. Kedro Sweep Runner (with Kedro) {#sweep-runner}
 
 ```python
 # src/my_project/scripts/sweep.py

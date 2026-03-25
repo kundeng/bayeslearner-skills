@@ -3,249 +3,206 @@ name: analytic-workbench
 description: Use this skill for analytics and data-science workflow setup, exploratory analysis, notebook-first EDA, repo normalization for analysis projects, experiment comparison, AutoML, causal analysis, and promotion from ad hoc exploration into reusable pipelines. Trigger when the user asks for analysis best practices, how to structure an analytics repo, how to organize notebooks and runs, whether to use marimo or Quarto/qmd, how to handle experiment sweeps, how to compare models, or how to make analysis reproducible. Also trigger on phrases such as analytic workbench, EDA, exploratory analysis, notebook workflow, analytics pipeline, reproducible analysis, experiment sweep, hyperparameter comparison, comparison table, marimo, Quarto, qmd, Hydra, DVC, Kedro, MLflow, AutoML, PyCaret, causal analysis, feature engineering, or model review.
 metadata:
   author: kundeng
-  version: "1.0.0"
+  version: "1.2.0"
 ---
 
 # Analytic Workbench
 
-Human-directed, AI-operated analysis. Use early, before work drifts into ad hoc
-scripts, mixed review surfaces, or weak run structure.
+Human-directed, AI-operated analysis. Use early when analysis may become a real
+workflow.
 
-## Early Guardrails
+## Start Here
 
-Before deep exploration or code changes:
+1. Read `AGENTS.md` or `agents.md` if present
+2. Inspect the repo before changing structure
+3. Separate repo facts from agent assumptions
+4. Separate frozen inputs from live pulls
 
-- read `AGENTS.md` or `agents.md` first when the repo has one
-- pair with `workflow-guardrails` when the work may restructure the repo or set conventions
-- do not stay silent at the start of the turn; make the operating plan visible
-- do not use throwaway inline analysis code from Stage 1 onward — throwaway code silently diverges from the notebook contract and cannot be reviewed or rerun
-- do not split one analysis phase across several half-wired surfaces — split surfaces hide state, break review flow, and make promotion impossible
-- do not let AutoML choose the problem framing — AutoML optimizes whatever metric you hand it, so an unexamined framing produces a model that answers the wrong question
-- do not use naive random row sampling for temporal, spatial, grouped, or event-style data unless justified — random rows break time ordering, leak future data, and produce misleadingly optimistic metrics
+Then establish per area: current mode, likely next mode, review surface, first
+boundary-sensitive change.
 
-Use `spec-driven-dev` only when the work needs durable requirements, design,
-tasks, or multi-session implementation tracking. Do not require it for ordinary
-analytics execution.
+## Modes
 
-## Lightweight Bookkeeping
+A mode is a workflow shape, not what you compute. Different areas of work can
+be in different modes simultaneously.
 
-When the work is likely to continue across sessions, create `.aw/stages/` and
-keep stage-scoped artifacts there.
+| Mode | Use when | Read next | Common mistake |
+|---|---|---|---|
+| `probe` | first contact, uncertain framing | this file only | over-structuring early or treating probes as durable |
+| `explore` | work worth keeping formally | `module-conventions.md`, `marimo-patterns.md` | logic in cells, hidden acquisition |
+| `experiment` | reruns, comparisons, sweeps | `hydra-config.md` | adding Hydra before repeated runs exist |
+| `operate` | scale, schedules, team work | `mlflow-guide.md` + orchestration docs | overbuilding early |
 
-Preferred layout:
+All references above are in `references/`.
 
-```text
-.aw/
-  status.json
-  stages/
-    stage-0-ad-hoc-eda/
-    stage-1-notebook-eda/
-    stage-2-workbench/
-```
+## Operators
 
-Use `.aw/status.json` as the current machine-readable state. For each active
-stage folder, keep only the artifacts needed to resume cleanly, such as:
+Five operators drive all work, firing from conversational intent. Default
+rhythm: `plan -> run -> review -> summary`, with `promote` inserting when the
+current mode's wiring is no longer sufficient.
 
-- `plan.md` for human-readable framing and plan revisions
-- `status.json` for machine-readable state
-- `review.md` for review notes and approval outcomes
+Each operator must produce a visible declaration.
 
-Do not create a new folder for every small update. Create or advance a stage
-folder when the stage changes or when the user wants a durable checkpoint.
+### plan
 
-## First-Turn Contract
-
-At the start of substantive analytics work, report:
-
-- stage
-- primary surface
-- fallback surface
-- run manager
-- sampling strategy
-- target framing if ML or causal work is in scope
-- first reusable artifacts
-- steering docs read
-
-Use this format:
+Set up or revise the workflow. Fires at start of substantive work or direction
+change.
 
 ```text
 Plan
-- Stage: ...
+- Area: ...          - Mode: ...
+- Likely next mode: ...
 - Primary surface: marimo | qmd | chat-only | other
-- Fallback surface: ...
-- Run manager: plain config | Hydra | DVC | Kedro | other
-- Sampling strategy: ...
-- Target framing: binary | multiclass | regression | ranking | causal | n/a
-- First reusable artifacts:
-  - ...
-  - ...
-- Steering docs read:
-  - ...
+- Review surface: ...
+- First boundary-sensitive change: ...
+- Steering docs read: ...
 ```
 
-For ongoing work, use compact progress updates:
+Add for ML/causal: `Sampling strategy: ...` and
+`Target framing: binary | multiclass | regression | ranking | causal`.
+
+For `probe`: `Area, Mode: probe, First probe, Review surface, Risk`.
+
+### run
+
+Execute the next planned step.
+
+```text
+Run                          Run outcome
+- Area: ...                  - What ran: ...
+- Step: ...                  - Output: ...
+- Expected output: ...       - Anomaly or caveat: ...
+```
+
+### review
+
+Sanity-check outputs before presenting — fires automatically, not on request.
+
+```text
+Review
+- Area: ...
+- Artifacts reviewed: ...
+- Findings: ...
+- Caveats: ...
+- Verdict: proceed | revise | back up to [phase]
+```
+
+### summary
+
+Report status at natural stopping points.
 
 ```text
 EDA Update
-- Step: ...
-- What ran: ...
-- Outcome: ...
-- Risk or caveat: ...
-- Next step: ...
+- Area: ...       - What ran: ...
+- Step: ...       - Outcome: ...
+- Caveat: ...     - Next step: ...
 ```
 
-If bookkeeping is active, treat the first-turn contract as the seed for
-`.aw/status.json` and the current stage's `plan.md`.
+### promote
 
-## Default Loop
+Advance to a stronger mode. This is where mode transitions happen — probe to
+explore when work is worth keeping, explore to experiment when reruns matter.
+Transitions can also emerge from user intent (e.g., asking for comparisons).
+Transitions are additive wiring, not rewrites.
 
-Use this unless the user explicitly wants another process:
+```text
+Promote
+- Area: ...             - From mode: ...
+- To mode: ...          - What survives: ...
+- What changes: ...
+```
+
+## Core Workflow
+
+The analytical spine, used within any mode:
 
 ```text
 Frame -> Acquire -> Profile -> Hypothesize -> Model or Analyze -> Review -> Promote
 ```
 
-Meaning:
+- **Frame**: question, decision, constraints, review surface
+- **Acquire**: data access as workflow shape, not hidden setup
+- **Profile**: coverage, missingness, slices, label shape
+- **Hypothesize**: likely drivers before over-engineering
+- **Review**: findings early enough to redirect
+- **Promote**: worth-keeping work into modules, config, runs, reports
 
-- **Frame**: define the question, decision, constraints, and review surface
-- **Acquire**: get data through reusable steps, not throwaway shell snippets
-- **Profile**: inspect coverage, missingness, slices, and label shape
-- **Hypothesize**: state likely drivers before over-engineering
-- **Model or Analyze**: run the next sensible baseline, test, or comparison
-- **Review**: present findings early for correction
-- **Promote**: move worth-keeping work into reusable modules, config, runs, review surfaces, and the runbook
+Backtrack when stuck:
+- Unusable data → Acquire or reframe
+- All hypotheses fail → Profile with fresh slices
+- Suspicious metrics → check leakage before celebrating
+- Wrong assumption surfaced → Frame
 
-If a phase stalls, back up rather than push through:
+## Guardrails
 
-- Profile reveals unusable data -> return to Acquire or reframe
-- Hypotheses all fail -> return to Profile with fresh slices
-- Model produces suspicious metrics -> check for leakage before celebrating
-- Review surfaces a wrong assumption -> return to Frame
+- Prefer what is on disk over generic assumptions
+- Do not silently change folder layout, artifact semantics, or execution path — breaks resumption and review
+- Once structure exists, stop using throwaway snippets — they diverge from the notebook contract
+- First live extraction is usually a run artifact, not a frozen input
+- Do not split a phase across half-wired surfaces — hides state, blocks promotion
+- Do not let AutoML choose the framing — it optimizes whatever metric you hand it
+- Match sampling/CV to temporal, grouped, spatial, or event structure — naive splits leak and inflate
+- Keep project knowledge in repo docs, not agent memory
 
-## Operator Vocabulary
+## Acquisition and DAG Shape
 
-Four operators keep planning, execution, and review aligned:
+`explore`+ should follow `references/module-conventions.md`: pure functions in
+`src/<project>/analysis/`, function name = output name, parameter name =
+dependency name, manual driver fine. Hamilton-style naming encouraged; the
+package is optional.
 
-- `aw-plan create|update|advance` — create, revise, or advance the stage plan
-- `aw-run` — execute the next planned step and produce artifacts
-- `aw-review` — self-review artifacts, summarize outcomes, decide whether to revise or promote
-- `aw-status` — report current stage, latest artifacts, open risks, next step
-
-When `.aw/stages/` exists, operators update the stage folder and
-`.aw/status.json` rather than inventing separate bookkeeping.
-
-## Runbook
-
-The runbook (`runbook.md` at the repo root) is the human-readable reproduction
-guide for the project. It is derived from the project structure — configs, scripts,
-notebooks, runs — not maintained as a separate log.
-
-### When to generate
-
-Generate or update the runbook at **promote time**: when the analysis reaches a
-milestone, when the user asks for a handoff document, or when `aw-plan advance`
-moves to a new stage. The runbook is a snapshot of "how to reproduce everything
-up to this point."
-
-### What it contains
-
-The runbook should read as a step-by-step guide that a human (or a new agent)
-can follow to reproduce the full pipeline from scratch:
-
-1. **Prerequisites** — environment setup, data acquisition, external tools
-2. **Pipeline overview** — ASCII diagram showing the data flow from raw inputs
-   to final outputs
-3. **Numbered steps** — one section per major pipeline step, each with:
-   - what happens (plain English)
-   - the exact command to run
-   - expected runtime
-   - what to inspect afterward (files produced, expected values)
-4. **Configuration reference** — table of config files and what they control
-5. **Key directories** — table of paths, contents, and whether git-tracked
-6. **Troubleshooting** — known failure modes and fixes
-
-### How it relates to existing artifacts
-
-The runbook does not duplicate what `config.yaml` and `metrics.json` already
-capture per run. Instead it ties them together into a narrative:
-
-- `config.yaml` says *what parameters* a run used → the runbook says *which
-  command produced that run and why*
-- `metrics.json` says *what the results were* → the runbook says *what results
-  to expect and what "correct" looks like*
-- The notebook says *how to explore results* → the runbook says *how to open
-  the notebook and what sections to look at*
-
-### Keeping it current
-
-The runbook is a promote-time artifact, not an append-only log. When the
-pipeline changes, update the runbook to match — do not accumulate stale
-instructions. If `.aw/` bookkeeping is active, note the runbook's last-updated
-timestamp in `.aw/status.json`.
-
-## Detecting the Current Stage
-
-When joining mid-project:
-
-- `.aw/status.json` exists -> read it; the `stage` field is authoritative
-- `.aw/stages/` exists but no `status.json` -> use the highest stage folder name
-- Hydra `conf/` or `multirun/` present but no `.aw/` -> likely Stage 2, confirm with user
-- Notebook and modules present but no config management -> likely Stage 1
-- Nothing structured -> Stage 0
-
-## What a Stage Means
-
-A stage is both:
-
-- a **temporal checkpoint** in the life of the analysis
-- a **workflow wiring level** describing how the work is structured and managed
-
-It is not a new computation stack. Moving to a later stage preserves
-earlier-stage modules and notebook surfaces; what changes is config injection,
-run management, caching, orchestration, and review rigor. Promote when the need
-for repeatability, comparison, or reproducibility increases.
-
-Stage model:
-
-- **Stage 0 — Ad Hoc EDA**: first contact with unfamiliar data. Minimal wiring, quick probes. Do not load any references yet.
-- **Stage 1 — Notebook EDA**: disciplined exploration with reusable modules and a simple run path. Read `references/module-conventions.md` and `references/marimo-patterns.md`. Do not load `hydra-config.md`, `dvc-guide.md`, `kedro-guide.md`, or `mlflow-guide.md`.
-- **Stage 2 — Workbench**: add Hydra-managed repeatable runs, comparisons, and experiment discipline on top of Stage 1. Read `references/hydra-config.md`. Do not load `dvc-guide.md`, `kedro-guide.md`, or `mlflow-guide.md`.
-- **Stage 3 — Reproducible**: add DVC and/or Kedro for expensive data, pipeline structure, and lineage. Read `references/dvc-guide.md` or `references/kedro-guide.md`. Do not load `mlflow-guide.md`.
-- **Stage 4 — Orchestrated**: add MLflow plus orchestration for team or production use. Read `references/mlflow-guide.md`.
-
-Promotion bias:
-
-- move `0 -> 1` when the work is worth keeping
-- move `1 -> 2` after initial findings if the user wants to continue, compare, rerun, tune, or keep the work
-- treat `1 -> 2` as an additive wiring upgrade, not a rewrite; preserve Stage 1 computation and notebook contracts
-
-## Surface Rules
-
-- Stage 1 should already use a notebook surface for EDA
-- prefer `marimo` for interactive review and iterative analysis
-- prefer `qmd` for staged narrative delivery or final presentation artifacts
-- if the user cannot reliably run `qmd`, do not force it as the main exploration surface
-- keep computation in reusable modules and use the surface for review, controls, and presentation
+- `probe`: direct fetches acceptable
+- `explore`+: reusable command/tool/pipeline if the pull will be rerun or handed off
+- Notebooks read saved artifacts, not embed live fetch logic
 
 ## ML and Causal Rules
 
-If the work includes prediction, classification, AutoML, or causal analysis,
-read `references/modeling-guardrails.md` before modeling. Key expert-level rules:
+Read `references/modeling-guardrails.md` before modeling. Key rules:
 
-- frame the target and choose binary vs multiclass vs regression vs causal *before* any model runs — an unexamined framing wastes every downstream step
-- use sampling and CV that match the data structure — naive splits on temporal or grouped data leak information and inflate metrics
-- use AutoML as a comparison accelerator after framing and baselines are set, not as problem framing
-- keep predictive and causal claims separate — predictive feature importance is not causal effect
-- provide interpretability artifacts for important outputs; read `references/interpretability.md` when explanations matter
+- Frame target before any model runs — unexamined framing wastes downstream work
+- Match sampling/CV to data structure
+- AutoML as comparison accelerator after framing, not as problem framing
+- Predictive importance is not causal effect — keep claims separate
+- Interpretability artifacts for important outputs (`references/interpretability.md`)
+- Causal design discipline: `references/causal-analysis.md`
 
-For causal design and claim discipline, read `references/causal-analysis.md`.
+## Reference Guide
 
-## References
+Read only what the current mode or task needs.
 
-Stage-specific and modeling references are linked at their decision points
-above. Read these as needed regardless of stage:
+| Reference | When to read | Key rules |
+|---|---|---|
+| `environment-setup.md` | packaging, imports, deps | Use real package setup; do not patch with editor settings |
+| `module-conventions.md` | before `explore` code | Pure functions, output-oriented names, manual driver; no durable logic in cells |
+| `marimo-patterns.md` | marimo surface | Verify in marimo itself; explicit paths; no hidden cross-cell state |
+| `hydra-config.md` | entering `experiment` | Config separate from computation; no Hydra for one-off probes |
+| `review-workflow.md` | presenting results | Review before presenting; marimo for interactive, qmd for narrative |
+| `artifact-strategy.md` | repeated outputs, comparisons | Materialize clearly; do not mix frozen inputs with run outputs |
+| `dvc-guide.md` / `kedro-guide.md` | reproducibility, lineage | Add only when beyond ordinary experiment needs |
 
-- `references/artifact-strategy.md` for runs and comparison outputs
-- `references/review-workflow.md` for review and approval flow
-- `references/environment-setup.md` for environment and dependency setup
-- `references/code-templates.md` for reusable code patterns
+All references above are in `references/`.
+
+## Bookkeeping
+
+Maintain `.aw/` when work continues across sessions:
+
+```text
+.aw/
+  status.json          # current state across all areas
+  stages/
+    <area-name>/       # one folder per area of work
+      plan.md          # framing and plan revisions
+      status.json      # machine-readable state
+      review.md        # review notes and approvals
+```
+
+Create or advance a stage folder only on mode changes or user-requested
+checkpoints. Plan revisions, reruns, and parameter changes belong in the
+existing folder, not a new one.
+
+Joining mid-project:
+- `.aw/status.json` exists → authoritative
+- `stages/` but no root status → reconstruct from folders
+- Hydra `conf/`/`multirun/` without `.aw/` → likely `experiment`, confirm
+- Notebook + modules, no config management → likely `explore`
+- Nothing structured → `probe`

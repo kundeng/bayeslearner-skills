@@ -1,6 +1,6 @@
-# DVC Guide (Stage 3 Option)
+# DVC Guide
 
-DVC is one of two options at Stage 3 for adding reproducibility to the analytic
+DVC is one of two options in `experiment` mode for adding reproducibility to the analytic
 workbench. It wraps existing scripts (Hydra runners or Kedro pipelines) with
 hash-based caching, experiment tracking, and remote artifact storage.
 
@@ -8,7 +8,7 @@ hash-based caching, experiment tracking, and remote artifact storage.
 modules, or config system. It wraps the commands you already run and adds
 caching and versioning on top.
 
-The other Stage 3 option is Kedro (see `references/kedro-guide.md`). You can
+The other option is Kedro (see `references/kedro-guide.md`). You can
 use DVC alone, Kedro alone, or both together. They are complementary:
 DVC adds caching/versioning, Kedro adds DAG runner/catalog/viz.
 
@@ -39,7 +39,7 @@ DVC-tracked outputs or ignored folders.
 
 ## 2. Minimal `dvc.yaml` {#dvc-yaml}
 
-### Wrapping a Hydra runner (Stage 2 -> 3)
+### Wrapping a Hydra runner (adding DVC to `experiment`)
 
 ```yaml
 stages:
@@ -172,7 +172,7 @@ recovered later.
 
 ## 7. When DVC Wraps Hydra Scripts {#wraps-hydra}
 
-At Stage 3 without Kedro, DVC wraps Hydra-powered scripts directly:
+Without Kedro, DVC wraps Hydra-powered scripts directly:
 
 ```yaml
 stages:
@@ -196,7 +196,7 @@ handwired driver executes the analysis.
 
 ## 8. When DVC Wraps Kedro Pipelines {#wraps-kedro}
 
-If you use both DVC and Kedro at Stage 3:
+If you use both DVC and Kedro in `experiment` mode:
 
 | Concern | Tool |
 |---------|------|
@@ -214,7 +214,7 @@ artifact caching and versioning; Hydra manages config composition.
 
 ## 9. When to Add DVC {#when-to-add}
 
-Add DVC at Stage 3 when at least one of these becomes painful without it:
+Add DVC to `experiment` mode when at least one of these becomes painful without it:
 
 - Expensive upstream data pulls that shouldn't repeat unnecessarily
 - Repeat runs with mostly unchanged inputs
@@ -222,5 +222,5 @@ Add DVC at Stage 3 when at least one of these becomes painful without it:
 - Remote sharing of cached artifacts
 - Reproducible stage history that should survive the current workspace
 
-If none of that hurts yet, stay at Stage 2 with Hydra + handwired driver +
+If none of that hurts yet, stay at `experiment` with Hydra + handwired driver +
 explicit `runs/` folders + comparison tables.

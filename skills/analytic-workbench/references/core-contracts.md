@@ -1,8 +1,8 @@
-# Core Contracts Reference (Stage 3+)
+# Core Contracts Reference
 
 Recommended file contracts for the execute-review-approve loop. Use these at
-Stage 3+ when the project needs persistent audit trails and reproducibility
-records.
+`experiment`+ when the project needs persistent audit trails and reproducibility
+records (i.e., when DVC/Kedro formality is added).
 
 **These schemas are starting points.** Add fields your project needs, omit
 fields you don't. The only hard requirements are:
@@ -10,7 +10,7 @@ fields you don't. The only hard requirements are:
 - Each run has a `config.yaml` (what ran) and `metrics.json` (what happened).
 - The state machine transitions are respected.
 
-At Stage 1-2, the same loop happens conversationally — no contract files needed.
+At `explore` and early `experiment`, the same loop happens conversationally — no contract files needed.
 You may use JSON, YAML, or TOML for any of these files.
 
 ## Table of Contents
@@ -207,11 +207,11 @@ Edit the interpretation above if the framing needs adjustment.
 
 ---
 
-## Workflow: Step by Step (Stage 3)
+## Workflow: Step by Step
 
 ```
 1. Check pipeline state (dvc status or run status)
-2. Run stale stages (Kedro pipeline, DVC repro, or Stage 1 driver)
+2. Run stale stages (Kedro pipeline, DVC repro, or `explore` driver)
 3. For each completed stage:
    a. Write review/<stage>/manifest.json
    b. Run self-review checks

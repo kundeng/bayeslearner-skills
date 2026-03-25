@@ -8,11 +8,11 @@ approves work through the chosen surface.
 
 ## Table of Contents
 1. [The Notebook as Review Surface](#notebook-review)
-2. [Review by Stage](#review-by-stage)
+2. [Review by Mode](#review-by-mode)
 3. [Runbook as Review Surface](#runbook)
 4. [Self-Review Expectations](#self-review)
-5. [State Machine (Stage 3+)](#state-machine)
-6. [Formal Workflow (Stage 3+)](#formal-workflow)
+5. [State Machine (formal review)](#state-machine)
+6. [Formal Workflow (formal review)](#formal-workflow)
 7. [Data Access Rules](#data-access)
 8. [Narrative Rules](#narrative)
 9. [When Full Formality Is Worth It](#when-formal)
@@ -28,11 +28,11 @@ The chosen review surface should:
 - Include the AI's draft interpretation (in editable markdown cells)
 - Provide comparison tables for multi-run experiments
 - Allow drill-down into individual runs
-- Be interactive enough for the stage: live controls in marimo, or structured
+- Be interactive enough for the mode: live controls in marimo, or structured
   staged sections in Quarto
 
 The human approval happens *through* the notebook interaction and conversation.
-At Stage 1-2, no separate review files are needed. The notebook + conversation
+At `explore` and early `experiment`, no separate review files are needed. The notebook + conversation
 *is* the review loop.
 
 ### Surface choice
@@ -62,20 +62,20 @@ become the review artifact. The document should make the workflow legible:
 
 ### Report notebook as review surface
 
-For Stage 2+, the report notebook (`notebooks/report.py`) loads pre-computed
+For `experiment`+, the report notebook (`notebooks/report.py`) loads pre-computed
 artifacts from `runs/` and presents them for review. The human selects runs,
 compares metrics, and inspects figures — all within the notebook.
 
 ---
 
-## 2. Review by Stage {#review-by-stage}
+## 2. Review by Mode {#review-by-mode}
 
-| Stage | Review surface | Approval mechanism |
+| Mode | Review surface | Approval mechanism |
 |------|---------------|-------------------|
-| **1** | Chat message with inline figures, exploration notebook, or Quarto EDA doc | Conversational ("looks good", "try X instead") |
-| **2** | marimo report app or Quarto report + comparison table | Conversational, optionally card.md |
-| **3** | marimo report app or Quarto report + formal review files | `approval.json` / `feedback.json` in `review/` |
-| **4** | Orchestrator UI + notebook/report | CI/CD gates + human sign-off |
+| **`explore`** | Chat message with inline figures, exploration notebook, or Quarto EDA doc | Conversational ("looks good", "try X instead") |
+| **`experiment`** | marimo report app or Quarto report + comparison table | Conversational, optionally card.md |
+| **`experiment` (formal)** | marimo report app or Quarto report + formal review files | `approval.json` / `feedback.json` in `review/` |
+| **`operate`** | Orchestrator UI + notebook/report | CI/CD gates + human sign-off |
 
 ---
 
@@ -105,7 +105,7 @@ See `SKILL.md § Runbook` for the full specification. Key sections:
 
 ### When to generate or update
 
-- At stage promotion (`aw-plan advance`)
+- At stage promotion (`promote`)
 - When the user asks for a handoff document
 - When the pipeline structure changes materially (new scripts, new configs,
   new data sources)
@@ -122,7 +122,7 @@ are needed for a complete review:
 - Runbook → "how to get from raw data to these artifacts"
 - Notebook/report → "what do the artifacts show and what do they mean"
 
-During `aw-review`, summarize the runbook's pipeline steps in chat so the
+During `review`, summarize the runbook's pipeline steps in chat so the
 human can see the reproduction path without opening a file. The full runbook
 lives at the repo root for detailed reference.
 
@@ -130,7 +130,7 @@ lives at the repo root for detailed reference.
 
 ## 4. Self-Review Expectations {#self-review}
 
-Before presenting any stage to the human, the AI verifies:
+Before presenting any step to the human, the AI verifies:
 
 - Declared outputs exist and are non-empty in `runs/<run-id>/`
 - Key metrics are plausible and internally consistent
@@ -141,8 +141,8 @@ Before presenting any stage to the human, the AI verifies:
 
 If blocking issues appear, fix them before presenting anything to the human.
 
-At Stage 1-2, this is a mental checklist the AI runs before speaking.
-At Stage 3+, write `review/<stage>/review.json` with pass/fail per check.
+At `explore` and early `experiment`, this is a mental checklist the AI runs before speaking.
+With formal review, write `review/<stage>/review.json` with pass/fail per check.
 
 During EDA, do not wait for the end of the run to report discoveries. Provide
 interim updates whenever a meaningful step completes. A good interim update
@@ -156,7 +156,7 @@ contains:
 
 ---
 
-## 5. State Machine (Stage 3+) {#state-machine}
+## 5. State Machine (formal review) {#state-machine}
 
 Every stage moves through a lifecycle:
 
@@ -174,11 +174,11 @@ Rules:
 
 ---
 
-## 6. Formal Workflow (Stage 3+) {#formal-workflow}
+## 6. Formal Workflow (formal review) {#formal-workflow}
 
 Follow this sequence for each stale stage:
 
-1. Run the stage (handwired Stage 1 run, Kedro pipeline, or DVC repro) and produce explicit outputs.
+1. Run the stage (handwired `explore` run, Kedro pipeline, or DVC repro) and produce explicit outputs.
 2. Write `review/<stage>/manifest.json` describing params, inputs, outputs.
 3. Run self-review checks.
 4. Write `review/<stage>/review.json`.
@@ -221,7 +221,7 @@ The final report should read from saved artifacts only:
 - `rawdata/` — immutable source data
 - `runs/<run-id>/data/` — computed outputs
 - `runs/<run-id>/figures/` — visual artifacts
-- `review/<stage>/approval.json` — approved interpretation text (Stage 3+)
+- `review/<stage>/approval.json` — approved interpretation text (formal review)
 
 Always materialize:
 
@@ -241,7 +241,7 @@ useful, such as:
 
 ## 9. When Full Formality Is Worth It {#when-formal}
 
-Use the full Stage 3+ review workflow when:
+Use the full formal review workflow when:
 
 - Multiple runs need to be compared over time
 - The human wants explicit approval checkpoints

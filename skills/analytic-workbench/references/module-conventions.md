@@ -2,18 +2,18 @@
 
 Analysis modules are **pure Python functions** following a DAG-friendly naming
 discipline. The conventions produce readable, testable, DAG-shaped code that
-works with the handwired driver (Stage 1-2) and slots directly into Kedro
-pipelines if you add Kedro at Stage 3.
+works with the handwired driver (`explore`/`experiment`) and slots directly into Kedro
+pipelines when needed.
 
 ## Table of Contents
 1. [Core Rules](#core-rules)
 2. [Naming Discipline](#naming)
-3. [The Handwired Driver (Stage 1)](#handwired-driver)
+3. [The Handwired Driver (`explore`)](#handwired-driver)
 4. [Module Layout](#module-layout)
 5. [Data Loading](#data-loading)
 6. [Figures and Artifacts](#figures)
 7. [Testing](#testing)
-8. [Transition to Kedro (Stage 3 Option)](#kedro-transition)
+8. [Transition to Kedro](#kedro-transition)
 9. [Anti-Patterns](#anti-patterns)
 
 ---
@@ -36,10 +36,10 @@ Every function in `src/<project>/analysis/` follows these rules:
 
 Compatibility rule:
 
-- Later stages may change wiring, config injection, caching, or orchestration,
+- Later modes may change wiring, config injection, caching, or orchestration,
   but they should preserve the computation contract established here.
 - Functions in `analysis/` should not depend on notebook widget state, Hydra
-  objects, Kedro context, or other stage-specific runtime objects.
+  objects, Kedro context, or other mode-specific runtime objects.
 
 ---
 
@@ -77,9 +77,9 @@ Key consequences:
 
 ---
 
-## 3. The Handwired Driver (Stage 1) {#handwired-driver}
+## 3. The Handwired Driver (`explore`) {#handwired-driver}
 
-At Stage 1, a simple `run()` function calls the module functions in DAG order.
+At `explore`, a simple `run()` function calls the module functions in DAG order.
 Every step is visible, every dependency explicit.
 
 ```python
@@ -138,8 +138,8 @@ The handwired driver is intentionally simple:
 - The call order mirrors the DAG: `raw_data` → `timeseries_hourly` → `summary_stats`.
 - All I/O happens in the driver, not in the analysis functions.
 - This driver defines a stable boundary that later stages should preserve.
-- When this grows unwieldy, add Hydra at Stage 2 for better config wiring, then
-  Kedro or DVC at Stage 3.
+- When this grows unwieldy, add Hydra at `experiment` for better config wiring, then
+  Kedro or DVC.
 
 ---
 
@@ -157,7 +157,7 @@ src/
       evaluation.py        # metrics and scoring
       data_loader.py       # freshness-aware data loading
     scripts/
-      run.py               # Handwired driver (Stage 1-2) or Kedro runner (Stage 3)
+      run.py               # Handwired driver (`explore`/`experiment`) or Kedro runner
       build_comparison.py  # Sweep comparison table builder
     tools/
       fetch_data.py        # Data access CLI
@@ -284,17 +284,17 @@ Testing layers:
 
 ---
 
-## 8. Transition to Kedro (Stage 3 Option) {#kedro-transition}
+## 8. Transition to Kedro {#kedro-transition}
 
 Because module functions follow the same output-and-dependency naming discipline,
 they map directly to Kedro nodes:
 
 ```python
-# Before (Stage 1-2 handwired driver):
+# Before (`explore`/`experiment` handwired driver):
 df = raw_data(raw_data_path=params["raw_data_path"])
 ts = timeseries_hourly(raw_data=df, ...)
 
-# After (Stage 3 Kedro pipeline):
+# After (Kedro pipeline):
 from kedro.pipeline import Pipeline, node
 
 Pipeline([
