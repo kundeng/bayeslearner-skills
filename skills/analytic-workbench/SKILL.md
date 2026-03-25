@@ -29,6 +29,80 @@ workflow shape already matches this pattern.
 
 ---
 
+## Required Turn Protocol
+
+When this skill triggers, the agent should not jump straight into silent
+exploration. It should make its operating plan visible.
+
+At the start of the analysis turn, explicitly report:
+
+1. the **tier** you are using now
+2. the **interactive surface** you plan to use now
+3. the **fallback surface** if the first surface is a poor fit
+4. the **data acquisition plan**
+5. the **EDA plan** with concrete steps
+6. the **first reusable artifacts** you intend to create
+
+Use this default structure in the first substantive update:
+
+```text
+Plan
+- Tier: ...
+- Surface now: marimo | quarto | chat-only
+- Fallback surface: ...
+- Acquisition stage: ...
+- EDA steps:
+  1. ...
+  2. ...
+  3. ...
+- Reusable artifacts to create first:
+  - ...
+  - ...
+```
+
+If the work is more than a one-off micro-check, continue to provide interim
+updates during execution. Every meaningful EDA step should report both the step
+and the outcome.
+
+Use this compact progress format:
+
+```text
+EDA Update
+- Step: ...
+- What ran: ...
+- Outcome: ...
+- Risk or caveat: ...
+- Next step: ...
+```
+
+Do not wait until the end of EDA to reveal discoveries. Surface findings as
+they emerge so the human can redirect the work early.
+
+---
+
+## Automatic Operating Modes
+
+Treat these as subcommand-style modes the agent can announce and follow without
+the user needing to invent workflow language each time.
+
+- **`aw-plan`** — declare tier, surface, acquisition plan, EDA steps, and the
+  first reusable artifacts before deep work starts.
+- **`aw-fetch`** — convert live-system data access into a reusable acquisition
+  stage or tool, rather than ad hoc inline snippets.
+- **`aw-eda`** — run exploratory analysis with visible step-by-step updates and
+  interim findings.
+- **`aw-report`** — summarize what is known so far, what remains uncertain, and
+  what decision the human can make now.
+- **`aw-promote`** — move temporary exploration into reusable modules, scripts,
+  config, and review surfaces.
+- **`aw-surface`** — explicitly choose marimo, Quarto, or another display layer
+  and state the fallback if the primary surface is not suitable.
+
+The agent does not need a literal CLI implementation for these names. They are
+behavioral defaults that should shape execution and reporting.
+
+---
+
 ## Architecture: Config -> Computation -> Display
 
 Three layers, each with a single job.
@@ -43,8 +117,11 @@ Config layer   ->  Computation layer  ->  Display layer
 - **Computation**: Pure Python modules following DAG-friendly naming conventions
   (function name = output name, typed I/O, small functions). Handwired driver
   at Tier 1-2, optionally Kedro pipelines at Tier 3.
-- **Display**: marimo (reactive notebooks, app mode). Alternatives: Jupyter,
-  Streamlit, or any surface that separates display from logic.
+- **Display**: marimo (reactive notebooks, app mode) is preferred for rich
+  interactive review. Quarto is the default fallback when the work needs a more
+  document-first, stage-by-stage narrative surface, static rendering, or a
+  publishable report artifact. Alternatives: Jupyter, Streamlit, or any surface
+  that separates display from logic.
 
 Config never touches DataFrames, computation never renders UI, display never
 contains business logic. At Tier 1, the config layer may just be widget values.
@@ -63,6 +140,19 @@ marimo-specific guardrails:
 - If the notebook narrative depends on live-system data semantics, verify those
   semantics before presenting a polished report. A correct-looking notebook can
   still encode the wrong story.
+
+Surface-selection guardrails:
+
+- Always state which interactive surface you are choosing and why.
+- If marimo is not clearly the best fit, propose Quarto as the first fallback
+  rather than treating marimo as mandatory.
+- Prefer Quarto when the immediate need is a narrative EDA document, staged
+  write-up, or an artifact meant to be shared as HTML/PDF.
+- Prefer marimo when the human will benefit from live controls, rapid
+  parameterized exploration, or app-style review of saved artifacts.
+- The surface must not own the business logic. Regardless of marimo vs Quarto,
+  reusable computation belongs in modules and acquisition belongs in explicit
+  tools or stages.
 
 ---
 
@@ -105,6 +195,12 @@ analyses should begin at Tier 2.** Signs you need the next tier:
   restructure), or both.
 - **3->4**: Multiple people need scheduling, retries, experiment tracking, or CI/CD.
 
+Escalation rule:
+
+- If the first data pull is non-trivial, repeated, expensive, or likely to be
+  reused, do not leave it as a chat snippet. Promote it immediately into a
+  reusable acquisition tool or stage.
+
 ---
 
 ## Project Structure
@@ -126,9 +222,14 @@ project/
         build_comparison.py
       tools/                   # Data access CLI tools
         fetch_data.py
+      pipelines/               # Optional acquisition or stage wrappers
+        acquire.py
   notebooks/                   # marimo notebooks (outside src/)
     explore.py
     report.py
+  reports/                     # Optional Quarto reports / narratives
+    eda.qmd
+    report.qmd
   conf/                        # Tier 2+: Hydra config files
     config.yaml
     source/
@@ -156,6 +257,9 @@ Key rules:
 - The first pull from a live external system is not automatically `rawdata/`.
   Treat that as a run artifact or acquisition output first. Promote it into
   `rawdata/` only when you intend to reuse it as a stable input snapshot.
+- Initial live-system access is part of the pipeline shape. If it matters to
+  the workflow, represent it as a reusable acquisition command, script, or
+  stage rather than an inline one-off snippet.
 - `runs/` is gitignored.
 - No `data/processed/` or `outputs/figures/` — artifacts live inside `runs/<run-id>/`.
 - Even at Tier 1, analysis code belongs in `src/<project_name>/analysis/`, not
@@ -174,13 +278,19 @@ Execute -> Self-Review -> Present -> Human Decision -> Record & Advance
 **Execute** — Run the analysis (handwired driver, Hydra sweep, Kedro pipeline,
 DVC repro). Produce outputs inside `runs/<run-id>/`.
 
+**Report Progress During Execution** — During EDA, do not stay silent until the
+final summary. After each meaningful step, report what ran, what changed, and
+what you learned. See the `EDA Update` format above.
+
 **Self-Review** — Before showing the human anything, check your own work:
 outputs exist and are non-empty, figures are non-trivial, metrics are plausible,
 no NaN/Inf in key columns, values match figures. At Tier 3+, write `review.json`.
 
-**Present** — The marimo notebook is the primary review surface. The human reads
-it, interacts with it, drills into comparison tables and figures. At Tier 1 this
-can be a chat message with inline figures. At Tier 2+, the notebook *is* the
+**Present** — marimo is the preferred interactive review surface, with Quarto as
+the default fallback when a staged narrative artifact is the better fit. The
+human should be able to see what ran, what was found, what remains uncertain,
+and what decision is needed next. At Tier 1 this can still be a chat message
+with inline figures. At Tier 2+, the notebook/report surface is the
 presentation. See `references/review-workflow.md`.
 
 **Human Decision** — Approve, approve with edits, or reject with feedback.

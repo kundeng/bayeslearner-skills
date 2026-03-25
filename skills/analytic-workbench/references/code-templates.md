@@ -23,7 +23,7 @@ Copy and adapt these to bootstrap a new project.
 ```bash
 # Replace my_project with your actual project name
 mkdir -p src/my_project/analysis src/my_project/scripts src/my_project/tools \
-         notebooks rawdata runs tests
+         notebooks reports rawdata runs tests
 touch src/my_project/__init__.py src/my_project/analysis/__init__.py
 ```
 
@@ -338,7 +338,60 @@ Run: `marimo edit notebooks/explore.py`
 
 ---
 
-## 5. marimo Report App {#report-app}
+## 6. Quarto EDA Report Skeleton {#quarto-eda}
+
+Use Quarto when the work needs a staged narrative artifact instead of a highly
+interactive app.
+
+```markdown
+<!-- reports/eda.qmd -->
+---
+title: "EDA Progress Report"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+## Question
+
+What are we trying to learn?
+
+## Data Acquisition
+
+- Source: API / database / file
+- Reusable command: `python -m my_project.tools.fetch_data --output rawdata/events.parquet`
+- Snapshot used in this report: `rawdata/events.parquet`
+
+## Step 1: Coverage Check
+
+```{python}
+import pandas as pd
+df = pd.read_parquet("rawdata/events.parquet")
+df.head()
+```
+
+Write the concrete outcome here.
+
+## Step 2: Key Distributions
+
+Add the next figure/table and record the finding immediately below it.
+
+## Interim Findings
+
+- Finding 1
+- Finding 2
+- Caveat
+
+## Recommended Next Step
+
+State the next analysis move or decision needed from the human.
+```
+
+---
+
+## 7. marimo Report App {#report-app}
 
 Loads pre-computed artifacts from `runs/`. No computation, only display.
 
@@ -412,7 +465,7 @@ Run: `marimo run notebooks/report.py`
 
 ---
 
-## 7. Kedro Pipeline (Tier 3 Option) {#kedro-pipeline}
+## 8. Kedro Pipeline (Tier 3 Option) {#kedro-pipeline}
 
 At Tier 3, you can optionally replace the handwired driver with a Kedro
 pipeline. The analysis functions don't change — only the wiring. Hydra still

@@ -1,8 +1,10 @@
 # Review Workflow Reference
 
 The review workflow is how AI-produced analysis gets validated by a human. The
-primary review surface is a **marimo notebook** — not JSON files. The human
-reads, interacts with, and approves work through the notebook.
+preferred review surface is a **marimo notebook**, with **Quarto** as the
+default fallback when the work needs a staged narrative document, shareable
+HTML/PDF, or a document-first EDA surface. The human reads, interacts with, and
+approves work through the chosen surface.
 
 ## Table of Contents
 1. [The Notebook as Review Surface](#notebook-review)
@@ -16,26 +18,46 @@ reads, interacts with, and approves work through the notebook.
 
 ---
 
-## 1. The Notebook as Review Surface {#notebook-review}
+## 1. The Review Surface {#notebook-review}
 
-The marimo notebook is the primary artifact the human reviews. It should:
+The chosen review surface should:
 
 - Show what ran (parameters, data sources, run IDs)
 - Display key outputs (figures, tables, metrics)
 - Include the AI's draft interpretation (in editable markdown cells)
 - Provide comparison tables for multi-run experiments
 - Allow drill-down into individual runs
-- Be interactive — the human can adjust filters, select runs, explore
+- Be interactive enough for the stage: live controls in marimo, or structured
+  staged sections in Quarto
 
 The human approval happens *through* the notebook interaction and conversation.
 At Tier 1-2, no separate review files are needed. The notebook + conversation
 *is* the review loop.
+
+### Surface choice
+
+Prefer marimo when the human needs to adjust filters, choose runs, or explore
+artifacts interactively. Prefer Quarto when the human needs a staged EDA
+document, decision memo, or polished report artifact that reads clearly from top
+to bottom.
 
 ### Exploration notebook as review surface
 
 When the AI produces or updates an exploration notebook, that notebook is itself
 the review artifact. The human opens it, runs it, reads the AI's interpretation,
 and either approves or gives feedback conversationally.
+
+### Exploration report as review surface
+
+When the AI uses Quarto for exploration, the `.qmd` file and its rendered HTML
+become the review artifact. The document should make the workflow legible:
+
+- question and scope
+- data source and acquisition notes
+- EDA steps performed
+- findings discovered so far
+- open questions and caveats
+- recommended next step
 
 ### Report notebook as review surface
 
@@ -49,10 +71,10 @@ compares metrics, and inspects figures — all within the notebook.
 
 | Tier | Review surface | Approval mechanism |
 |------|---------------|-------------------|
-| **1** | Chat message with inline figures, or exploration notebook | Conversational ("looks good", "try X instead") |
-| **2** | marimo report app + comparison table | Conversational, optionally card.md |
-| **3** | marimo report app + formal review files | `approval.json` / `feedback.json` in `review/` |
-| **4** | Orchestrator UI + notebook | CI/CD gates + human sign-off |
+| **1** | Chat message with inline figures, exploration notebook, or Quarto EDA doc | Conversational ("looks good", "try X instead") |
+| **2** | marimo report app or Quarto report + comparison table | Conversational, optionally card.md |
+| **3** | marimo report app or Quarto report + formal review files | `approval.json` / `feedback.json` in `review/` |
+| **4** | Orchestrator UI + notebook/report | CI/CD gates + human sign-off |
 
 ---
 
@@ -71,6 +93,16 @@ If blocking issues appear, fix them before presenting anything to the human.
 
 At Tier 1-2, this is a mental checklist the AI runs before speaking.
 At Tier 3+, write `review/<stage>/review.json` with pass/fail per check.
+
+During EDA, do not wait for the end of the run to report discoveries. Provide
+interim updates whenever a meaningful step completes. A good interim update
+contains:
+
+- step attempted
+- artifact or query produced
+- concrete result
+- caveat or uncertainty
+- next action
 
 ---
 
@@ -125,6 +157,11 @@ should:
 
 This keeps data acquisition separate from the core computation layer.
 
+Rule of thumb: the first live data pull is part of the pipeline, not just a
+setup chore. If the agent expects to rerun it, explain it, test it, or hand it
+to the human later, it should exist as a reusable command, stage, or tool
+rather than as an inline ad hoc snippet in chat.
+
 ---
 
 ## 7. Narrative Rules {#narrative}
@@ -142,6 +179,13 @@ Always materialize:
 - machine-readable summaries (`metrics.json`)
 - comparison tables (`runs/comparison.csv`)
 - report-ready figures and tables
+
+For EDA-stage work, also materialize a lightweight progress artifact when
+useful, such as:
+
+- `runs/<run-id>/notes.md`
+- `runs/<run-id>/eda_summary.json`
+- `reports/eda.qmd`
 
 ---
 

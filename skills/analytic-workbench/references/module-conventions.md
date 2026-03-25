@@ -169,6 +169,23 @@ def raw_data(raw_data_path: str) -> pd.DataFrame:
     return pd.read_csv(raw_data_path, parse_dates=True)
 ```
 
+For live systems, separate **acquisition** from **loading**:
+
+- acquisition belongs in `src/<project>/tools/` or an explicit pipeline stage
+- loading belongs in `src/<project>/analysis/` as functions that read saved data
+- notebooks and reports should call the reusable loader, not embed fetch logic
+
+Bad pattern:
+
+- a notebook cell or chat reply that directly calls the API and then tells the
+  human to rerun the snippet later
+
+Preferred pattern:
+
+- `python -m my_project.tools.fetch_data --output runs/<run-id>/data/source.parquet`
+- analysis modules load the saved artifact
+- reports read only saved artifacts
+
 For freshness-aware loading, use helper functions prefixed with `_`:
 
 ```python
@@ -191,6 +208,10 @@ def raw_data_cached(raw_data_path: str, freshness_hours: int) -> pd.DataFrame:
         f"Run: python -m my_project.tools.fetch_data --output {raw_data_path}"
     )
 ```
+
+If the acquisition step is expensive or reused across runs, escalate it into a
+first-class stage rather than a hidden helper. The agent should tell the human
+that this promotion is happening and why.
 
 ---
 
