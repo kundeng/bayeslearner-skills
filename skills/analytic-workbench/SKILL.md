@@ -1,6 +1,9 @@
 ---
 name: analytic-workbench
 description: "ALWAYS use this skill for human-in-the-loop analytic workflows: exploratory notebook runs, Tier 0 data exploration, Tier 1 structured analysis, folder normalization for analytics projects, Hydra-managed experiment sweeps, review/approval loops, and reproducibility layers such as DVC, Kedro, or MLflow. Use it when the user wants to set up or run an analysis pipeline, asks whether an analytic workflow maps to best practices, wants to normalize repo structure for analytics, wants to choose a tier, compare hyperparameters, build a comparison table, review outputs before approval, run the next stage, or decide how marimo, Hydra, DVC, Kedro, MLflow, Dagster, or Prefect fit together. Trigger on phrases like analysis pipeline, reproducible analysis, best practices, tier 0, tier 1, normalize folder structure, exploratory analysis, notebook workflow, human-in-the-loop, next stage, experiment sweep, hyperparameter comparison, comparison table, marimo, Hydra, DVC, Kedro, MLflow, Dagster, Prefect, analytic workbench, AutoML, PyCaret."
+metadata:
+  author: kundeng
+  version: "1.0.0"
 ---
 
 # Analytic Workbench

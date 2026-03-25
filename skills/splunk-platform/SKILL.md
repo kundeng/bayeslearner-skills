@@ -1,6 +1,9 @@
 ---
 name: splunk-platform
 description: "Deep skill for Splunk development, administration, app/add-on engineering, dashboards, SDK/REST integrations, and AI-facing tooling. ALWAYS use this skill when the task involves splunklib, Splunk REST API, search/jobs or jobs/export patterns, Python SDK, JavaScript SDK, SPL discovery/admin searches, knowledge objects, UCC add-on development, Dashboard Studio, Simple XML, Splunk MCP integration, AppInspect/package validation, or platform deployment automation. This also covers Splunk analytics projects, MCP-backed data investigation, and reproducible analysis pipelines when the work is primarily about how to access, query, model, or safely expose Splunk data and capabilities. Trigger on: Splunk SDK, splunklib, SPL, Splunk REST API, jobs/export, add-on, UCC, modular input, alert action, Dashboard Studio, Simple XML, appinspect, saved searches, knowledge objects, MCP, Splunk admin, Splunk Cloud, Splunk Enterprise, Splunk automation, Splunk analytics, Tier 0 exploration, Tier 1 analysis."
+metadata:
+  author: kundeng
+  version: "1.0.0"
 ---
 
 # Splunk Platform

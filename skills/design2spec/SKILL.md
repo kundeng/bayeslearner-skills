@@ -14,6 +14,9 @@ description: >
   specialized system. Also triggers on requests like "I need to build a Chrome extension that
   looks like this", "implement this dashboard in Splunk", or "build this UI as a Tauri app".
   This skill emits structured JSONC specs — it does NOT generate implementation code.
+metadata:
+  author: kundeng
+  version: "1.0.0"
 ---
 
 # Design-to-Spec Handoff

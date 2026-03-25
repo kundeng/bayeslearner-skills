@@ -1,6 +1,9 @@
 ---
 name: workflow-guardrails
 description: "Use this skill for cross-cutting execution discipline that applies regardless of domain: inspect the repo before restructuring, distinguish repo knowledge from agent memory, avoid changing editor or IDE config without permission, avoid throwaway scripts once a structured workflow is underway, and stop to re-anchor before changing project conventions, persistence layout, or artifact semantics. Trigger when the user asks for best practices, workflow discipline, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, spec, or tooling boundaries."
+metadata:
+  author: kundeng
+  version: "1.0.0"
 ---
 
 # Workflow Guardrails
