@@ -125,7 +125,7 @@ Frame -> Acquire -> Profile -> Hypothesize -> Model or Analyze -> Review -> Prom
 - **Profile**: coverage, missingness, slices, label shape
 - **Hypothesize**: likely drivers before over-engineering
 - **Review**: findings early enough to redirect
-- **Promote**: worth-keeping work into modules, config, runs, reports
+- **Promote**: worth-keeping work into modules, config, runs, reports, and the runbook
 
 Backtrack when stuck:
 - Unusable data → Acquire or reframe
@@ -181,6 +181,33 @@ Read only what the current mode or task needs.
 | `dvc-guide.md` / `kedro-guide.md` | reproducibility, lineage | Add only when beyond ordinary experiment needs |
 
 All references above are in `references/`.
+
+## Runbook
+
+The runbook (`runbook.md` at the repo root) is the human-readable reproduction
+guide. It is derived from project structure — configs, scripts, notebooks,
+runs — not maintained as a separate log.
+
+Generate or update at **promote time**: milestones, handoff requests, or mode
+transitions. Rewrite stale sections rather than appending.
+
+Contents:
+
+1. **Prerequisites** — env setup, data acquisition, external tools
+2. **Pipeline overview** — ASCII diagram of data flow
+3. **Numbered steps** — one per major pipeline step, each with: the exact
+   command, expected runtime, and what to inspect afterward (including expected
+   results so the reader knows what "correct" looks like)
+4. **Configuration reference** — table of config files and what they control
+5. **Key directories** — paths, contents, git-tracked or not
+6. **Troubleshooting** — known failure modes and fixes
+
+The runbook ties per-run artifacts together: `config.yaml` says what params
+were used, `metrics.json` says what happened, the runbook says which command
+produced the run, what results to expect, and how to open the review surface.
+
+If `.aw/` bookkeeping is active, note the runbook's last-updated timestamp in
+`.aw/status.json`.
 
 ## Bookkeeping
 
