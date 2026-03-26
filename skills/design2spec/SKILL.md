@@ -1,19 +1,6 @@
 ---
 name: design2spec
-description: >
-  Convert UI designs (screenshots, mockups, wireframes, or descriptions) into structured
-  implementation-ready JSONC specification packages — before any code is written. This skill
-  is especially valuable for specialized platforms where jumping straight to code causes real
-  damage: Chrome extensions (CSP restrictions, manifest v3 constraints), Splunk React dashboards
-  (SDK boundaries, SplunkUI component requirements), Tauri desktop apps (Rust/JS bridge, IPC
-  patterns), Electron apps (process isolation, preload scripts), VS Code extensions (webview API
-  restrictions), React Native (native module constraints), or any platform with non-obvious
-  rules that generic code generation gets wrong. Use this skill whenever the user wants to
-  analyze a design and produce a spec, says "prepare a handoff", "create a spec from this
-  design", "turn this screenshot into something buildable", or provides a design for a
-  specialized system. Also triggers on requests like "I need to build a Chrome extension that
-  looks like this", "implement this dashboard in Splunk", or "build this UI as a Tauri app".
-  This skill emits structured JSONC specs — it does NOT generate implementation code.
+description: Convert UI designs into structured JSONC spec packages before code is written. Valuable for platforms where jumping to code causes damage — Chrome extensions, Splunk dashboards, Tauri/Electron apps, VS Code extensions, React Native. Trigger on "prepare a handoff", "create a spec from this design", "turn this screenshot into something buildable", or design-to-spec for any specialized platform. Emits JSONC specs, not implementation code.
 metadata:
   author: kundeng
   version: "1.0.0"
