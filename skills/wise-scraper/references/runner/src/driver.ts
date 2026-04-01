@@ -23,6 +23,10 @@ export type DriverWait =
 // ── the interface ───────────────────────────────────────
 
 export interface BrowserDriver {
+  // --- identity ---
+  /** Session identifier. One driver instance = one browser session/tab. */
+  readonly session: string;
+
   // --- lifecycle ---
   open(url: string, opts?: { wait?: DriverWait }): boolean;
   getUrl(): string | null;

@@ -238,17 +238,13 @@ async function main(): Promise<void> {
   if (profile.hooks) hookRegistry.loadFromConfig(profile.hooks);
   if (runner.hooks) await hookRegistry.loadFromModule(resolve(runner.hooks));
 
-  // Wire up driver
-  const driver = new AgentBrowserDriver({
-    timeoutMs: runner.timeout,
-    retries: runner.retries,
-  });
-
   // Wire up AI adapter
   const aiModel = (config.inputs as Record<string, unknown>)?.ai_model;
   const ai = aiModel
     ? new AIChatAdapter({ model: String(aiModel) })
     : new NullAIAdapter();
+
+  const drivers: AgentBrowserDriver[] = [];
 
   try {
     // Set up artifact store with declared schemas
@@ -267,6 +263,14 @@ async function main(): Promise<void> {
     for (const resourceName of executionOrder) {
       const resource = resourceMap.get(resourceName)!;
       console.log(`\n=== Resource: ${resource.name} ===`);
+
+      // One driver (session) per resource
+      const driver = new AgentBrowserDriver({
+        session: `${profile.name}-${resource.name}`.replace(/\s+/g, "-"),
+        timeoutMs: runner.timeout,
+        retries: runner.retries,
+      });
+      drivers.push(driver);
 
       // Resource-level hooks
       if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
@@ -337,7 +341,7 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     }
   } finally {
-    driver.close();
+    for (const d of drivers) d.close();
   }
 }
 

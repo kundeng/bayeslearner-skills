@@ -18,10 +18,12 @@ import { locatorToSelector, escapeJs } from "./driver.js";
 import type { Locator } from "./schema.js";
 
 export class AgentBrowserDriver implements BrowserDriver {
+  readonly session: string;
   timeoutMs: number;
   retries: number;
 
-  constructor({ timeoutMs = 60000, retries = 2 } = {}) {
+  constructor({ session, timeoutMs = 60000, retries = 2 }: { session?: string; timeoutMs?: number; retries?: number } = {}) {
+    this.session = session ?? `wise-${process.pid}-${Date.now()}`;
     this.timeoutMs = timeoutMs;
     this.retries = retries;
   }
@@ -30,7 +32,8 @@ export class AgentBrowserDriver implements BrowserDriver {
 
   private run(args: string[], timeoutS?: number): string | null {
     const timeout = (timeoutS ?? Math.ceil(this.timeoutMs / 1000) + 30) * 1000;
-    const cmd = `agent-browser ${args.join(" ")}`;
+    const sessionArgs = ["--session", this.session, ...args];
+    const cmd = `agent-browser ${sessionArgs.join(" ")}`;
     try {
       return execSync(cmd, {
         encoding: "utf-8",
