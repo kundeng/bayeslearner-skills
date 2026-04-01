@@ -32,7 +32,7 @@ import { NullAIAdapter } from "./ai.js";
 import { AIChatAdapter } from "./aichat-adapter.js";
 import { Engine } from "./engine.js";
 import { HookRegistry } from "./hooks.js";
-import { ArtifactStore } from "./store.js";
+import { ArtifactStore, toArray } from "./store.js";
 import { loadConfig } from "./config.js";
 import { assembleMarkdown, assembleCsv } from "./processing.js";
 
@@ -110,21 +110,23 @@ function validateSemantics(profile: Deployment): void {
       );
     }
 
-    // produces must reference a declared artifact
-    if (resource.produces) {
-      if (artifactNames.size > 0 && !artifactNames.has(resource.produces)) {
+    // produces must reference declared artifacts
+    for (const name of toArray(resource.produces)) {
+      if (artifactNames.size > 0 && !artifactNames.has(name)) {
         throw new Error(
-          `Resource '${resource.name}': produces '${resource.produces}' not declared in artifacts`,
+          `Resource '${resource.name}': produces '${name}' not declared in artifacts`,
         );
       }
-      producerNames.add(resource.produces);
+      producerNames.add(name);
     }
 
-    // consumes must reference a declared artifact that some resource produces
-    if (resource.consumes && artifactNames.size > 0 && !artifactNames.has(resource.consumes)) {
-      throw new Error(
-        `Resource '${resource.name}': consumes '${resource.consumes}' not declared in artifacts`,
-      );
+    // consumes must reference declared artifacts
+    for (const name of toArray(resource.consumes)) {
+      if (artifactNames.size > 0 && !artifactNames.has(name)) {
+        throw new Error(
+          `Resource '${resource.name}': consumes '${name}' not declared in artifacts`,
+        );
+      }
     }
 
     for (const node of resource.nodes) {
@@ -272,9 +274,9 @@ async function main(): Promise<void> {
       const engine = new Engine(driver, ai, hookRegistry, store);
       const records = engine.runResource(resource);
 
-      // Store records in artifact if resource declares produces
-      if (resource.produces) {
-        store.put(resource.produces, records);
+      // Store records in artifact(s) if resource declares produces
+      for (const name of toArray(resource.produces)) {
+        store.put(name, records);
       }
 
       allRecords.push(...records);

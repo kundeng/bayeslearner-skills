@@ -24,7 +24,9 @@
                         "number",
                         "boolean",
                         "array",
-                        "object"
+                        "object",
+                        "url",
+                        "binary"
                       ],
                       "default": "string"
                     },
@@ -40,6 +42,19 @@
                 }
               },
               "consumes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "dedupe": {
                 "type": "string"
               },
               "output": {
@@ -804,10 +819,30 @@
                       ]
                     },
                     "yields": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
                     },
                     "consumes": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
                     },
                     "retry": {
                       "type": "object",
@@ -869,10 +904,30 @@
                 "minItems": 1
               },
               "produces": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
               },
               "consumes": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
               },
               "globals": {
                 "type": "object",

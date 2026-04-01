@@ -37,6 +37,7 @@ export class Engine {
   private hooks: HookRegistry;
   private interrupts: InterruptHandler;
   private store: ArtifactStore | null;
+  private visited = new Set<string>();   // URL dedup
 
   constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry, store?: ArtifactStore) {
     this.driver = driver;
@@ -62,15 +63,15 @@ export class Engine {
     const rootNode = nodeMap[resource.entry.root];
     if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
 
-    // If resource consumes an artifact, iterate over its records.
-    // Each record's fields are available for {field_ref} in entry.url.
-    if (resource.consumes && this.store) {
-      const consumed = this.store.get(resource.consumes);
+    // If resource consumes artifact(s), iterate over their merged records.
+    const consumeNames = this.toArray(resource.consumes);
+    if (consumeNames.length > 0 && this.store) {
+      const consumed = this.mergeConsumed(consumeNames);
       if (consumed.length === 0) {
-        console.warn(`[engine] Consumed artifact '${resource.consumes}' is empty`);
+        console.warn(`[engine] Consumed artifacts empty: ${consumeNames.join(", ")}`);
         return [];
       }
-      console.log(`[engine] Consuming ${consumed.length} records from '${resource.consumes}'`);
+      console.log(`[engine] Consuming ${consumed.length} records from [${consumeNames.join(", ")}]`);
       return this.runResourceOverRecords(resource, rootNode, nodeMap, consumed);
     }
 
@@ -118,6 +119,12 @@ export class Engine {
       return [];
     }
 
+    if (this.visited.has(url)) {
+      console.log(`[engine] Skipping visited: ${url}`);
+      return [];
+    }
+    this.visited.add(url);
+
     if (!this.driver.open(url, { wait: { idle: true } })) {
       console.error(`[engine] Failed to open: ${url}`);
       return [];
@@ -130,7 +137,7 @@ export class Engine {
     this.interrupts.check();
 
     const records: ExtractedRecord[] = [];
-    this.walkNode(rootNode, nodeMap, records, 0);
+    this.walkNode(rootNode, nodeMap, records, 0, {});
     return records;
   }
 
@@ -173,36 +180,42 @@ export class Engine {
     allNodes: Record<string, NER>,
     records: ExtractedRecord[],
     depth: number,
+    context: Record<string, unknown>,    // accumulated fields from ancestors
   ): void {
     const indent = "  ".repeat(depth);
 
-    // If this node consumes an artifact, iterate over its records
-    if (node.consumes && this.store) {
-      const consumed = this.store.get(node.consumes);
+    // If this node consumes artifact(s), iterate over their records
+    const consumeNames = this.toArray(node.consumes);
+    if (consumeNames.length > 0 && this.store) {
+      const consumed = this.mergeConsumed(consumeNames);
       if (consumed.length === 0) {
-        console.log(`${indent}[node] ${node.name} — consumed artifact '${node.consumes}' is empty, skipping`);
+        console.log(`${indent}[node] ${node.name} — consumed artifacts empty, skipping`);
         return;
       }
-      console.log(`${indent}[node] ${node.name} — consuming ${consumed.length} records from '${node.consumes}'`);
+      console.log(`${indent}[node] ${node.name} — consuming ${consumed.length} records`);
       for (let i = 0; i < consumed.length; i++) {
         const rec = consumed[i];
         console.log(`${indent}  [consume ${i + 1}/${consumed.length}]`);
-        // Make consumed record's fields available for {field_ref} and navigate actions
-        this.walkNodeOnce(node, allNodes, records, depth, rec.data);
+        const mergedContext = { ...context, ...rec.data };
+        this.walkNodeOnce(node, allNodes, records, depth, mergedContext);
       }
       return;
     }
 
-    this.walkNodeOnce(node, allNodes, records, depth, null);
+    this.walkNodeOnce(node, allNodes, records, depth, context);
   }
 
-  /** Execute a single pass of a node (state check → actions → extract → expand → children). */
+  /**
+   * Execute a single pass of a node.
+   * Context = accumulated fields from all ancestors + consumed records.
+   * Each node's extraction merges into context before passing to children.
+   */
   private walkNodeOnce(
     node: NER,
     allNodes: Record<string, NER>,
     records: ExtractedRecord[],
     depth: number,
-    consumedData: Record<string, unknown> | null,
+    context: Record<string, unknown>,
   ): void {
     const indent = "  ".repeat(depth);
     console.log(`${indent}[node] ${node.name}`);
@@ -221,38 +234,63 @@ export class Engine {
       }
     }
 
-    // 2. Execute actions (with consumed data available for {field_ref})
+    // 2. Execute actions (context available for {field_ref})
     for (const action of node.action ?? []) {
-      this.executeAction(action, records, indent, consumedData);
+      this.executeAction(action, records, indent, context);
     }
 
     // Check for interrupts after actions
     this.interrupts.check();
 
-    // 3. Observe (extract data)
+    // 3. Observe (extract data) — merge with ancestor context
     const extracted = this.extract(node, indent);
+    const childContext = extracted ? { ...context, ...extracted } : context;
+
     if (extracted) {
-      // Merge consumed data fields into extracted record if present
-      const data = consumedData ? { ...consumedData, ...extracted } : extracted;
+      // The record contains the FULL accumulated context, not just this node's fields
+      const data = { ...context, ...extracted };
       let record = this.makeRecord(node.name, data);
       record = this.hooks.invoke("post_extract", record);
       records.push(record);
 
-      // Yield into artifact stream if declared
-      if (node.yields && this.store) {
-        this.store.put(node.yields, [record]);
-      }
+      // Yield into artifact stream(s)
+      this.yieldToArtifacts(node, record);
     }
 
     // Node delay
     if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
 
-    // 4. Expand + 5. Walk children
+    // 4. Expand + 5. Walk children — pass childContext down the tree
     if (node.expand) {
-      this.expandAndDescend(node, allNodes, records, depth);
+      this.expandAndDescend(node, allNodes, records, depth, childContext);
     } else {
-      this.walkChildren(node.name, allNodes, records, depth);
+      this.walkChildren(node.name, allNodes, records, depth, childContext);
     }
+  }
+
+  /** Yield a record into the node's declared artifact stream(s). */
+  private yieldToArtifacts(node: NER, record: ExtractedRecord): void {
+    if (!node.yields || !this.store) return;
+    const names = this.toArray(node.yields);
+    for (const name of names) {
+      this.store.put(name, [record]);
+    }
+  }
+
+  /** Normalize string | string[] | undefined to string[]. */
+  private toArray(val: string | string[] | undefined): string[] {
+    if (!val) return [];
+    return Array.isArray(val) ? val : [val];
+  }
+
+  /** Merge records from multiple consumed artifacts. */
+  private mergeConsumed(artifactNames: string[]): ExtractedRecord[] {
+    if (!this.store) return [];
+    const all: ExtractedRecord[] = [];
+    for (const name of artifactNames) {
+      all.push(...this.store.get(name));
+    }
+    return all;
   }
 
   // ── retry ─────────────────────────────────────────────
@@ -364,7 +402,7 @@ export class Engine {
       if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
 
     } else if ("navigate" in action) {
-      const url = this.resolveUrl(action.navigate.to, records, consumedData);
+      const url = this.resolveUrl(action.navigate.to, records, consumedData ?? undefined);
       console.log(`${indent}  [action] navigate → ${url}`);
       this.driver.open(url, { wait: { idle: true } });
 
@@ -407,18 +445,19 @@ export class Engine {
     console.log(`    [scroll-to] Target not visible after ${maxScrolls} scrolls`);
   }
 
+  /** Resolve {field_ref} from accumulated context, then fall back to record history. */
   private resolveUrl(
     template: string,
     records: ExtractedRecord[],
-    consumedData?: Record<string, unknown> | null,
+    context?: Record<string, unknown>,
   ): string {
     return template.replace(/\{(\w+)\}/g, (_match, field: string) => {
-      // 1. Check consumed data first (from node-level consumes)
-      if (consumedData) {
-        const val = consumedData[field];
+      // 1. Accumulated context (ancestors + consumed data)
+      if (context) {
+        const val = context[field];
         if (val !== undefined && val !== null) return String(val);
       }
-      // 2. Fall back to most recent record in extraction history
+      // 2. Fall back to most recent record
       for (let i = records.length - 1; i >= 0; i--) {
         const val = records[i].data[field];
         if (val !== undefined && val !== null) return String(val);
@@ -573,16 +612,17 @@ export class Engine {
     allNodes: Record<string, NER>,
     records: ExtractedRecord[],
     depth: number,
+    context: Record<string, unknown>,
   ): void {
     const expand = node.expand!;
     const indent = "  ".repeat(depth);
 
     if (expand.over === "elements") {
-      this.expandElements(node, expand, allNodes, records, depth, indent);
+      this.expandElements(node, expand, allNodes, records, depth, indent, context);
     } else if (expand.over === "pages") {
-      this.expandPages(node, expand, allNodes, records, depth, indent);
+      this.expandPages(node, expand, allNodes, records, depth, indent, context);
     } else if (expand.over === "combinations") {
-      this.expandCombinations(node, expand, allNodes, records, depth, indent);
+      this.expandCombinations(node, expand, allNodes, records, depth, indent, context);
     }
   }
 
@@ -595,33 +635,35 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
-    // Extract data from all matching elements
     const extractRules = node.extract ?? [];
     const rows = this.extractMultiple(expand.scope, extractRules, expand.limit);
     console.log(`${indent}  Expand elements: ${rows.length} matches`);
 
     if (expand.order === "bfs") {
-      // BFS: collect all observations first, then walk children for each
-      const batchRecords: ExtractedRecord[] = [];
+      // BFS: collect all observations, then walk children
+      const batch: Array<{ record: ExtractedRecord; childCtx: Record<string, unknown> }> = [];
       for (const row of rows) {
-        let record = this.makeRecord(node.name, row);
+        const data = { ...context, ...row };
+        let record = this.makeRecord(node.name, data);
         record = this.hooks.invoke("post_extract", record);
-        batchRecords.push(record);
+        batch.push({ record, childCtx: data });
         records.push(record);
-        if (node.yields && this.store) this.store.put(node.yields, [record]);
+        this.yieldToArtifacts(node, record);
       }
-      for (const _rec of batchRecords) {
-        this.walkChildren(node.name, allNodes, records, depth);
+      for (const { childCtx } of batch) {
+        this.walkChildren(node.name, allNodes, records, depth, childCtx);
       }
     } else {
-      // DFS: process each element fully before moving to next
+      // DFS: process each element fully before next
       for (const row of rows) {
-        let record = this.makeRecord(node.name, row);
+        const data = { ...context, ...row };
+        let record = this.makeRecord(node.name, data);
         record = this.hooks.invoke("post_extract", record);
         records.push(record);
-        if (node.yields && this.store) this.store.put(node.yields, [record]);
-        this.walkChildren(node.name, allNodes, records, depth);
+        this.yieldToArtifacts(node, record);
+        this.walkChildren(node.name, allNodes, records, depth, data);
       }
     }
   }
@@ -674,15 +716,16 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
     console.log(`${indent}  Expand pages: strategy=${expand.strategy}, limit=${expand.limit}`);
 
     if (expand.strategy === "numeric") {
-      this.expandNumericPages(node, expand, allNodes, records, depth, indent);
+      this.expandNumericPages(node, expand, allNodes, records, depth, indent, context);
     } else if (expand.strategy === "next") {
-      this.expandNextPages(node, expand, allNodes, records, depth, indent);
+      this.expandNextPages(node, expand, allNodes, records, depth, indent, context);
     } else if (expand.strategy === "infinite") {
-      this.expandInfiniteScroll(node, expand, allNodes, records, depth, indent);
+      this.expandInfiniteScroll(node, expand, allNodes, records, depth, indent, context);
     }
   }
 
@@ -693,8 +736,8 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
-    // Discover all page URLs from pagination links
     const pageUrls = this.driver.evalJson<string[]>(`
       (() => {
         const links = [...document.querySelectorAll('${escapeJs(expand.control)}')];
@@ -707,25 +750,10 @@ export class Engine {
     const limited = pageUrls.slice(0, expand.limit);
     console.log(`${indent}  Discovered ${limited.length} pages`);
 
-    if (expand.order === "bfs") {
-      // BFS: discover all pages, then walk children on each
-      const urls = [...limited];
-      for (let i = 0; i < urls.length; i++) {
-        console.log(`${indent}  Page ${i + 1}/${urls.length}`);
-        if (i > 0) {
-          this.driver.open(urls[i], { wait: { idle: true } });
-        }
-        this.walkChildren(node.name, allNodes, records, depth);
-      }
-    } else {
-      // DFS: process each page fully
-      for (let i = 0; i < limited.length; i++) {
-        console.log(`${indent}  Page ${i + 1}/${limited.length}`);
-        if (i > 0) {
-          this.driver.open(limited[i], { wait: { idle: true } });
-        }
-        this.walkChildren(node.name, allNodes, records, depth);
-      }
+    for (let i = 0; i < limited.length; i++) {
+      console.log(`${indent}  Page ${i + 1}/${limited.length}`);
+      if (i > 0) this.driver.open(limited[i], { wait: { idle: true } });
+      this.walkChildren(node.name, allNodes, records, depth, context);
     }
   }
 
@@ -736,18 +764,16 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
     for (let page = 0; page < expand.limit; page++) {
       console.log(`${indent}  Page ${page + 1}/${expand.limit}`);
-      this.walkChildren(node.name, allNodes, records, depth);
+      this.walkChildren(node.name, allNodes, records, depth, context);
 
-      // Check if next button exists
       if (!this.driver.exists(expand.control)) {
         console.log(`${indent}  No more pages (control not found)`);
         break;
       }
-
-      // Check stop conditions
       if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) {
         console.log(`${indent}  Sentinel found`);
         break;
@@ -769,6 +795,7 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
     const maxIter = expand.stop?.limit ?? expand.limit;
     let stableCount = 0;
@@ -776,28 +803,22 @@ export class Engine {
 
     for (let page = 0; page < maxIter; page++) {
       console.log(`${indent}  Scroll ${page + 1}/${maxIter}`);
-      this.walkChildren(node.name, allNodes, records, depth);
+      this.walkChildren(node.name, allNodes, records, depth, context);
       this.driver.scroll("down", 2000);
       this.driver.wait({ ms: 1500 });
 
-      // Check sentinel: a specific element appeared
       if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) {
         console.log(`${indent}  Sentinel found: ${expand.stop.sentinel}`);
         break;
       }
-
-      // Check sentinel_gone: a specific element disappeared
       if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) {
         console.log(`${indent}  Sentinel gone: ${expand.stop.sentinel_gone}`);
         break;
       }
-
-      // Check stability: element count stopped changing
       if (expand.stop?.stable) {
         const currentCount = this.driver.evalJson<number>(`
           document.querySelectorAll('${escapeJs(expand.stop.stable.css)}').length
         `) ?? 0;
-
         if (currentCount === lastCount) {
           stableCount++;
           if (stableCount >= (expand.stop.stable.after ?? 2)) {
@@ -825,8 +846,8 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
     indent: string,
+    context: Record<string, unknown>,
   ): void {
-    // Resolve "auto" values from DOM
     const resolvedAxes = expand.axes.map((axis) => {
       if (axis.values === "auto") {
         const values = this.discoverAxisValues(axis.control, axis.action);
@@ -840,8 +861,6 @@ export class Engine {
 
     for (const combo of combos) {
       console.log(`${indent}  Combo: [${combo.join(", ")}]`);
-
-      // Apply each axis value
       for (let i = 0; i < combo.length; i++) {
         const axis = resolvedAxes[i];
         const val = combo[i];
@@ -853,9 +872,8 @@ export class Engine {
           this.driver.click({ css: axis.control });
         }
       }
-
       this.driver.wait({ idle: true });
-      this.walkChildren(node.name, allNodes, records, depth);
+      this.walkChildren(node.name, allNodes, records, depth, context);
     }
   }
 
@@ -878,18 +896,17 @@ export class Engine {
     allNodes: Record<string, NER>,
     records: ExtractedRecord[],
     depth: number,
+    context: Record<string, unknown>,
   ): void {
-    // Collect children of this parent
     const children = Object.values(allNodes).filter(
       (n) => (n.parents ?? []).includes(parentName),
     );
     if (children.length === 0) return;
 
-    // Topological sort: if any child yields/consumes, respect artifact dependencies.
-    // For children without artifact deps, this preserves YAML order (stable sort).
+    // Topological sort: respect artifact yields/consumes dependencies
     const sorted = ArtifactStore.resolveNodeOrder(children);
     for (const name of sorted) {
-      this.walkNode(allNodes[name], allNodes, records, depth + 1);
+      this.walkNode(allNodes[name], allNodes, records, depth + 1, context);
     }
   }
 

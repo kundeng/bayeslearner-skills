@@ -10,6 +10,12 @@
 
 import type { ArtifactSchema, FieldDef, ExtractedRecord, Deployment } from "./schema.js";
 
+/** Normalize string | string[] | undefined → string[] */
+export function toArray(val: string | string[] | undefined): string[] {
+  if (!val) return [];
+  return Array.isArray(val) ? val : [val];
+}
+
 export interface ValidationError {
   artifact: string;
   record_index: number;
@@ -82,7 +88,9 @@ export class ArtifactStore {
     // Build artifact → producer resource mapping
     const artifactProducer = new Map<string, string>();
     for (const r of resources) {
-      if (r.produces) artifactProducer.set(r.produces, r.name);
+      for (const name of toArray(r.produces)) {
+        artifactProducer.set(name, r.name);
+      }
     }
 
     // Build adjacency: resource A must run before resource B
@@ -93,22 +101,27 @@ export class ArtifactStore {
       if (!inDeg.has(r.name)) inDeg.set(r.name, 0);
     }
 
+    const addEdge = (from: string, to: string) => {
+      if (from === to) return;
+      const existing = adj.get(from) ?? [];
+      if (!existing.includes(to)) {
+        existing.push(to);
+        adj.set(from, existing);
+        inDeg.set(to, (inDeg.get(to) ?? 0) + 1);
+      }
+    };
+
     for (const r of resources) {
-      // Direct consumes on resource
-      if (r.consumes) {
-        const producer = artifactProducer.get(r.consumes);
-        if (producer && producer !== r.name) {
-          adj.get(producer)!.push(r.name);
-          inDeg.set(r.name, (inDeg.get(r.name) ?? 0) + 1);
-        }
+      // Direct consumes on resource → must run after producer
+      for (const consumed of toArray(r.consumes)) {
+        const producer = artifactProducer.get(consumed);
+        if (producer) addEdge(producer, r.name);
       }
       // Artifact-level consumes
-      if (r.produces && artifacts[r.produces]?.consumes) {
-        const upstreamArtifact = artifacts[r.produces].consumes!;
-        const producer = artifactProducer.get(upstreamArtifact);
-        if (producer && producer !== r.name) {
-          adj.get(producer)!.push(r.name);
-          inDeg.set(r.name, (inDeg.get(r.name) ?? 0) + 1);
+      for (const produced of toArray(r.produces)) {
+        for (const upstream of toArray(artifacts[produced]?.consumes)) {
+          const producer = artifactProducer.get(upstream);
+          if (producer) addEdge(producer, r.name);
         }
       }
     }
@@ -145,11 +158,11 @@ export class ArtifactStore {
    *
    * Returns node names in execution order.
    */
-  static resolveNodeOrder(nodes: Array<{ name: string; yields?: string; consumes?: string; parents: string[] }>): string[] {
+  static resolveNodeOrder(nodes: Array<{ name: string; yields?: string | string[]; consumes?: string | string[]; parents: string[] }>): string[] {
     // Build yields → consumes edges
     const yielder = new Map<string, string>(); // artifact → node name
     for (const n of nodes) {
-      if (n.yields) yielder.set(n.yields, n.name);
+      for (const y of toArray(n.yields)) yielder.set(y, n.name);
     }
 
     const adj = new Map<string, string[]>();
@@ -171,10 +184,9 @@ export class ArtifactStore {
 
     // artifact edges: yielder must run before consumer
     for (const n of nodes) {
-      if (n.consumes) {
-        const producer = yielder.get(n.consumes);
+      for (const consumed of toArray(n.consumes)) {
+        const producer = yielder.get(consumed);
         if (producer && producer !== n.name) {
-          // Only add if not already an edge (e.g. already a parent)
           const existing = adj.get(producer) ?? [];
           if (!existing.includes(n.name)) {
             existing.push(n.name);
