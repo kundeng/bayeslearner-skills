@@ -306,6 +306,20 @@ export const StateSetup = z.object({
   actions: z.array(SetupAction).min(1),
 });
 
+// ── artifact schema (exploration agent's output contract) ─
+
+export const FieldDef = z.object({
+  type: z.enum(["string", "number", "boolean", "array", "object"]).default("string"),
+  required: z.boolean().default(true),
+  description: z.string().optional(),
+});
+
+export const ArtifactSchema = z.object({
+  fields: z.record(FieldDef),             // field name → type + constraints
+  consumes: z.string().optional(),         // name of upstream artifact (DAG edge)
+  description: z.string().optional(),
+});
+
 // ── resource ────────────────────────────────────────────
 
 export const Resource = z.object({
@@ -315,6 +329,8 @@ export const Resource = z.object({
     root: z.string(),
   }),
   nodes: z.array(NER).min(1),
+  produces: z.string().optional(),         // artifact name this resource writes to
+  consumes: z.string().optional(),         // artifact name this resource reads from
   globals: z
     .object({
       timeout_ms: z.number().int().positive().default(60000),
@@ -341,6 +357,7 @@ export const QualityGate = z.object({
 
 export const Deployment = z.object({
   name: z.string(),
+  artifacts: z.record(ArtifactSchema).optional(),  // declared output schemas
   resources: z.array(Resource).min(1),
   quality: QualityGate.optional(),
   schedule: z
@@ -373,6 +390,8 @@ export type Retry = z.infer<typeof Retry>;
 export type NER = z.infer<typeof NER>;
 export type SetupAction = z.infer<typeof SetupAction>;
 export type StateSetup = z.infer<typeof StateSetup>;
+export type FieldDef = z.infer<typeof FieldDef>;
+export type ArtifactSchema = z.infer<typeof ArtifactSchema>;
 export type Resource = z.infer<typeof Resource>;
 export type QualityGate = z.infer<typeof QualityGate>;
 export type Deployment = z.infer<typeof Deployment>;

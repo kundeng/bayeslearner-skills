@@ -1,10 +1,26 @@
 name: splunk-itsi-administer
+
+artifacts:
+  page_urls:
+    fields:
+      url:   { type: string, required: true }
+      title: { type: string, required: true }
+    description: "TOC links from the left nav"
+
+  page_content:
+    fields:
+      title: { type: string, required: true }
+      body:  { type: string, required: true }
+    consumes: page_urls
+    description: "Title + body HTML per page"
+
 resources:
   # Phase 1: discover all pages from the left nav
   - name: discover
     entry:
       url: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/overview/about-administering-it-service-intelligence"
       root: toc
+    produces: page_urls
     globals:
       timeout_ms: 30000
       retries: 2
@@ -16,7 +32,7 @@ resources:
         expand:
           over: elements
           scope: "a[href*='/administer/4.21/']"
-          order: bfs                    # collect all URLs before descending
+          order: bfs
         extract:
           - link: { name: url, css: "a[href*='/administer/4.21/']" }
           - text: { name: title, css: "a[href*='/administer/4.21/']" }
@@ -24,8 +40,10 @@ resources:
   # Phase 2: extract content from each discovered page
   - name: extract_pages
     entry:
-      url: { from: "toc.url" }
+      url: { from: "page_urls" }
       root: page
+    consumes: page_urls
+    produces: page_content
     globals:
       timeout_ms: 30000
       page_load_delay_ms: 1500
@@ -33,7 +51,7 @@ resources:
       - name: page
         parents: []
         state:
-          selector_exists: "article[role='article']"
+          selector_exists: "h1.title"
         extract:
           - text: { name: title, css: "h1.title" }
           - html: { name: body, css: ".body" }

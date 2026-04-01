@@ -32,6 +32,7 @@ import { NullAIAdapter } from "./ai.js";
 import { AIChatAdapter } from "./aichat-adapter.js";
 import { Engine } from "./engine.js";
 import { HookRegistry } from "./hooks.js";
+import { ArtifactStore } from "./store.js";
 import { loadConfig } from "./config.js";
 import { assembleMarkdown, assembleCsv } from "./processing.js";
 
@@ -95,6 +96,9 @@ function loadProfile(profilePath: string): Deployment {
 // ── semantic validation ─────────────────────────────────
 
 function validateSemantics(profile: Deployment): void {
+  const artifactNames = new Set(Object.keys(profile.artifacts ?? {}));
+  const producerNames = new Set<string>();
+
   for (const resource of profile.resources) {
     const nodeNames = new Set(resource.nodes.map((n: { name: string }) => n.name));
 
@@ -103,6 +107,23 @@ function validateSemantics(profile: Deployment): void {
       throw new Error(
         `Resource '${resource.name}': entry.root '${resource.entry.root}' references unknown node. ` +
         `Available: ${[...nodeNames].join(", ")}`,
+      );
+    }
+
+    // produces must reference a declared artifact
+    if (resource.produces) {
+      if (artifactNames.size > 0 && !artifactNames.has(resource.produces)) {
+        throw new Error(
+          `Resource '${resource.name}': produces '${resource.produces}' not declared in artifacts`,
+        );
+      }
+      producerNames.add(resource.produces);
+    }
+
+    // consumes must reference a declared artifact that some resource produces
+    if (resource.consumes && artifactNames.size > 0 && !artifactNames.has(resource.consumes)) {
+      throw new Error(
+        `Resource '${resource.name}': consumes '${resource.consumes}' not declared in artifacts`,
       );
     }
 
@@ -228,16 +249,34 @@ async function main(): Promise<void> {
     : new NullAIAdapter();
 
   try {
+    // Set up artifact store with declared schemas
+    const store = new ArtifactStore(profile.artifacts);
+
+    // Resolve execution order (topological sort on produces/consumes)
+    const executionOrder = ArtifactStore.resolveOrder(profile);
+    const resourceMap = new Map(profile.resources.map((r) => [r.name, r]));
+
+    if (executionOrder.length > 1) {
+      console.log(`[main] Execution order: ${executionOrder.join(" → ")}`);
+    }
+
     const allRecords: ExtractedRecord[] = [];
 
-    for (const resource of profile.resources) {
+    for (const resourceName of executionOrder) {
+      const resource = resourceMap.get(resourceName)!;
       console.log(`\n=== Resource: ${resource.name} ===`);
 
       // Resource-level hooks
       if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
 
-      const engine = new Engine(driver, ai, hookRegistry);
+      const engine = new Engine(driver, ai, hookRegistry, store);
       const records = engine.runResource(resource);
+
+      // Store records in artifact if resource declares produces
+      if (resource.produces) {
+        store.put(resource.produces, records);
+      }
+
       allRecords.push(...records);
       console.log(`[engine] '${resource.name}' → ${records.length} records`);
     }

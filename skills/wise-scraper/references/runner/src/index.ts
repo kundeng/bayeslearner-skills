@@ -25,6 +25,8 @@ export {
   HookDef,
   QualityGate,
   StateSetup,
+  ArtifactSchema,
+  FieldDef,
 } from "./schema.js";
 export type {
   Deployment as DeploymentType,
@@ -36,6 +38,8 @@ export type {
   Expand as ExpandType,
   Locator as LocatorType,
   ExtractedRecord,
+  ArtifactSchema as ArtifactSchemaType,
+  FieldDef as FieldDefType,
 } from "./schema.js";
 
 // Driver
@@ -50,6 +54,10 @@ export { AIChatAdapter } from "./aichat-adapter.js";
 
 // Engine
 export { Engine } from "./engine.js";
+
+// Store
+export { ArtifactStore } from "./store.js";
+export type { ValidationError } from "./store.js";
 
 // Interrupts
 export { InterruptHandler, COMMON_RULES } from "./interrupts.js";

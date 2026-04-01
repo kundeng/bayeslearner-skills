@@ -25,14 +25,65 @@ A node only runs when its **state** checks pass. It executes its **actions**, re
 ### Deployment (the whole profile)
 
 ```
-name → resources[] → quality?
+name → artifacts? → resources[] → quality?
 ```
 
 - **`name`** — human label for this scraping job
-- **`resources`** — list of independent scraping units (one per site section or data source)
+- **`artifacts`** — declared output schemas (exploration agent's contract)
+- **`resources`** — list of scraping units, wired via `produces` / `consumes`
 - **`quality`** — post-run data validation (min records, max empty %, min filled % per column)
 - **`schedule`** — cron or interval-based execution
 - **`hooks`** — global lifecycle hooks
+
+### Artifact Schema (exploration agent's output contract)
+
+After exploring a site, the agent knows what data shapes it found. The `artifacts` block declares these explicitly:
+
+```yaml
+artifacts:
+  product_data:
+    fields:
+      title:       { type: string, required: true }
+      price:       { type: string, required: true }
+      description: { type: string, required: true }
+      rating:      { type: number, required: false }
+    description: "Product listings from the catalog page"
+```
+
+Each field has:
+- **`type`** — `string` (default), `number`, `boolean`, `array`, `object`
+- **`required`** — `true` (default) or `false` — if true, empty/missing values are flagged during extraction
+
+Artifacts can declare **`consumes`** to form a dependency DAG:
+
+```yaml
+artifacts:
+  page_urls:
+    fields:
+      url: { type: string, required: true }
+  page_content:
+    fields:
+      title: { type: string, required: true }
+      body:  { type: string, required: true }
+    consumes: page_urls       # ← runs after page_urls is produced
+```
+
+Resources link to artifacts via **`produces`** and **`consumes`**:
+
+```yaml
+resources:
+  - name: discover
+    produces: page_urls       # writes to this artifact
+    ...
+  - name: extract
+    consumes: page_urls       # reads from this artifact
+    produces: page_content
+    entry:
+      url: { from: "page_urls" }   # iterate over URLs in the artifact
+    ...
+```
+
+The runner resolves execution order automatically (topological sort). Records are validated against the artifact schema as they're extracted — required fields that are missing are flagged immediately.
 
 ### Resource (one scraping unit)
 

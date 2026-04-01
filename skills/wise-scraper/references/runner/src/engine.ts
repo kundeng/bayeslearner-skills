@@ -17,6 +17,7 @@ import { locatorToSelector, escapeJs } from "./driver.js";
 import type { AIAdapter } from "./ai.js";
 import { HookRegistry } from "./hooks.js";
 import { InterruptHandler } from "./interrupts.js";
+import type { ArtifactStore } from "./store.js";
 import type {
   Resource,
   NER,
@@ -35,12 +36,14 @@ export class Engine {
   private ai: AIAdapter;
   private hooks: HookRegistry;
   private interrupts: InterruptHandler;
+  private store: ArtifactStore | null;
 
-  constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry) {
+  constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry, store?: ArtifactStore) {
     this.driver = driver;
     this.ai = ai;
     this.hooks = hooks;
     this.interrupts = new InterruptHandler(driver);
+    this.store = store ?? null;
   }
 
   // ── public API ────────────────────────────────────────
@@ -56,32 +59,82 @@ export class Engine {
     // Run state setup if needed (auth, locale, etc.)
     if (resource.setup) this.runSetup(resource.setup);
 
-    // Resolve entry URL
-    const entryUrl = typeof resource.entry.url === "string"
-      ? resource.entry.url
-      : null;
-    if (!entryUrl) throw new Error("Field-ref entry URLs require chaining support");
-
-    console.log(`[engine] Opening: ${entryUrl}`);
-    if (!this.driver.open(entryUrl, { wait: { idle: true } })) {
-      console.error("[engine] Failed to open entry URL");
+    // Resolve entry URLs
+    const entryUrls = this.resolveEntryUrls(resource);
+    if (entryUrls.length === 0) {
+      console.error("[engine] No entry URLs resolved");
       return [];
     }
-
-    // Page load delay
-    if (globals?.page_load_delay_ms) {
-      this.driver.wait({ ms: globals.page_load_delay_ms });
-    }
-
-    // Dismiss any initial interrupts (cookie banners, etc.)
-    this.interrupts.check();
 
     const rootNode = nodeMap[resource.entry.root];
     if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
 
-    const records: ExtractedRecord[] = [];
-    this.walkNode(rootNode, nodeMap, records, 0);
-    return records;
+    const allRecords: ExtractedRecord[] = [];
+
+    for (let i = 0; i < entryUrls.length; i++) {
+      const url = entryUrls[i];
+      if (entryUrls.length > 1) {
+        console.log(`[engine] Page ${i + 1}/${entryUrls.length}: ${url}`);
+      } else {
+        console.log(`[engine] Opening: ${url}`);
+      }
+
+      if (!this.driver.open(url, { wait: { idle: true } })) {
+        console.error(`[engine] Failed to open: ${url}`);
+        continue;
+      }
+
+      if (globals?.page_load_delay_ms) {
+        this.driver.wait({ ms: globals.page_load_delay_ms });
+      }
+
+      // Dismiss interrupts on first page (cookie banners etc.)
+      if (i === 0) this.interrupts.check();
+
+      const records: ExtractedRecord[] = [];
+      this.walkNode(rootNode, nodeMap, records, 0);
+      allRecords.push(...records);
+
+      // Request interval between pages
+      if (globals?.request_interval_ms && i < entryUrls.length - 1) {
+        this.driver.wait({ ms: globals.request_interval_ms });
+      }
+    }
+
+    return allRecords;
+  }
+
+  // ── entry URL resolution ──────────────────────────────
+
+  private resolveEntryUrls(resource: Resource): string[] {
+    const entry = resource.entry.url;
+
+    // Direct URL string
+    if (typeof entry === "string") return [entry];
+
+    // Artifact reference: { from: "artifact_name" } or { from: "resource.node.field" }
+    if ("from" in entry && this.store) {
+      const ref = entry.from;
+      // Try as artifact name first
+      const urls = this.store.getUrls(ref);
+      if (urls.length > 0) {
+        console.log(`[engine] Resolved ${urls.length} URLs from artifact '${ref}'`);
+        return urls;
+      }
+      // Try as dotted path: "resource_name.node_name.field_name" → look up artifact by resource.consumes
+      if (resource.consumes) {
+        const fromUrls = this.store.getUrls(resource.consumes);
+        if (fromUrls.length > 0) {
+          console.log(`[engine] Resolved ${fromUrls.length} URLs from consumed artifact '${resource.consumes}'`);
+          return fromUrls;
+        }
+      }
+      console.warn(`[engine] No URLs found for reference '${ref}'`);
+      return [];
+    }
+
+    console.error("[engine] Cannot resolve entry URL — no store configured for artifact references");
+    return [];
   }
 
   // ── state setup ───────────────────────────────────────

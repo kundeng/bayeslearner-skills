@@ -7,6 +7,51 @@
         "name": {
           "type": "string"
         },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "array",
+                        "object"
+                      ],
+                      "default": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "consumes": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "fields"
+            ],
+            "additionalProperties": false
+          }
+        },
         "resources": {
           "type": "array",
           "items": {
@@ -819,6 +864,12 @@
                   "additionalProperties": false
                 },
                 "minItems": 1
+              },
+              "produces": {
+                "type": "string"
+              },
+              "consumes": {
+                "type": "string"
               },
               "globals": {
                 "type": "object",

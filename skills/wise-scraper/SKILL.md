@@ -51,6 +51,28 @@ Instead of separate `type: pagination` / `type: matrix` / `multiple: true`, all 
 
 Each `expand` block supports `order: dfs | bfs` (default: dfs).
 
+### Artifact Schemas (exploration output contract)
+
+After exploration, the agent declares **what data it expects to produce** in the `artifacts` block. This serves as:
+- **Runtime validation** — each extracted record is checked against the schema
+- **Resource chaining** — `consumes` / `produces` wire resources into a DAG
+- **Self-documentation** — the profile declares its output shape without running it
+
+```yaml
+artifacts:
+  page_urls:
+    fields:
+      url:   { type: string, required: true }
+      title: { type: string, required: true }
+  page_content:
+    fields:
+      title: { type: string, required: true }
+      body:  { type: string, required: true }
+    consumes: page_urls   # ← DAG edge: this depends on page_urls
+```
+
+Resources declare `produces` and `consumes` to link into the artifact DAG. The runner resolves execution order automatically.
+
 ## Agent Contract
 
 1. **Orient first.** Read `references/guide.md § Big Picture` and scan `templates/*.yaml` before touching `agent-browser` or writing code.

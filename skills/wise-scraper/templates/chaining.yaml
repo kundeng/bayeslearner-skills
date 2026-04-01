@@ -1,39 +1,50 @@
-# Chaining — multi-resource pipeline: discover URLs → extract pages.
-# BFS expansion collects all URLs first, then children visit each.
+# Chaining — multi-resource pipeline with declared artifact schemas.
+# Discovery produces typed URLs, extraction consumes them.
 name: chained_scrape
+
+artifacts:
+  page_urls:
+    fields:
+      url:   { type: string, required: true }
+      label: { type: string, required: true }
+    description: "Discovered page URLs from navigation"
+
+  page_content:
+    fields:
+      title: { type: string, required: true }
+      body:  { type: string, required: true }
+    consumes: page_urls
+    description: "Extracted content from each page"
+
 resources:
-  - name: categories
+  - name: discover
     entry: { url: "https://example.com/", root: root }
+    produces: page_urls
     nodes:
       - name: root
         parents: []
 
-      - name: category_links
+      - name: nav_links
         parents: [root]
         expand:
           over: elements
-          scope: "a.category-link"
+          scope: "nav a"
           order: bfs
         extract:
-          - link: { name: url, css: "a.category-link" }
-          - text: { name: label, css: "a.category-link" }
+          - link: { name: url, css: "a" }
+          - text: { name: label, css: "a" }
 
-  - name: products
+  - name: extract_pages
     entry:
-      url: { from: "category_links.url" }
-      root: root
+      url: { from: "page_urls" }
+      root: page
+    consumes: page_urls
+    produces: page_content
     nodes:
-      - name: root
+      - name: page
         parents: []
-        action:
-          - navigate: { to: "{url}" }
-          - wait: { idle: true }
-
-      - name: product_cards
-        parents: [root]
-        expand:
-          over: elements
-          scope: ".product-card"
+        state:
+          selector_exists: "article"
         extract:
-          - text: { name: name,  css: ".title" }
-          - text: { name: price, css: ".price" }
+          - text: { name: title, css: "h1" }
+          - html: { name: body, css: "article" }
