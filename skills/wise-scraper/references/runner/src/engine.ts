@@ -170,6 +170,36 @@ export class Engine {
     depth: number,
   ): void {
     const indent = "  ".repeat(depth);
+
+    // If this node consumes an artifact, iterate over its records
+    if (node.consumes && this.store) {
+      const consumed = this.store.get(node.consumes);
+      if (consumed.length === 0) {
+        console.log(`${indent}[node] ${node.name} — consumed artifact '${node.consumes}' is empty, skipping`);
+        return;
+      }
+      console.log(`${indent}[node] ${node.name} — consuming ${consumed.length} records from '${node.consumes}'`);
+      for (let i = 0; i < consumed.length; i++) {
+        const rec = consumed[i];
+        console.log(`${indent}  [consume ${i + 1}/${consumed.length}]`);
+        // Make consumed record's fields available for {field_ref} and navigate actions
+        this.walkNodeOnce(node, allNodes, records, depth, rec.data);
+      }
+      return;
+    }
+
+    this.walkNodeOnce(node, allNodes, records, depth, null);
+  }
+
+  /** Execute a single pass of a node (state check → actions → extract → expand → children). */
+  private walkNodeOnce(
+    node: NER,
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    consumedData: Record<string, unknown> | null,
+  ): void {
+    const indent = "  ".repeat(depth);
     console.log(`${indent}[node] ${node.name}`);
 
     // 1. Check state (preconditions) — with retry support
@@ -186,20 +216,27 @@ export class Engine {
       }
     }
 
-    // 2. Execute actions
+    // 2. Execute actions (with consumed data available for {field_ref})
     for (const action of node.action ?? []) {
-      this.executeAction(action, records, indent);
+      this.executeAction(action, records, indent, consumedData);
     }
 
-    // Check for interrupts after actions (popups triggered by clicks, etc.)
+    // Check for interrupts after actions
     this.interrupts.check();
 
     // 3. Observe (extract data)
     const extracted = this.extract(node, indent);
     if (extracted) {
-      let record = this.makeRecord(node.name, extracted);
+      // Merge consumed data fields into extracted record if present
+      const data = consumedData ? { ...consumedData, ...extracted } : extracted;
+      let record = this.makeRecord(node.name, data);
       record = this.hooks.invoke("post_extract", record);
       records.push(record);
+
+      // Yield into artifact stream if declared
+      if (node.yields && this.store) {
+        this.store.put(node.yields, [record]);
+      }
     }
 
     // Node delay
@@ -286,6 +323,7 @@ export class Engine {
     action: Action,
     records: ExtractedRecord[],
     indent: string,
+    consumedData?: Record<string, unknown> | null,
   ): void {
     if ("click" in action) {
       console.log(`${indent}  [action] click`);
@@ -321,7 +359,7 @@ export class Engine {
       if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
 
     } else if ("navigate" in action) {
-      const url = this.resolveUrl(action.navigate.to, records);
+      const url = this.resolveUrl(action.navigate.to, records, consumedData);
       console.log(`${indent}  [action] navigate → ${url}`);
       this.driver.open(url, { wait: { idle: true } });
 
@@ -364,14 +402,23 @@ export class Engine {
     console.log(`    [scroll-to] Target not visible after ${maxScrolls} scrolls`);
   }
 
-  private resolveUrl(template: string, records: ExtractedRecord[]): string {
-    // Replace {field_ref} with the most recent matching extracted value
+  private resolveUrl(
+    template: string,
+    records: ExtractedRecord[],
+    consumedData?: Record<string, unknown> | null,
+  ): string {
     return template.replace(/\{(\w+)\}/g, (_match, field: string) => {
+      // 1. Check consumed data first (from node-level consumes)
+      if (consumedData) {
+        const val = consumedData[field];
+        if (val !== undefined && val !== null) return String(val);
+      }
+      // 2. Fall back to most recent record in extraction history
       for (let i = records.length - 1; i >= 0; i--) {
         const val = records[i].data[field];
         if (val !== undefined && val !== null) return String(val);
       }
-      return `{${field}}`; // unresolved — leave as-is
+      return `{${field}}`;
     });
   }
 
@@ -557,6 +604,7 @@ export class Engine {
         record = this.hooks.invoke("post_extract", record);
         batchRecords.push(record);
         records.push(record);
+        if (node.yields && this.store) this.store.put(node.yields, [record]);
       }
       for (const _rec of batchRecords) {
         this.walkChildren(node.name, allNodes, records, depth);
@@ -567,6 +615,7 @@ export class Engine {
         let record = this.makeRecord(node.name, row);
         record = this.hooks.invoke("post_extract", record);
         records.push(record);
+        if (node.yields && this.store) this.store.put(node.yields, [record]);
         this.walkChildren(node.name, allNodes, records, depth);
       }
     }

@@ -280,9 +280,16 @@ export const NER = z.object({
   // expand — how many successor states does this node produce?
   expand: Expand.optional(),
 
+  // yields — write extracted records into this artifact stream.
+  // Like a generator: this node produces data for downstream consumption.
+  yields: z.string().optional(),
+
+  // consumes — iterate over records from this artifact stream.
+  // The node runs once per record in the consumed artifact,
+  // with the record's fields available for {field_ref} substitution.
+  consumes: z.string().optional(),
+
   // retry — if state check fails, re-execute parent's actions and retry
-  // this node up to max times. Enables closed-loop control without
-  // breaking the declarative model.
   retry: Retry.optional(),
 
   // hooks — per-node extension points
@@ -317,6 +324,8 @@ export const FieldDef = z.object({
 export const ArtifactSchema = z.object({
   fields: z.record(FieldDef),             // field name → type + constraints
   consumes: z.string().optional(),         // name of upstream artifact (DAG edge)
+  output: z.boolean().default(false),      // true = final deliverable, false = internal plumbing
+  format: z.enum(["jsonl", "csv", "json", "markdown"]).optional(), // output format hint
   description: z.string().optional(),
 });
 

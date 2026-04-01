@@ -13,9 +13,10 @@ package wise
 // Each node is a (state, action) → observation triple.
 
 Deployment: {
-	name:      string
-	resources: [...Resource]
-	quality?:  QualityGate
+	name:       string
+	artifacts?: [string]: ArtifactSchema    // declared output schemas
+	resources:  [...Resource]
+	quality?:   QualityGate
 	schedule?: {
 		cron?:       string
 		interval_s?: int & >0
@@ -27,13 +28,33 @@ Deployment: {
 	}
 }
 
+// ── Artifact Schema ─────────────────────────────────────
+// Exploration agent declares these — typed record streams.
+// Can be internal (plumbing) or output (deliverables).
+
+FieldDef: {
+	type?:        "string" | "number" | "boolean" | "array" | "object" | *"string"
+	required?:    bool | *true
+	description?: string
+}
+
+ArtifactSchema: {
+	fields:       [string]: FieldDef       // field name → type + constraints
+	consumes?:    string                    // upstream artifact (DAG edge)
+	output?:      bool | *false            // true = final deliverable
+	format?:      "jsonl" | "csv" | "json" | "markdown"  // output format hint
+	description?: string
+}
+
 Resource: {
 	name:  string
 	entry: {
 		url:  string | {from: string}
 		root: string
 	}
-	nodes:   [...NER] & [_, ...]
+	nodes:     [...NER] & [_, ...]
+	produces?: string                       // artifact this resource writes to
+	consumes?: string                       // artifact this resource reads from
 	globals?: {
 		timeout_ms?:          int & >0 | *60000
 		retries?:             int & >=0 | *2
@@ -46,12 +67,15 @@ Resource: {
 }
 
 NER: {
-	name:    string
-	parents: [...string] | *[]
-	state?:  State
-	action?: [...Action]
-	extract?: [...Extraction]
-	expand?:  Expand
+	name:      string
+	parents:   [...string] | *[]
+	state?:    State
+	action?:   [...Action]
+	extract?:  [...Extraction]
+	expand?:   Expand
+	yields?:   string                       // write records into this artifact stream
+	consumes?: string                       // iterate over records from this artifact
+	retry?:    Retry
 	hooks?: {
 		pre_extract?:  [...Hook]
 		post_extract?: [...Hook]
@@ -195,6 +219,25 @@ AIExtract: {
 	}
 }
 
+// ── Retry ───────────────────────────────────────────────
+
+Retry: {
+	max?:      int & >0 | *3
+	delay_ms?: int & >=0 | *1000
+}
+
+// ── Stop Condition ──────────────────────────────────────
+
+StopCondition: {
+	sentinel?:      string                  // CSS — stop when this appears
+	sentinel_gone?: string                  // CSS — stop when this disappears
+	stable?: {
+		css:    string                        // count elements matching this
+		after?: int & >0 | *2                // N consecutive unchanged checks
+	}
+	limit?: int & >0 | *50                 // hard max iterations (safety net)
+}
+
 // ── Expansion ───────────────────────────────────────────
 
 Expand: ElementExpand | PageExpand | CombinationExpand
@@ -212,7 +255,7 @@ PageExpand: {
 	control:   string
 	limit?:    int & >0 | *10
 	start?:    int & >=1 | *1
-	stop?:     string
+	stop?:     StopCondition
 	order?:    "dfs" | "bfs" | *"dfs"
 }
 

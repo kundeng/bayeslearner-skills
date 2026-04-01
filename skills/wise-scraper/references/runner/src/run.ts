@@ -286,14 +286,34 @@ async function main(): Promise<void> {
     ctx = hookRegistry.invoke("pre_assemble", ctx);
     const finalRecords = ctx.records;
 
-    // Always write JSONL
     const baseName = profile.name.replace(/\s+/g, "_").toLowerCase();
+
+    // Write output artifacts (those marked output: true)
+    const artifacts = profile.artifacts ?? {};
+    const outputArtifacts = Object.entries(artifacts).filter(([, a]) => a.output);
+
+    if (outputArtifacts.length > 0) {
+      for (const [name, schema] of outputArtifacts) {
+        const records = store.get(name);
+        const fmt = schema.format ?? runner.outputFormat ?? "jsonl";
+        const ext = fmt === "markdown" ? "md" : fmt;
+        const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
+
+        if (WRITERS[fmt]) {
+          WRITERS[fmt](records, outPath);
+        } else {
+          writeJsonl(records, outPath);
+        }
+      }
+    }
+
+    // Always write all records as JSONL (the complete intermediate truth)
     const jsonlPath = resolve(outDir, `${baseName}.jsonl`);
     writeJsonl(finalRecords, jsonlPath);
 
-    // Write in requested format if different
+    // Also write in CLI-requested format if different and no output artifacts declared
     const fmt = runner.outputFormat ?? "jsonl";
-    if (fmt !== "jsonl" && WRITERS[fmt]) {
+    if (outputArtifacts.length === 0 && fmt !== "jsonl" && WRITERS[fmt]) {
       const ext = fmt === "markdown" ? "md" : fmt;
       const outPath = resolve(outDir, `${baseName}.${ext}`);
       WRITERS[fmt](finalRecords, outPath);
