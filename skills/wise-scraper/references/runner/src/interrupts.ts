@@ -183,17 +183,21 @@ export class InterruptHandler {
 
   /**
    * Find the first matching element for a (possibly compound) CSS selector.
-   * Returns the narrowest matching selector, or null.
+   * Uses a single eval call to check all selectors at once.
    */
   private findTrigger(trigger: string): string | null {
-    // The trigger may be a comma-separated list — check each
     const selectors = trigger.split(",").map((s) => s.trim());
-    for (const sel of selectors) {
-      const exists = this.driver.evalJson<boolean>(`
-        (() => document.querySelector('${escapeJs(sel)}') !== null)()
-      `);
-      if (exists) return sel;
-    }
-    return null;
+    // Batch: one eval call checks all selectors, returns index of first match
+    const selsJson = JSON.stringify(selectors);
+    const idx = this.driver.evalJson<number>(`
+      (() => {
+        const sels = ${selsJson};
+        for (let i = 0; i < sels.length; i++) {
+          try { if (document.querySelector(sels[i])) return i; } catch {}
+        }
+        return -1;
+      })()
+    `);
+    return (idx !== null && idx >= 0) ? selectors[idx] : null;
   }
 }

@@ -142,14 +142,17 @@ function validateSemantics(profile: Deployment): void {
 
 // ── quality gate ────────────────────────────────────────
 
-function checkQuality(records: ExtractedRecord[], profile: Deployment): void {
+/** Returns true if all quality checks pass, false if any fail. */
+function checkQuality(records: ExtractedRecord[], profile: Deployment): boolean {
   const q = profile.quality;
-  if (!q) return;
+  if (!q) return true;
 
+  let passed = true;
   const total = records.length;
 
   if (q.min_records && total < q.min_records) {
     console.warn(`[quality] FAIL: ${total} records < min_records ${q.min_records}`);
+    passed = false;
   }
 
   if (q.max_empty_pct !== undefined) {
@@ -157,6 +160,7 @@ function checkQuality(records: ExtractedRecord[], profile: Deployment): void {
     const pct = total > 0 ? (empty / total) * 100 : 0;
     if (pct > q.max_empty_pct) {
       console.warn(`[quality] FAIL: ${pct.toFixed(1)}% empty > max_empty_pct ${q.max_empty_pct}%`);
+      passed = false;
     }
   }
 
@@ -169,9 +173,12 @@ function checkQuality(records: ExtractedRecord[], profile: Deployment): void {
       const pct = total > 0 ? (filled / total) * 100 : 0;
       if (pct < (threshold as number)) {
         console.warn(`[quality] FAIL: column '${col}' ${pct.toFixed(1)}% filled < ${threshold}%`);
+        passed = false;
       }
     }
   }
+
+  return passed;
 }
 
 // ── main ────────────────────────────────────────────────
@@ -261,9 +268,13 @@ async function main(): Promise<void> {
     });
 
     // Quality gate
-    checkQuality(finalRecords, profile);
+    const qualityOk = checkQuality(finalRecords, profile);
 
     console.log(`\n=== Done: ${finalRecords.length} records ===`);
+    if (!qualityOk) {
+      console.error("[main] Quality gate failed");
+      process.exitCode = 1;
+    }
   } finally {
     driver.close();
   }

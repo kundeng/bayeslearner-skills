@@ -10,7 +10,9 @@
  */
 
 import { execSync } from "child_process";
-import { Buffer } from "buffer";
+import { writeFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { BrowserDriver, DriverWait } from "./driver.js";
 import { locatorToSelector, escapeJs } from "./driver.js";
 import type { Locator } from "./schema.js";
@@ -37,14 +39,17 @@ export class AgentBrowserDriver implements BrowserDriver {
         windowsHide: true,
       }).trim();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const err = e as { message?: string; stderr?: string | Buffer };
+      const msg = err.message ?? String(e);
+      const stderr = err.stderr ? String(err.stderr).trim() : "";
       if (msg.includes("not found") || msg.includes("not recognized")) {
         throw new Error(
           "agent-browser not found. Install: npm i -g @anthropic-ai/agent-browser && agent-browser install",
         );
       }
       const short = cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      console.error(`[driver] FAILED: ${short} — ${msg.split("\n")[0]}`);
+      const detail = stderr ? ` (${stderr.split("\n")[0]})` : "";
+      console.error(`[driver] FAILED: ${short} — ${msg.split("\n")[0]}${detail}`);
       return null;
     }
   }
@@ -89,8 +94,14 @@ export class AgentBrowserDriver implements BrowserDriver {
   // ── DOM evaluation ────────────────────────────────────
 
   eval(js: string): string | null {
-    const b64 = Buffer.from(js, "utf-8").toString("base64");
-    return this.runRetry(["eval", "-b", b64]);
+    // Write JS to temp file, pass via command substitution to avoid shell escaping
+    const tmpFile = join(tmpdir(), `wise-eval-${process.pid}.js`);
+    try {
+      writeFileSync(tmpFile, js, "utf-8");
+      return this.runRetry(["eval", `"$(cat ${tmpFile})"`]);
+    } finally {
+      try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    }
   }
 
   evalJson<T = unknown>(js: string): T | null {
