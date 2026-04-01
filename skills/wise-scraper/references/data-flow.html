@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WISE Data Flow — How Artifacts Link at Runtime</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --orange: #d29922; --red: #f85149;
+    --purple: #bc8cff; --cyan: #39d353;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; line-height: 1.5; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.2rem; color: var(--accent); margin: 2.5rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; color: var(--muted); margin: 1.5rem 0 0.5rem; }
+  p, li { color: var(--muted); font-size: 0.9rem; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+
+  /* Case container */
+  .case { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin: 1rem 0; }
+  .case-title { font-size: 1.05rem; color: var(--text); margin-bottom: 0.3rem; }
+  .case-url { font-size: 0.8rem; color: var(--muted); font-family: monospace; }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: stretch; gap: 0; margin: 1.2rem 0; overflow-x: auto; }
+  .flow-step { flex: 1; min-width: 160px; position: relative; }
+  .flow-step:not(:last-child)::after {
+    content: ''; position: absolute; right: -1px; top: 50%; width: 20px; height: 2px;
+    background: var(--border); z-index: 1;
+  }
+
+  .node-box {
+    border: 2px solid var(--border); border-radius: 6px; padding: 0.7rem;
+    margin: 0 10px; min-height: 100px; position: relative; font-size: 0.85rem;
+  }
+  .node-box.root { border-color: var(--muted); }
+  .node-box.extract { border-color: var(--green); }
+  .node-box.expand { border-color: var(--accent); }
+  .node-box.navigate { border-color: var(--orange); }
+  .node-box.yields-box { border-color: var(--purple); }
+
+  .node-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+  .node-name .type { font-weight: 400; color: var(--muted); font-size: 0.75rem; }
+  .node-field { font-family: monospace; font-size: 0.75rem; color: var(--muted); margin: 2px 0; }
+  .node-field .key { color: var(--accent); }
+  .node-field .val { color: var(--green); }
+  .node-field .artifact-ref { color: var(--purple); font-weight: 600; }
+
+  /* Artifact stream */
+  .artifact-stream {
+    display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0;
+    padding: 0.6rem 1rem; border-radius: 20px; font-size: 0.8rem;
+    font-family: monospace;
+  }
+  .artifact-stream.internal { background: rgba(188,140,255,0.1); border: 1px dashed var(--purple); color: var(--purple); }
+  .artifact-stream.output { background: rgba(63,185,80,0.1); border: 1px solid var(--green); color: var(--green); }
+  .artifact-stream .badge {
+    font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .artifact-stream .badge.internal { background: var(--purple); color: var(--bg); }
+  .artifact-stream .badge.output { background: var(--green); color: var(--bg); }
+  .artifact-stream .arrow { font-size: 1.1rem; }
+
+  /* Linking explanation */
+  .linking { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .link-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
+  .link-box h4 { font-size: 0.9rem; color: var(--text); margin-bottom: 0.4rem; }
+  .link-box code { background: rgba(88,166,255,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; color: var(--accent); }
+
+  /* Runtime trace */
+  .trace { font-family: monospace; font-size: 0.78rem; line-height: 1.7; margin: 0.8rem 0; }
+  .trace .step { color: var(--muted); }
+  .trace .action { color: var(--orange); }
+  .trace .data { color: var(--green); }
+  .trace .artifact { color: var(--purple); font-weight: 600; }
+  .trace .label { color: var(--accent); }
+  .trace .dim { color: #484f58; }
+
+  /* Legend */
+  .legend { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 1rem 0; font-size: 0.8rem; }
+  .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; border: 2px solid; }
+
+  @media (max-width: 768px) { .linking { grid-template-columns: 1fr; } .flow { flex-direction: column; } }
+</style>
+</head>
+<body>
+
+<h1>WISE Data Flow</h1>
+<p class="subtitle">How artifacts link nodes and resources at runtime — with real examples</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--muted)"></div> State check</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--accent)"></div> Expand</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--green)"></div> Extract</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--orange)"></div> Navigate</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--purple)"></div> Artifact yield/consume</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>Case 1: Simple Extraction (no artifacts)</h2>
+<p>webscraper.io laptops — 117 products on one page. Single resource, no chaining needed.</p>
+
+<div class="case">
+  <div class="case-title">laptop-products-scrape</div>
+  <div class="case-url">https://www.webscraper.io/test-sites/e-commerce/allinone/computers/laptops</div>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="node-box root">
+        <div class="node-name">root <span class="type">state check</span></div>
+        <div class="node-field"><span class="key">state:</span> url_pattern, .thumbnail exists</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box expand">
+        <div class="node-name">products <span class="type">expand × 117</span></div>
+        <div class="node-field"><span class="key">expand:</span> elements, scope=".thumbnail"</div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">title, price, desc, rating</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Runtime trace</h3>
+  <div class="trace">
+    <span class="step">1.</span> <span class="action">open</span> URL → <span class="action">interrupt.check()</span> → cookie dismissed<br>
+    <span class="step">2.</span> <span class="label">[node] root</span> → state check passes<br>
+    <span class="step">3.</span> <span class="label">[node] products</span> → <span class="action">expand elements</span> → 117 .thumbnail matches<br>
+    <span class="step">4.</span> <span class="dim">for each match:</span> <span class="data">extract {title, price, description, rating}</span> → push record<br>
+    <span class="step">5.</span> → <span class="data">118 records</span> → JSONL
+  </div>
+
+  <p><strong>Data flow:</strong> Node → records[] → JSONL file. No artifacts involved.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>Case 2: Paginated Extraction (expand over pages)</h2>
+<p>webscraper.io laptops (static) — 20 pages × 6 products. Three-node DAG with page expansion.</p>
+
+<div class="case">
+  <div class="case-title">laptop-paginated-scrape</div>
+  <div class="case-url">https://www.webscraper.io/test-sites/e-commerce/static/computers/laptops</div>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="node-box root">
+        <div class="node-name">root</div>
+        <div class="node-field"><span class="key">state:</span> .thumbnail exists</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box expand">
+        <div class="node-name">pages <span class="type">expand × 20</span></div>
+        <div class="node-field"><span class="key">expand:</span> pages, strategy=next</div>
+        <div class="node-field"><span class="key">control:</span> a.page-link.next</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box extract">
+        <div class="node-name">products <span class="type">expand × 6/page</span></div>
+        <div class="node-field"><span class="key">expand:</span> elements, scope=".thumbnail"</div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">title, price, desc, rating</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Runtime trace (DFS — default)</h3>
+  <div class="trace">
+    <span class="step">1.</span> <span class="label">[node] root</span> → state passes<br>
+    <span class="step">2.</span> <span class="label">[node] pages</span> → expand pages (DFS)<br>
+    <span class="dim">│</span> <span class="step">Page 1:</span> walk children → <span class="label">[node] products</span> → <span class="data">extract 6 rows</span><br>
+    <span class="dim">│</span> <span class="step">Page 2:</span> <span class="action">click next</span> → walk children → <span class="data">extract 6 rows</span><br>
+    <span class="dim">│</span> <span class="step">...</span><br>
+    <span class="dim">│</span> <span class="step">Page 20:</span> next button gone → stop<br>
+    <span class="step">3.</span> → <span class="data">117 records</span> → JSONL
+  </div>
+
+  <p><strong>Data flow:</strong> Nested expansion (pages × elements). Each page is a successor state; within each, elements expand. Still no artifacts — everything stays in the records[] array.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>Case 3: Multi-Phase Pipeline (artifacts link resources)</h2>
+<p>Splunk ITSI docs — discover 80+ pages from nav, then extract each. Two resources linked by artifact.</p>
+
+<div class="case">
+  <div class="case-title">splunk-itsi-administer</div>
+  <div class="case-url">https://help.splunk.com/.../about-administering-it-service-intelligence</div>
+
+  <div class="artifact-stream internal">
+    <span class="badge internal">internal</span>
+    <span>page_urls</span>
+    <span class="arrow">→</span>
+    <span>{ url: string, title: string }</span>
+  </div>
+  <div class="artifact-stream output">
+    <span class="badge output">output</span>
+    <span>page_content</span>
+    <span class="arrow">→</span>
+    <span>{ title: string, body: string } → markdown</span>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="node-box yields-box">
+        <div class="node-name">Resource: discover</div>
+        <div class="node-field"><span class="key">produces:</span> <span class="artifact-ref">page_urls</span></div>
+        <div class="node-field"><span class="key">node:</span> toc</div>
+        <div class="node-field"><span class="key">expand:</span> elements, <span class="val">order: bfs</span></div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">url, title</span></div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box yields-box">
+        <div class="node-name">Resource: extract_pages</div>
+        <div class="node-field"><span class="key">consumes:</span> <span class="artifact-ref">page_urls</span></div>
+        <div class="node-field"><span class="key">produces:</span> <span class="artifact-ref">page_content</span></div>
+        <div class="node-field"><span class="key">entry.url:</span> { from: "page_urls" }</div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">title, body</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Runtime linking trace</h3>
+  <div class="trace">
+    <span class="step">0.</span> <span class="label">resolveOrder()</span> → topological sort → <span class="data">[discover, extract_pages]</span><br>
+    <span class="dim">   produces/consumes graph: discover→page_urls→extract_pages</span><br><br>
+    <span class="step">1.</span> <span class="label">Resource: discover</span><br>
+    <span class="dim">│</span> <span class="action">open</span> entry URL<br>
+    <span class="dim">│</span> <span class="label">[node] toc</span> → expand 80 elements (BFS)<br>
+    <span class="dim">│</span> <span class="dim">  for each nav link:</span> <span class="data">extract {url, title}</span><br>
+    <span class="dim">│</span> → 80 records returned<br>
+    <span class="dim">│</span> <span class="artifact">store.put("page_urls", 80 records)</span> <span class="dim">← resource.produces writes to store</span><br><br>
+    <span class="step">2.</span> <span class="label">Resource: extract_pages</span><br>
+    <span class="dim">│</span> <span class="artifact">resolveEntryUrls()</span> → entry.url is {from: "page_urls"}<br>
+    <span class="dim">│</span> <span class="artifact">store.getUrls("page_urls")</span> <span class="dim">← reads url field from each record</span><br>
+    <span class="dim">│</span> → <span class="data">80 URLs</span><br>
+    <span class="dim">│</span> <span class="dim">for i = 0..79:</span><br>
+    <span class="dim">│   │</span> <span class="action">open</span> URL[i]<br>
+    <span class="dim">│   │</span> <span class="label">[node] page</span> → <span class="data">extract {title, body}</span><br>
+    <span class="dim">│</span> → 80 records returned<br>
+    <span class="dim">│</span> <span class="artifact">store.put("page_content", 80 records)</span><br><br>
+    <span class="step">3.</span> <span class="label">Output</span><br>
+    <span class="dim">│</span> page_content has <span class="data">output: true, format: markdown</span><br>
+    <span class="dim">│</span> → <span class="data">write splunk-itsi_page_content.md</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>Case 4: Node-Level Chaining (single resource, yields/consumes)</h2>
+<p>Same Splunk use case, but using node-level data flow instead of two resources.</p>
+
+<div class="case">
+  <div class="case-title">Single-resource variant (equivalent)</div>
+
+  <div class="artifact-stream internal">
+    <span class="badge internal">internal</span>
+    <span>page_urls</span>
+    <span class="arrow">→</span>
+    <span>toc yields → pages consumes</span>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="node-box root">
+        <div class="node-name">root</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box yields-box">
+        <div class="node-name">toc <span class="type">yields</span></div>
+        <div class="node-field"><span class="key">expand:</span> elements, <span class="val">order: bfs</span></div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">url, title</span></div>
+        <div class="node-field"><span class="key">yields:</span> <span class="artifact-ref">page_urls</span></div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="node-box yields-box">
+        <div class="node-name">pages <span class="type">consumes</span></div>
+        <div class="node-field"><span class="key">consumes:</span> <span class="artifact-ref">page_urls</span></div>
+        <div class="node-field"><span class="key">action:</span> <span class="action">navigate {url}</span></div>
+        <div class="node-field"><span class="key">extract:</span> <span class="val">title, body</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Runtime linking trace</h3>
+  <div class="trace">
+    <span class="step">1.</span> <span class="label">[node] root</span> → walk children in YAML order<br><br>
+    <span class="step">2.</span> <span class="label">[node] toc</span> <span class="dim">(first child of root)</span><br>
+    <span class="dim">│</span> expand 80 elements (BFS) → extract {url, title} × 80<br>
+    <span class="dim">│</span> <span class="artifact">store.put("page_urls", [record])</span> <span class="dim">← called 80 times via node.yields</span><br>
+    <span class="dim">│</span> BFS: all 80 records in artifact BEFORE children walk<br><br>
+    <span class="step">3.</span> <span class="label">[node] pages</span> <span class="dim">(second child of root — runs after toc)</span><br>
+    <span class="dim">│</span> <span class="artifact">store.get("page_urls")</span> → 80 records<br>
+    <span class="dim">│</span> <span class="dim">for each consumed record:</span><br>
+    <span class="dim">│   │</span> consumedData = {url: "https://...", title: "..."}<br>
+    <span class="dim">│   │</span> <span class="action">navigate</span> → resolveUrl("{url}") → <span class="dim">checks consumedData first</span><br>
+    <span class="dim">│   │</span> <span class="data">extract {title, body}</span><br>
+    <span class="dim">│</span> → 80 records
+  </div>
+
+  <p style="margin-top: 1rem; color: var(--orange); font-size: 0.85rem;">
+    ⚠ <strong>Ordering depends on YAML declaration order.</strong> If "pages" were listed before "toc" in the YAML,
+    it would run first and see an empty artifact. No topological sort for node-level chaining —
+    the exploration agent must emit nodes in the correct order.
+  </p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>How Linking Works at Each Level</h2>
+
+<div class="linking">
+  <div class="link-box">
+    <h4>Cross-Resource (materialized)</h4>
+    <p>At startup, <code>ArtifactStore.resolveOrder()</code> builds a DAG from all resources' <code>produces</code>/<code>consumes</code> fields. Kahn's algorithm gives execution order. Resources run sequentially in that order.</p>
+    <p style="margin-top: 0.5rem;"><strong>Linking:</strong> <code>store.put(name, records)</code> after producer completes. <code>store.getUrls(name)</code> when consumer resolves entry URLs. The store is a <code>Map&lt;string, Record[]&gt;</code>.</p>
+    <p style="margin-top: 0.5rem; color: var(--green);">✓ Ordering guaranteed by topological sort</p>
+  </div>
+  <div class="link-box">
+    <h4>Node-Level (logical, YAML-ordered)</h4>
+    <p>No dependency resolution. Engine walks children of each parent in <strong>YAML array order</strong>. A yielding node writes to <code>store.put()</code> during expansion. A consuming sibling reads via <code>store.get()</code>.</p>
+    <p style="margin-top: 0.5rem;"><strong>Linking:</strong> Same <code>ArtifactStore</code> instance shared across all nodes. <code>yields</code> writes per-record. <code>consumes</code> reads the full artifact and iterates.</p>
+    <p style="margin-top: 0.5rem; color: var(--orange);">⚠ Ordering depends on YAML declaration order</p>
+  </div>
+</div>
+
+<div class="case" style="border-color: var(--accent);">
+  <h4 style="color: var(--accent);">The ArtifactStore at Runtime</h4>
+  <div class="trace" style="margin: 0.5rem 0;">
+    <span class="dim">// Shared across entire profile execution</span><br>
+    <span class="label">ArtifactStore</span> {<br>
+    &nbsp;&nbsp;store: Map {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="artifact">"page_urls"</span>  → [<span class="data">{url, title}</span>, <span class="data">{url, title}</span>, <span class="dim">... × 80</span>]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="artifact">"page_content"</span> → [<span class="data">{title, body}</span>, <span class="data">{title, body}</span>, <span class="dim">... × 80</span>]<br>
+    &nbsp;&nbsp;}<br>
+    &nbsp;&nbsp;schemas: {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="artifact">"page_urls"</span>: { fields: {url: required, title: required} }<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="artifact">"page_content"</span>: { fields: {title: required, body: required}, <span class="val">output: true</span> }<br>
+    &nbsp;&nbsp;}<br>
+    }<br><br>
+    <span class="dim">// Write path (producer):</span><br>
+    <span class="artifact">store.put("page_urls", records)</span><br>
+    &nbsp;&nbsp;→ validate each record against schema.fields<br>
+    &nbsp;&nbsp;→ append to store.get("page_urls")<br>
+    &nbsp;&nbsp;→ log validation errors if any<br><br>
+    <span class="dim">// Read path (consumer):</span><br>
+    <span class="artifact">store.getUrls("page_urls")</span><br>
+    &nbsp;&nbsp;→ map records: prefer data.url, fallback record.url<br>
+    &nbsp;&nbsp;→ return string[]<br><br>
+    <span class="artifact">store.get("page_urls")</span><br>
+    &nbsp;&nbsp;→ return ExtractedRecord[] (full records for iteration)
+  </div>
+</div>
+
+<h2>Decision Guide: When to Use What</h2>
+<div class="case">
+  <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+    <tr style="border-bottom: 1px solid var(--border);">
+      <th style="text-align: left; padding: 0.5rem; color: var(--accent);">Pattern</th>
+      <th style="text-align: left; padding: 0.5rem; color: var(--accent);">Mechanism</th>
+      <th style="text-align: left; padding: 0.5rem; color: var(--accent);">When</th>
+    </tr>
+    <tr style="border-bottom: 1px solid var(--border);">
+      <td style="padding: 0.5rem; color: var(--text);">Extract from single page</td>
+      <td style="padding: 0.5rem;"><code>expand: elements</code></td>
+      <td style="padding: 0.5rem;">All data on one page</td>
+    </tr>
+    <tr style="border-bottom: 1px solid var(--border);">
+      <td style="padding: 0.5rem; color: var(--text);">Paginate + extract</td>
+      <td style="padding: 0.5rem;"><code>expand: pages</code> → child <code>expand: elements</code></td>
+      <td style="padding: 0.5rem;">Data split across pages</td>
+    </tr>
+    <tr style="border-bottom: 1px solid var(--border);">
+      <td style="padding: 0.5rem; color: var(--text);">Discover URLs → extract each</td>
+      <td style="padding: 0.5rem;">Node <code>yields</code> + sibling <code>consumes</code> (intra-resource)</td>
+      <td style="padding: 0.5rem;">Same globals, simple pipeline</td>
+    </tr>
+    <tr style="border-bottom: 1px solid var(--border);">
+      <td style="padding: 0.5rem; color: var(--text);">Discover → extract (separate config)</td>
+      <td style="padding: 0.5rem;">Resource <code>produces</code>/<code>consumes</code> (cross-resource)</td>
+      <td style="padding: 0.5rem;">Different timeouts, setup, hooks per phase</td>
+    </tr>
+    <tr>
+      <td style="padding: 0.5rem; color: var(--text);">Multi-section doc site</td>
+      <td style="padding: 0.5rem;">Multiple resources, each <code>produces</code> same artifact</td>
+      <td style="padding: 0.5rem;">3 sections → merge into one output</td>
+    </tr>
+  </table>
+</div>
+
+<p style="margin-top: 2rem; font-size: 0.75rem; color: #484f58;">
+  Source of truth: references/runner/src/schema.ts (Zod) • references/runner/src/store.ts (ArtifactStore) • references/runner/src/engine.ts (walkNode, resolveEntryUrls)
+</p>
+
+</body>
+</html>
