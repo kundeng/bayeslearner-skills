@@ -221,6 +221,60 @@ Scope:
 - `global` — checked after every action in every resource
 - `resource` — checked only during this resource's execution
 
+## Test Results Summary
+
+Five end-to-end test runs validated the WISE framework against real scraping targets. Each tested a different capability surface.
+
+### Test 1: Simple extract (117 records)
+
+**What it tested:** Basic element expansion and extraction from a single page.
+
+**Findings:**
+- Agent needed guidance on `attr` vs `text` extraction. Text on `<a>` tags was truncated; the `title` attribute had the full name. Added attr-vs-text tip to field-guide and SKILL.md common patterns.
+- Template paths in SKILL.md were relative and confusing when the agent's working directory differed from the skill directory. (Addressed by using consistent reference paths.)
+
+### Test 2: Paginated extract (117 records across 20 pages)
+
+**What it tested:** Page expansion with numeric pagination strategy.
+
+**Findings:**
+- Agent initially opened the wrong URL variant (`/more/` vs `/static/`). Different URL variants expose different interaction patterns (JS-heavy vs static). Added troubleshooting entry about URL variant selection.
+- Templates are "mental composition" not literal file merging. Agent tried to concatenate YAML files. Clarified in troubleshooting that templates are composable patterns.
+
+### Test 3: Sort-then-extract (200 records)
+
+**What it tested:** Navigation-based sorting followed by paginated extraction.
+
+**Findings:**
+- Sort was navigation-based (clicking a sort link changes the URL, e.g., `?sort=price`), not JS-based. The child node's `state.url_pattern` check on the new URL implicitly verified the sort. Documented as a common pattern in SKILL.md.
+- No issues with the pagination or extraction phases.
+
+### Test 4: Variant combinations (18 records)
+
+**What it tested:** Combination expansion across filter axes, plus cross-resource artifact chaining.
+
+**Findings:**
+- Combination expansion only supports `select`/`type`/`checkbox`/`click` axis actions. Agent needed 3 separate click nodes as a workaround for unsupported button-group patterns. Now documented; click axis support addresses this.
+- Relative URLs from `link` extraction required prepending the base URL in the entry template. Confirmed as a recurring pattern (also in Test 5). Added to common patterns.
+- Using both `yields` and `produces` for the same artifact caused double records. Already documented in field-guide; added to troubleshooting for discoverability.
+
+### Test 5: Multi-page documentation scrape (9 pages, 86KB markdown)
+
+**What it tested:** BFS URL discovery, cross-resource artifact chaining, HTML-to-markdown assembly.
+
+**Findings:**
+- Expanding over `<a>` tags directly broke extraction (extractor looked for `<a>` inside `<a>`). Must expand over parent wrapper. Already documented in field-guide; reinforced in SKILL.md common patterns.
+- Relative URL issue confirmed (same as Test 4).
+- Interrupt handler false-positive: Splunk's informational dialog overlay triggered the interrupt system even though it did not block scraping. Added troubleshooting entry about narrowing interrupt trigger selectors.
+
+### Cross-cutting lessons
+
+1. **Attr vs text** is a recurring decision — always check attributes during exploration.
+2. **Relative URLs** from `link` extraction are the default; always template with base URL.
+3. **Expand over wrappers** not leaves is a firm rule, not a suggestion.
+4. **URL variant selection** matters — verify the exact URL during exploration.
+5. **Templates are patterns** to compose mentally, not files to concatenate.
+
 ## Worked Example: Multi-Level Catalog
 
 See the e-commerce full catalog example in this directory for a complete

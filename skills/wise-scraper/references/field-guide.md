@@ -149,6 +149,8 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 
 **Tables:** always prefer header-based column mapping over positional index.
 
+**Attr vs text:** When an element's visible text is truncated (CSS `text-overflow: ellipsis`) or cluttered by child elements, the full value often lives in the `title` or `aria-label` attribute. During exploration, compare `el.textContent` with `el.getAttribute('title')` to decide. Use `attr` extraction when the attribute is more reliable.
+
 **Relative URLs:** The `link` extraction type uses `getAttribute('href')` which returns the raw attribute value — often a relative path like `/en/docs/page`. When a consuming resource navigates to these URLs, prepend the base URL in the `entry.url` template: `"https://example.com{url}"`. Do NOT rely on the resolved `.href` property.
 
 **AI extraction:** operates on already-extracted text (via `input` field reference), never on live DOM. Uses the abstract `AIAdapter` interface.

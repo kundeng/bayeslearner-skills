@@ -130,6 +130,73 @@ Do **not** read all references upfront. Read only what the current step needs:
 - **JSONL is intermediate truth** — assemble final formats later
 - **BFS for URL discovery** — use `order: bfs` when you need to collect all URLs before visiting
 
+## Common Patterns
+
+These patterns recur across real scraping targets. Internalize them before writing profiles.
+
+### Attribute vs text extraction
+
+`textContent` on an element is often truncated or includes child-element noise. When the full value lives in an HTML attribute (e.g., `title`, `aria-label`, `data-name`), use `attr` extraction instead of `text`:
+
+```yaml
+# Prefer this when <a> text is truncated but title has the full name
+- attr: { name: company, css: "a.company-link", attr: "title" }
+# Instead of
+- text: { name: company, css: "a.company-link" }
+```
+
+**Tip:** During exploration, compare `element.textContent` with `element.getAttribute('title')` (or other attrs) to decide which source is authoritative.
+
+### Sort verification via navigation
+
+When sorting is triggered by clicking a column header that changes the URL (e.g., `?sort=price`), the sort is navigation-based, not JS-based. The child node's `state.url_pattern` check implicitly verifies the sort applied:
+
+```yaml
+- name: sort
+  action:
+    - click: { css: "a.sort-by-price" }
+    - wait: { idle: true }
+
+- name: rows
+  parents: [sort]
+  state:
+    url_pattern: "sort=price"    # proves sort navigation succeeded
+  expand: { over: elements, scope: "table tbody tr" }
+```
+
+No separate sort-verification node is needed when the URL itself encodes the sort state.
+
+### Relative URL templates
+
+`link` extraction returns raw `href` attribute values, which are often relative paths (`/docs/page`). When a consuming resource or node navigates to these URLs, prepend the base URL in the entry template or navigate action:
+
+```yaml
+# In the consuming resource's entry
+entry:
+  url: "https://example.com{url}"    # {url} = "/docs/page" from artifact
+  root: page_node
+
+# Or in a navigate action
+action:
+  - navigate: { to: "https://example.com{url}" }
+```
+
+### Expand over wrappers, not leaves
+
+When expanding over elements for extraction, expand over the **parent wrapper**, not the leaf element you want to extract from. Expanding over `<a>` tags directly and then extracting `link: { css: "a" }` fails because the extractor looks for `<a>` children of `<a>`:
+
+```yaml
+# Correct: expand over wrapper, extract from child
+expand: { over: elements, scope: ".link-wrapper:has(a)" }
+extract:
+  - link: { name: url, css: "a" }
+
+# Wrong: expand over <a> directly, then extract <a> finds nothing
+expand: { over: elements, scope: "a.doc-link" }
+extract:
+  - link: { name: url, css: "a" }     # looks for <a> inside <a> — fails
+```
+
 ## Common Failure Modes
 
 - Jumping to `agent-browser` or code before reading the framework

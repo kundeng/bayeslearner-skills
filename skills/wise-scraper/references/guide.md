@@ -286,4 +286,75 @@ Options:
 
 ---
 
+## Troubleshooting
+
+Common pitfalls observed during testing, and how to resolve them.
+
+### Text extraction returns truncated values
+
+**Symptom:** `text` extraction on `<a>` or `<span>` tags returns truncated names or labels.
+
+**Cause:** The element's `textContent` is visually truncated via CSS (`text-overflow: ellipsis`), or child elements add noise. The full value often lives in the `title` attribute.
+
+**Fix:** Switch from `text` to `attr` extraction:
+```yaml
+- attr: { name: full_name, css: "a.item-link", attr: "title" }
+```
+
+### Wrong URL variant loaded
+
+**Symptom:** Page structure differs from what exploration found; pagination or filters are missing.
+
+**Cause:** Many sites expose multiple URL variants (e.g., `/products/more/` vs `/products/static/`) with different interaction patterns. The variant you land on depends on the exact URL.
+
+**Fix:** During exploration, verify the exact URL that produces the expected DOM. Record the full URL (including path suffixes) in the profile's `entry.url`.
+
+### Double records in JSONL output
+
+**Symptom:** Every record appears twice in the output.
+
+**Cause:** A node declares `yields: my_data` AND the resource declares `produces: my_data`. Both write to the same artifact, duplicating records.
+
+**Fix:** Use one or the other. Use `produces` on the resource for the common case (one flat table). Use `yields` on specific nodes when different nodes write to different artifacts. Never both for the same artifact name.
+
+### Expand over leaf elements breaks extraction
+
+**Symptom:** `link` or `text` extraction returns empty/null despite the element being visible on the page.
+
+**Cause:** `expand: { over: elements, scope: "a.link" }` makes each `<a>` the expansion root. Then `extract: [link: { css: "a" }]` looks for an `<a>` child inside that `<a>` and finds nothing.
+
+**Fix:** Expand over the parent wrapper element instead. See SKILL.md "Common Patterns" for the correct pattern.
+
+### Relative URLs cause navigation failures
+
+**Symptom:** Navigate action fails with an invalid URL like `/docs/page` instead of `https://example.com/docs/page`.
+
+**Cause:** `link` extraction uses `getAttribute('href')` which returns the raw relative path.
+
+**Fix:** Prepend the base URL in the entry template or navigate action: `"https://example.com{url}"`.
+
+### Combination expansion does not cover all interaction types
+
+**Symptom:** `expand: { over: combinations }` only supports `select`, `type`, `checkbox`, and `click` axis actions. Some button patterns (e.g., toggle button groups) are not supported.
+
+**Fix:** Use separate click action nodes as a workaround. Define one node per button-group option with explicit click actions, rather than trying to fit them into a combination axis.
+
+### Interrupt handler fires on non-blocking overlays
+
+**Symptom:** The interrupt system detects a dialog or overlay (e.g., Splunk's informational dialog) and pauses execution, even though the overlay does not block scraping.
+
+**Cause:** The trigger selector matches a non-blocking element that appears transiently.
+
+**Fix:** Narrow the interrupt trigger selector to match only truly blocking elements. Add a `skip_when` condition if the overlay auto-dismisses, or use `resolve: click` to dismiss it immediately rather than `resolve: pause`.
+
+### Templates are mental composition, not literal merge
+
+**Symptom:** Agent tries to concatenate YAML files or copy-paste template blocks verbatim.
+
+**Cause:** Templates in `templates/*.yaml` are composable **patterns**, not literal files to merge. They demonstrate idiomatic node structures for common scenarios.
+
+**Fix:** Read template fragments to understand the pattern, then write your profile by composing the relevant patterns. Think of templates as recipes, not ingredients to concatenate.
+
+---
+
 For competitive positioning (vs Crawlee, vs Scrapy+Playwright) and alternative runner backend designs, see `references/comparisons.md`.
