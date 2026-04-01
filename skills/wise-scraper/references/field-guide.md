@@ -1,175 +1,207 @@
 # Field Guide — How WISE Profiles Work
 
-This explains the WISE profile schema in plain English. For the formal definition see `schema.cue`. For the full annotated example see `guide.md § Profile Schema`.
+This explains the WISE profile schema in plain English. For the formal definition see `runner/src/schema.ts`. For the full annotated example see `guide.md § Profile Schema`.
 
 ## The Core Idea
 
-A WISE profile is a tree of **selectors**. Each selector is like a **contextual prompt** — it follows the same pattern an AI uses when reasoning about a task:
+A WISE profile is a graph of **NER (Navigation/Extraction Rule) nodes**. Each node is a deterministic **(state, action) → observation** triple:
 
 ```
-Context  →  Constraint  →  Task  →  Output
-"when"      "scope"       "do"     "produce"
+State  →  Action  →  Observation  →  Expand
+"when"    "do"       "read"          "how many successors?"
 ```
 
-| Prompt element | Selector field | What it means |
+| Part | Schema field | What it answers |
 |---|---|---|
-| **Context** | `context` | "When am I active?" — URL pattern, element exists, text on page, table headers present |
-| **Constraint** | `parents`, `selector`, `multiple` | "What's my scope?" — who must run before me, what DOM region am I inside, do I repeat? |
-| **Task** | `interaction` | "What do I do?" — click, select, scroll, wait, reveal — in order, before extracting |
-| **Output** | `extract` | "What do I produce?" — text, attribute, HTML, link, table rows, or AI-generated fields |
+| **State** | `state` | "Am I where I expect to be?" — precondition check on page state |
+| **Action** | `action[]` | "What do I do?" — click, select, scroll, wait, reveal, navigate, input |
+| **Observation** | `extract[]` | "What do I read?" — text, attr, html, link, image, table, grouped, ai |
+| **Expand** | `expand` | "How many successor states?" — elements, pages, or combinations |
 
-A selector only fires when its **context** matches. It scopes to its **constraint**, performs its **task** (interactions), then produces its **output** (extractions). Its output becomes available to child selectors and ultimately to the JSONL file.
+A node only runs when its **state** checks pass. It executes its **actions**, reads its **observations**, then **expands** to produce successor states. Each successor runs the node's children.
 
 ## Profile Structure (top-down)
 
 ### Deployment (the whole profile)
 
 ```
-name → artifacts[] → resources[] → outputs[]
+name → resources[] → quality?
 ```
 
 - **`name`** — human label for this scraping job
-- **`resources`** — list of independent scraping units (think: one per site section or data source)
-- **`artifacts`** — named intermediate outputs that form a pipeline DAG (see § Artifacts below)
-- **`config`** — path to canonical config file (auto-loaded if present; see `guide.md § Config Composition`)
-- **`ai_generate`** — optional: let an AI draft the profile from a high-level goal
-- **`hooks`** / **`schedule`** — global lifecycle hooks and scheduling
+- **`resources`** — list of independent scraping units (one per site section or data source)
+- **`quality`** — post-run data validation (min records, max empty %, min filled % per column)
+- **`schedule`** — cron or interval-based execution
+- **`hooks`** — global lifecycle hooks
 
 ### Resource (one scraping unit)
 
 ```
-entry → selectors[] → outputs[]
+entry → nodes[] → globals? → setup?
 ```
 
-- **`entry`** — where to start: a URL + the name of the root selector
-- **`selectors`** — the tree of contextual prompts (see above)
-- **`globals`** — shared settings: timeout, retries, user agent
-- **`inputs`** / **`outputs`** — named artifacts for chaining between resources
+- **`entry`** — where to start: a URL + the name of the root node
+- **`nodes`** — the NER graph (see below)
+- **`globals`** — shared settings: timeout, retries, user agent, request interval, page load delay
+- **`setup`** — pre-scrape state setup (auth, locale, currency)
+- **`hooks`** — resource-level lifecycle hooks
 
-### Selector (one contextual prompt)
+### NER Node (the core abstraction)
 
-This is the heart of WISE. Each selector answers five questions:
+This is the heart of WISE. Each node answers five questions:
 
-1. **Who am I?** → `name`, `type`
-2. **When do I fire?** → `context` (URL pattern, element existence, text match, table headers)
-3. **What's my scope?** → `parents` (who runs before me), `selector` (CSS scope), `multiple` (repeat per match?)
-4. **What do I do?** → `interaction[]` (click, select, scroll, wait, reveal — executed in order)
-5. **What do I produce?** → `extract[]` (text, attr, html, link, table, ai — fields written to JSONL)
+1. **Who am I?** → `name`, `parents[]`
+2. **Am I in the right state?** → `state` (URL match, element exists, text present, table headers)
+3. **What do I do?** → `action[]` (click, select, scroll, wait, reveal, navigate, input)
+4. **What do I read?** → `extract[]` (text, attr, html, link, image, table, grouped, ai)
+5. **How many successors?** → `expand` (elements, pages, combinations)
 
-**Selector types** determine special behavior:
+### State (preconditions)
 
-| Type | Behavior |
-|---|---|
-| `element` | Default — scope a region, extract, or hold children |
-| `element-click` | Like element but clicks to reveal content first |
-| `pagination` | Navigates pages (next button, numeric links, infinite scroll) |
-| `matrix` | Expands cartesian combinations (filter × search × category) |
-| `table` | Header-based table extraction (maps columns by header text) |
-| `ai` | Calls an AI adapter for semantic extraction |
+State is a set of **checks on the current page**. All specified checks must pass (AND).
 
-### Context (when does this selector fire?)
-
-Context is a set of **observable checks** on the current page state. All specified checks must pass.
-
-- **`url`** / **`url_pattern`** — current URL matches exactly or as a pattern
+- **`url`** / **`url_pattern`** — current URL matches exactly or as a substring
 - **`selector_exists`** — a CSS selector is present in the DOM
 - **`text_in_page`** — specific text appears on the page
 - **`table_headers`** — a table contains these header texts
 
-Think of context as the **precondition**: "I'm on the right page, the right element exists, and the page is in the right state."
+Think of state as: "I'm on the right page, the right element exists, and the page is in the right state." If state fails, the node is skipped.
 
-### Interaction (what does this selector do?)
+### Action (browser primitives)
 
-An ordered list of browser actions executed **before** extraction. Each step is deterministic and compiled to a browser primitive.
+An ordered list of browser actions executed **before** extraction. Each step is deterministic.
 
 | Action | What it does | Key fields |
 |---|---|---|
-| **click** | Click a button, link, or header | `target` (CSS/text/role), `click_action_type` (real vs scripted) |
-| **select** | Pick a dropdown value | `target`, `value` |
-| **scroll** | Scroll the page | `direction`, `amount_px` |
-| **wait** | Pause for a condition | `ms`, `network_idle`, `selector` (wait for element) |
-| **reveal** | Show hidden content | `target`, `mode` (click or hover) |
+| **click** | Click a button, link, or header | `click` (Locator), `type` (real/scripted), `uniqueness`, `discard` |
+| **select** | Pick a dropdown value | `select` (Locator), `value` |
+| **scroll** | Scroll the page | `scroll` (down/up), `px` |
+| **wait** | Pause for a condition | `wait` ({ idle: true } or { selector } or { ms }) |
+| **reveal** | Show hidden content | `reveal` (Locator), `mode` (click/hover) |
+| **navigate** | Go to a URL | `navigate` ({ to: URL }), supports `{field_ref}` |
+| **input** | Type into a form field | `input` ({ target, value }) |
 
-Interactions transform the page state so that the extraction step finds the right data.
+### Extraction (observation)
 
-### Extraction (what does this selector produce?)
-
-Fields to read from the DOM once interactions are complete. Each extraction rule produces a named field in the JSONL output.
+Fields to read from the DOM once actions are complete. Each rule produces a named field in the JSONL output.
 
 | Type | What it reads | Key fields |
 |---|---|---|
-| **text** | `.textContent.trim()` | `selector` |
-| **attr** | `.getAttribute(attr)` | `selector`, `attr` |
-| **html** | `.innerHTML` | `selector` |
-| **link** | `.getAttribute('href')` | `selector`, `attr?` |
-| **table** | Header-mapped row objects | `selector`, `columns?`, `header_row?` |
-| **ai** | AI-generated structured data | `prompt` |
+| **text** | `.textContent.trim()` | `name`, `css`, `regex?` |
+| **attr** | `.getAttribute(attr)` | `name`, `css`, `attr` |
+| **html** | `.innerHTML` | `name`, `css` |
+| **link** | `.getAttribute('href')` | `name`, `css`, `attr?` |
+| **image** | `.getAttribute('src')` | `name`, `css` |
+| **table** | Header-mapped row objects | `name`, `css`, `columns?`, `header_row?` |
+| **grouped** | Multiple elements → array | `name`, `css`, `attr?` |
+| **ai** | AI-generated structured data | `name`, `prompt`, `input?`, `schema?`, `categories?` |
 
-**Tables:** always prefer header-based column mapping over positional index. The `columns` field maps header text to output field names.
+**Tables:** always prefer header-based column mapping over positional index.
 
-### Pagination (how to traverse pages)
+**AI extraction:** operates on already-extracted text (via `input` field reference), never on live DOM. Uses the abstract `AIAdapter` interface.
 
-A selector with `type: pagination` automatically iterates through pages.
+### Expansion (successor states)
 
-- **`pagination_type`**: `next` (click next button), `numeric` (click page numbers), `infinite` (scroll to load)
-- **`selector`**: CSS selector for the navigation element
-- **`page_limit`**: max pages to visit
-- **`stop_condition`**: CSS selector that signals no more pages (infinite only)
+This is the unifying concept. Instead of separate selector types, **any node can expand**:
 
-### Matrix (cartesian combinations)
+| `expand.over` | What it does | Old equivalent |
+|---|---|---|
+| **elements** | `querySelectorAll(scope)` — one successor per match | `multiple: true` |
+| **pages** | Navigate pages — one successor per page | `type: pagination` |
+| **combinations** | Cartesian product of axes — one successor per combo | `type: matrix` |
 
-A selector with `type: matrix` enumerates all combinations of filter/search axes.
+Each expansion type supports **`order: dfs | bfs`**:
+- **DFS** (default): process each successor fully before the next. Streams results, uses minimal memory.
+- **BFS**: collect all successors first, then process children across all. Good for URL discovery → batch extraction.
 
-- **`axes[]`**: each axis is an action (`select`, `type`, `checkbox`) + `selector` + `values`
-- **`auto_discover`**: if true, discovers dropdown options from the live DOM
-- The runner executes every combination and collects results
+#### Element expansion
 
-### Hooks (per-selector)
+```yaml
+expand:
+  over: elements
+  scope: "table tbody tr"    # CSS — each match = one successor
+  limit: 200                  # optional cap
+  order: dfs
+```
 
-In addition to global hooks (per-resource), selectors can declare their own hooks:
+#### Page expansion
 
-- **`hooks.pre_extract`** — runs before this selector extracts (e.g., inject auth token)
-- **`hooks.post_extract`** — runs after this selector extracts (e.g., AI normalization on just this selector's output)
+```yaml
+expand:
+  over: pages
+  strategy: next              # next | numeric | infinite
+  control: "a.next-page"     # CSS for pagination element
+  limit: 10
+  stop: ".no-results"        # CSS for stop condition (infinite only)
+```
 
-Per-selector hooks fire only when that specific selector produces output. Use them when only one part of the pipeline needs enrichment. See `guide.md § Hook System` for details.
+#### Combination expansion
 
-### Artifacts (named intermediate outputs)
+```yaml
+expand:
+  over: combinations
+  axes:
+    - action: select
+      control: "#brand"
+      values: auto            # discover from DOM, or explicit list
+    - action: type
+      control: "#search"
+      values: ["laptop", "tablet"]
+```
 
-Artifacts are the **named, typed outputs** of a scraping pipeline. They form a **hierarchy** — each artifact can declare a parent, creating a DAG that the runner resolves and executes in dependency order.
+### Website State Setup
 
-- **`artifacts[]`** — declared at the deployment level, defines the pipeline's output structure
-- **`name`** — unique identifier (referenced by resources via `inputs` / `outputs`)
-- **`type`** — `urls`, `jsonl`, `json`, `csv`, `markdown`, `html`, `custom`
-- **`parent`** — optional parent artifact name (creates dependency: this artifact requires the parent to be produced first)
-- **`description`** — human-readable purpose
+Pre-scrape actions for authentication, locale, currency, etc.
 
-**How artifacts chain resources:**
+```yaml
+setup:
+  skip_when: ".logged-in"     # CSS — if found, skip setup
+  actions:
+    - open: "https://example.com/login"
+    - input: { target: { css: "#email" }, value: "user@co.com" }
+    - password: { target: { css: "#pass" }, env: "SITE_PASSWORD" }
+    - click: { css: "button[type=submit]" }
+```
 
-- A resource's **`outputs`** declares which artifact it produces and from which selector: `{ artifact: "name", from: "selector_name", format: "jsonl" }`
-- A resource's **`inputs`** binds a named artifact: `{ name: "urls", artifact: "discovered_urls" }`
-- **`entry.url`** can reference an artifact instead of a literal URL: `{ artifact: "discovered_urls" }`
+### Quality Gate
 
-**Flat pipeline** (one artifact): resource extracts rows → produces a single JSONL artifact.
+Post-run data validation at the deployment level:
 
-**Hierarchical pipeline** (multiple artifacts): resource 1 discovers URLs → resource 2 extracts pages → resource 3 assembles markdown. Each step produces a named artifact that feeds the next.
+```yaml
+quality:
+  min_records: 50
+  max_empty_pct: 5
+  max_failed_pct: 10
+  min_filled_pct:
+    product: 95
+    price: 80
+```
 
-See `guide.md § Named Artifacts` for worked examples with both patterns.
+### Hooks (per-node)
 
-## The Selector Tree
+Nodes can declare their own hooks:
 
-Selectors form a **tree** via `parents[]`. The engine walks this tree top-down:
+- **`hooks.pre_extract`** — runs before this node extracts
+- **`hooks.post_extract`** — runs after this node extracts
+
+Per-node hooks fire only when that specific node produces output.
+
+## The NER Graph
+
+Nodes form a **DAG via `parents[]`**. The engine walks this graph top-down:
 
 ```
 root (entry point)
-├── pages (pagination — iterates pages)
-│   └── rows (multiple: true — iterates table rows)
+├── pages (expand: pages — iterates pages)
+│   └── rows (expand: elements — iterates table rows)
 │       └── extract: [product, price, ...]
 └── sidebar (separate branch — extracts metadata)
 ```
 
-- **`parents`** is explicit — you declare who a selector's parent is
-- **Children are inferred** — the engine automatically walks all selectors that list a given parent
-- Each selector fires only when its context matches the current page state
-- The tree determines execution order: parent runs first, then children
+- **`parents`** is explicit — you declare who a node's parent is
+- **Children are inferred** — the engine walks all nodes that list a given parent
+- Each node fires only when its `state` checks pass
+- The graph determines execution order: parent runs first, then children
+- **Graph edges are transitions**: a child runs in the state produced by its parent's action
 
-This is why the framework is powerful: each selector is a self-contained contextual prompt that knows when to fire, what to do, and what to produce — and the tree connects them into a coherent scraping workflow.
+This is what makes the NER model powerful: each node is a self-contained (state, action) → observation triple, and the graph edges encode deterministic state transitions.

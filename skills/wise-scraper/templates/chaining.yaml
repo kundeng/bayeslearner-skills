@@ -1,34 +1,39 @@
-deployment:
-  resources:
-    - name: categories
-      entry: { url: "https://example.com/", root: root }
-      selectors:
-        - name: category_link
-          type: link
-          selector: "a.category-link"
-          multiple: true
-          parents: [root]
-      outputs:
-        - artifact: category_urls
-          from: category_link
+# Chaining — multi-resource pipeline: discover URLs → extract pages.
+# BFS expansion collects all URLs first, then children visit each.
+name: chained_scrape
+resources:
+  - name: categories
+    entry: { url: "https://example.com/", root: root }
+    nodes:
+      - name: root
+        parents: []
 
-    - name: products
-      inputs: [{ name: input, artifact: category_urls }]
-      entry: { url: { artifact: category_urls }, root: root }
-      selectors:
-        - name: product_card
-          type: element
-          selector: ".product-card"
-          multiple: true
-          parents: [root]
-        - name: name
-          type: text
-          selector: ".title"
-          parents: [product_card]
-        - name: price
-          type: text
-          selector: ".price"
-          parents: [product_card]
-      outputs:
-        - artifact: product_rows
-          from: product_card
+      - name: category_links
+        parents: [root]
+        expand:
+          over: elements
+          scope: "a.category-link"
+          order: bfs
+        extract:
+          - link: { name: url, css: "a.category-link" }
+          - text: { name: label, css: "a.category-link" }
+
+  - name: products
+    entry:
+      url: { from: "category_links.url" }
+      root: root
+    nodes:
+      - name: root
+        parents: []
+        action:
+          - navigate: { to: "{url}" }
+          - wait: { idle: true }
+
+      - name: product_cards
+        parents: [root]
+        expand:
+          over: elements
+          scope: ".product-card"
+        extract:
+          - text: { name: name,  css: ".title" }
+          - text: { name: price, css: ".price" }

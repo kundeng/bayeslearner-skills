@@ -1,8 +1,20 @@
-selectors:
-  - name: ai_extract_reviews
-    type: ai
+# AI extraction — use the AI adapter for semantic extraction.
+# AI runs on captured HTML, never on the live DOM.
+nodes:
+  - name: page_content
     parents: [root]
     extract:
-      - type: ai
-        name: reviews
-        prompt: "Extract all user reviews, ratings, and review dates from this product page."
+      - html: { name: raw_html, css: ".reviews-container" }
+      - ai:
+          name: reviews
+          prompt: "Extract all user reviews with rating, reviewer name, and date."
+          input: raw_html
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                reviewer: { type: string }
+                rating: { type: number }
+                date: { type: string }
+                text: { type: string }

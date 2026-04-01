@@ -3,7 +3,7 @@ name: wise-scraper
 description: "Structured web scraping for AI coders: explore, then exploit with shipped templates, runner, and hooks."
 metadata:
   author: kundeng
-  version: "1.0.0"
+  version: "2.0.0"
 ---
 
 # WISE Scraper
@@ -26,6 +26,31 @@ Orient → Explore → Evidence → Choose tier → Exploit → JSONL → Assemb
 Use when: JS-rendered sites, pagination, UI state, filter combos, structured repeatable output.
 Not when: a stable API/export exists, or static `curl` is clearly enough.
 
+## Core Model: NER (Navigation/Extraction Rules)
+
+WISE profiles define a **graph of NER nodes**. Each node is a deterministic **(state, action) → observation** triple:
+
+| Part | Schema field | What it answers |
+|---|---|---|
+| **State** | `state` | "Am I where I expect to be?" — precondition check |
+| **Action** | `action` | "What deterministic thing do I do?" — browser primitives |
+| **Observation** | `extract` | "What do I read/emit from this state?" — extraction rules |
+| **Successors** | `expand` | "How many successor states?" — elements, pages, or combinations |
+
+Nodes form a DAG via `parents[]`. The engine walks top-down: check state, execute actions, extract, expand, recurse into children.
+
+### Expansion (unified)
+
+Instead of separate `type: pagination` / `type: matrix` / `multiple: true`, all successor-state generation goes through `expand`:
+
+| `expand.over` | What it does | Old equivalent |
+|---|---|---|
+| `elements` | One successor per CSS match | `multiple: true` |
+| `pages` | One successor per page (next/numeric/infinite) | `type: pagination` |
+| `combinations` | Cartesian product of filter axes | `type: matrix` |
+
+Each `expand` block supports `order: dfs | bfs` (default: dfs).
+
 ## Agent Contract
 
 1. **Orient first.** Read `references/guide.md § Big Picture` and scan `templates/*.yaml` before touching `agent-browser` or writing code.
@@ -39,20 +64,25 @@ Not when: a stable API/export exists, or static `curl` is clearly enough.
 
 | Tier | When | What |
 |---|---|---|
-| 1 | Target fits declarative flow | Assemble template fragments + shipped `agent-browser` runner |
-| 2 | Target needs adaptation | Copy/adapt runner modules, hooks, helpers, or AI adapter |
+| 1 | Target fits declarative flow | Assemble template fragments + shipped runner |
+| 2 | Target needs adaptation | Copy/adapt runner modules, hooks, AI adapter |
 | 3 | Target exceeds reference boundary | Bespoke project, carrying WISE discipline |
-| 4 | User prefers alternative runtime | Same YAML profile, executed via Crawlee or Scrapy+Playwright runner |
+| 4 | User prefers alternative runtime | Same YAML profile, different backend |
 
-When escalating, explain why the simpler tier is insufficient. For Tier 4, the user's runtime preference (or project context like existing `package.json`/`requirements.txt`) determines the choice.
+### Architecture
 
-### Runner Boundary
+```
+YAML profile → Zod validation → Engine → BrowserDriver → JSONL → Assembly
+                                   ↕            ↕
+                              AIAdapter    agent-browser
+                              (aichat)     (or Playwright)
+```
 
-The **shipped runner** (`references/runner/`) uses `agent-browser` for browser driving. It handles: YAML profile interpretation, DOM-eval extraction, selectors, interactions, pagination, matrix, post-processing.
-
-**Alternative runners** interpret the same YAML profile with a different backend. See `references/comparisons.md` for Crawlee and Scrapy+Playwright runner designs.
-
-The agent may extend beyond any runner: hooks, helper scripts, chaining, AI-assisted extraction.
+- **Schema** — Zod is the single source of truth (`schema.ts`): runtime validation, TypeScript types, JSON Schema export
+- **BrowserDriver** — abstract interface; `AgentBrowserDriver` (CLI) is shipped, `PlaywrightDriver` (library) is preferred for production
+- **AIAdapter** — abstract interface for exploitation-phase NLP; `AIChatAdapter` wraps the `aichat` CLI
+- **Engine** — walks the NER graph with unified `expand` (elements/pages/combinations)
+- **Hooks** — 5 lifecycle points for site-specific logic
 
 ## Read Next — by step
 
@@ -63,9 +93,9 @@ Do **not** read all references upfront. Read only what the current step needs:
 | Orient | `references/guide.md § Big Picture` |
 | Explore | `agent-browser` CLI help (`agent-browser --help`) |
 | Choose tier / runtime | SKILL.md § Exploit Tiers, `references/comparisons.md` (if Tier 4) |
-| Write profile | `references/field-guide.md`, `references/schema.cue`, scan `templates/*.yaml` |
+| Write profile | `references/field-guide.md`, `references/schema.ts`, scan `templates/*.yaml` |
 | Add hooks | `references/guide.md § Hook System` |
-| Add AI adapter | `references/ai-adapter.md` |
+| Add AI extraction | `references/ai-adapter.md` |
 | Config / CLI | `references/guide.md § Config Composition`, `§ Runner CLI Reference` |
 | Worked examples | `examples/overview.md` |
 
@@ -73,9 +103,10 @@ Do **not** read all references upfront. Read only what the current step needs:
 
 - **Assemble from template fragments** — combine pieces, don't pick one template
 - **Header-based table mapping** — not positional
-- **Sort verification required** — verify state changed after sort interactions
+- **Sort verification required** — verify state changed via child's `state` check
 - **Avoid ambiguous clicks** — scope by CSS/role/context
 - **JSONL is intermediate truth** — assemble final formats later
+- **BFS for URL discovery** — use `order: bfs` when you need to collect all URLs before visiting
 
 ## Common Failure Modes
 

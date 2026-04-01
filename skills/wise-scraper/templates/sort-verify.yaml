@@ -1,20 +1,24 @@
-selectors:
+# Sort + verify — click a column header, verify sort applied, then extract.
+# The child's state check acts as transition verification.
+nodes:
   - name: sort_by_rating
-    type: element
     parents: [root]
-    context:
+    state:
       selector_exists: "table"
-    interaction:
-      - type: click
-        target: { css: "th.sortable[data-col='rating']" }
-        click_action_type: real
-      - type: wait
-        network_idle: true
+    action:
+      - click:
+          css: "th.sortable[data-col='rating']"
+        type: real
+      - wait: { idle: true }
 
   - name: sorted_results
-    type: element
     parents: [sort_by_rating]
-    context:
+    state:
+      # Transition verification: confirm sort actually applied
       selector_exists: "th.sortable[aria-sort='descending']"
-    selector: "table.results tbody tr"
-    multiple: true
+    expand:
+      over: elements
+      scope: "table.results tbody tr"
+    extract:
+      - text: { name: name,   css: "td.name" }
+      - text: { name: rating, css: "td.rating" }

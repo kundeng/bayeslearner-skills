@@ -8,84 +8,55 @@ resources:
       timeout_ms: 20000
       retries: 2
       user_agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
-    selectors:
+    nodes:
       - name: root
         parents: []
-        context:
+        state:
           url_pattern: revspin.net/top-rubber/overall-desc.html
           selector_exists: table
-        interaction:
-          - type: click
-            target:
+        action:
+          - click:
               css: td.durability a
-            click_action_type: real
-          - type: wait
-            network_idle: true
+            type: real
+          - wait: { idle: true }
+
       - name: durability_pages
-        type: pagination
         parents: [root]
-        context:
+        state:
           url_pattern: revspin.net/top-rubber/durability-desc.html
           selector_exists: "a.btn.btn-default[href*='p=']"
-        selector: "a.btn.btn-default[href*='p=']"
-        pagination:
-          pagination_type: numeric
-          selector: "a.btn.btn-default[href*='p=']"
-          start_page: 1
-          page_limit: 2
+        expand:
+          over: pages
+          strategy: numeric
+          control: "a.btn.btn-default[href*='p=']"
+          start: 1
+          limit: 2
+
       - name: rows
-        type: element
         parents: [durability_pages]
-        context:
+        state:
           selector_exists: "table tbody tr"
-        selector: "table tbody tr:not(.head)"
-        multiple: true
+        expand:
+          over: elements
+          scope: "table tbody tr:not(.head)"
         extract:
-          - type: text
-            name: rank
-            selector: td.rank
-          - type: text
-            name: rubber
-            selector: td.product
-          - type: text
-            name: speed
-            selector: td.speed
-          - type: text
-            name: spin
-            selector: td.spin
-          - type: text
-            name: control
-            selector: td.control
-          - type: text
-            name: tacky
-            selector: td.tackiness
-          - type: text
-            name: weight
-            selector: td.weight
-          - type: text
-            name: sponge_hardness
-            selector: td.sponge_hardness
-          - type: text
-            name: gears
-            selector: td.gears
-          - type: text
-            name: throw_angle
-            selector: td.throw_angle
-          - type: text
-            name: consistency
-            selector: td.consistency
-          - type: text
-            name: durable
-            selector: td.durability
-          - type: text
-            name: overall
-            selector: td.overall
-          - type: text
-            name: ratings
-            selector: td.ratings
-          - type: text
-            name: price
-            selector: td.price
-    outputs:
-      - artifact: revspin_durable_top2pages
-        from: rows
+          - text: { name: rank,           css: td.rank }
+          - text: { name: rubber,         css: td.product }
+          - text: { name: speed,          css: td.speed }
+          - text: { name: spin,           css: td.spin }
+          - text: { name: control,        css: td.control }
+          - text: { name: tacky,          css: td.tackiness }
+          - text: { name: weight,         css: td.weight }
+          - text: { name: sponge_hardness, css: td.sponge_hardness }
+          - text: { name: gears,          css: td.gears }
+          - text: { name: throw_angle,    css: td.throw_angle }
+          - text: { name: consistency,    css: td.consistency }
+          - text: { name: durable,        css: td.durability }
+          - text: { name: overall,        css: td.overall }
+          - text: { name: ratings,        css: td.ratings }
+          - text: { name: price,          css: td.price }
+quality:
+  min_records: 50
+  min_filled_pct:
+    rubber: 90
+    speed: 80

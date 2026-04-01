@@ -1,42 +1,43 @@
 name: splunk-itsi-administer
-description: "Splunk ITSI 4.21 Administer manual — all pages into single markdown"
+resources:
+  # Phase 1: discover all pages from the left nav
+  - name: discover
+    entry:
+      url: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/overview/about-administering-it-service-intelligence"
+      root: toc
+    globals:
+      timeout_ms: 30000
+      retries: 2
+    nodes:
+      - name: toc
+        parents: []
+        state:
+          selector_exists: "a[href*='/administer/4.21/']"
+        expand:
+          over: elements
+          scope: "a[href*='/administer/4.21/']"
+          order: bfs                    # collect all URLs before descending
+        extract:
+          - link: { name: url, css: "a[href*='/administer/4.21/']" }
+          - text: { name: title, css: "a[href*='/administer/4.21/']" }
 
-entry:
-  url: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/overview/about-administering-it-service-intelligence"
-  wait: networkidle
+  # Phase 2: extract content from each discovered page
+  - name: extract_pages
+    entry:
+      url: { from: "toc.url" }
+      root: page
+    globals:
+      timeout_ms: 30000
+      page_load_delay_ms: 1500
+    nodes:
+      - name: page
+        parents: []
+        state:
+          selector_exists: "article[role='article']"
+        extract:
+          - text: { name: title, css: "h1.title" }
+          - html: { name: body, css: ".body" }
 
-discovery:
-  scope: "a[href*='/administer/4.21/']"
-  url_pattern: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/**"
-  locale: "/en/"
-  exclude_patterns:
-    - "#*"
-  dedupe: true
-
-content:
-  container: "article[role='article']"
-  remove:
-    - "nav"
-    - ".cookie-banner"
-    - "script"
-    - "style"
-    - "noscript"
-  fields:
-    title:
-      selector: "h1.title"
-      type: text
-    body:
-      selector: ".body"
-      type: html
-    url:
-      type: url
-
-output:
-  format: markdown
-  intermediate: jsonl
-  file: "splunk-itsi-administer-4.21.md"
-
-options:
-  delay_ms: 1500
-  timeout_ms: 30000
-  max_pages: 200
+quality:
+  min_records: 10
+  max_empty_pct: 5

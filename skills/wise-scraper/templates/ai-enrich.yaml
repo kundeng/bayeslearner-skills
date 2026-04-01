@@ -1,13 +1,16 @@
-selectors:
-  - name: description
-    type: text
-    selector: ".desc"
-    parents: [product_card]
+# AI enrichment — deterministic extraction + AI post-processing.
+# Extract text normally, then classify/transform via AI adapter.
+nodes:
+  - name: products
+    parents: [root]
+    expand:
+      over: elements
+      scope: ".product-card"
     extract:
-      - type: text
-        name: description
-        selector: ".desc"
-    hooks:
-      post_extract:
-        - name: ai_enrich
-          config: { task: "categorize_product" }
+      - text: { name: description, css: ".desc" }
+      - text: { name: price, css: ".price" }
+      - ai:
+          name: category
+          prompt: "Classify this product into exactly one category."
+          input: description
+          categories: [electronics, clothing, home, food, other]

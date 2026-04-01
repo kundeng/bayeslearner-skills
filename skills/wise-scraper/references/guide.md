@@ -7,24 +7,30 @@ Read this after SKILL.md. This is the essential reference — it gives you the b
 You are building a **working scraping project** for a JS-rendered site. Here is what's shipped and how the pieces fit:
 
 ```
-YAML profile  ──→  Runner  ──→  Browser  ──→  JSONL output  ──→  Assembly
-  (what)          (how)       (where)       (intermediate)      (final)
+YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDriver  ──→  JSONL  ──→  Assembly
+  (what)            (gate)              (walk)       (browser)          (intermediate)  (final)
 ```
 
-**Profile** — a declarative YAML file that describes *what* to scrape: which URLs, which selectors, what interactions (click, scroll, wait), what to extract, how to paginate. You build this by assembling composable template fragments from `templates/*.yaml`.
+**Profile** — a declarative YAML file that describes *what* to scrape: which URLs, which NER nodes, what actions, what to extract, how to expand. You build this by assembling composable template fragments from `templates/*.yaml`.
 
-**Runner** — interprets the profile and drives a browser. The shipped runner (`references/runner/`) uses `agent-browser`. Alternative runners (Crawlee, Scrapy+Playwright) interpret the same profile with a different backend — see `references/comparisons.md` if the user prefers a different runtime (Tier 4).
+**Schema** — Zod is the single source of truth (`references/runner/src/schema.ts`). It validates profiles at load time, infers TypeScript types, and can export JSON Schema for cross-language use.
 
-**Templates** — composable fragments in `templates/*.yaml`. They are **not** a menu to pick from. Combine pieces: pagination + table-extract + sort-verify + interaction, etc. Scan them during orientation.
+**Engine** — walks the NER node graph. For each node: check state → execute actions → extract → expand → recurse children. One unified code path handles all expansion types.
 
-**Hooks** — 5 extension points (post_discover, pre_extract, post_extract, pre_assemble, post_assemble) for site-specific logic the profile can't express declaratively. Hooks can be global (per-resource) or per-selector.
+**BrowserDriver** — abstract interface for browser interaction. The shipped `AgentBrowserDriver` uses the `agent-browser` CLI. For production, use `PlaywrightDriver` (import agent-browser's internal Node.js API).
+
+**AIAdapter** — abstract interface for exploitation-phase NLP. The shipped `AIChatAdapter` wraps the `aichat` CLI. AI only operates on already-extracted text, never on the live DOM.
+
+**Templates** — composable fragments in `templates/*.yaml`. They are **not** a menu to pick from. Combine pieces: pagination + table-extract + sort-verify + element-click, etc.
+
+**Hooks** — 5 extension points (post_discover, pre_extract, post_extract, pre_assemble, post_assemble) for site-specific logic the profile can't express declaratively.
 
 **JSONL** — the intermediate output format. One JSON object per line. Assembly into markdown/CSV/JSON is a separate step.
 
 ### Decisions you need to make
 
-1. **Runtime** — shipped `agent-browser` runner (default) or alternative (Crawlee/Scrapy)? Infer from user context or ask.
-2. **Tier** — can the target be handled declaratively (Tier 1), or does it need adapted runner code (Tier 2), bespoke code (Tier 3), or an alternative runtime (Tier 4)?
+1. **Runtime** — shipped `agent-browser` driver (default) or alternative?
+2. **Tier** — declarative (Tier 1), adapted (Tier 2), bespoke (Tier 3), or alternative runtime (Tier 4)?
 3. **AI adapter** — is AI needed for semantic extraction, or are selectors + hooks sufficient?
 4. **Hooks** — does the site need custom logic at any of the 5 hook points?
 
@@ -32,8 +38,8 @@ YAML profile  ──→  Runner  ──→  Browser  ──→  JSONL output  �
 
 | You need to... | Read |
 |---|---|
-| Understand the selector framework | `references/field-guide.md` (intuitive conceptual guide) |
-| See the formal schema | `references/schema.cue` |
+| Understand the NER model | `references/field-guide.md` |
+| See the formal schema | `references/runner/src/schema.ts` |
 | See template fragments | `templates/*.yaml` |
 | Add AI extraction | `references/ai-adapter.md` |
 | Compare runtimes | `references/comparisons.md` |
@@ -43,7 +49,7 @@ YAML profile  ──→  Runner  ──→  Browser  ──→  JSONL output  �
 
 ## Profile Schema
 
-A profile is a declarative YAML file. The canonical schema is `references/schema.cue`; the TypeScript mirror is `references/runner/src/types.ts`. See `references/field-guide.md` for plain-English field descriptions.
+A profile is a declarative YAML file. The canonical schema is `references/runner/src/schema.ts` (Zod). See `references/field-guide.md` for plain-English field descriptions.
 
 ### Full Schema Structure
 
@@ -57,55 +63,54 @@ resources:
     globals:
       timeout_ms: 20000
       retries: 2
-    selectors:
+    setup:                                  # optional: auth, locale, etc.
+      skip_when: ".logged-in"
+      actions:
+        - open: "https://example.com/login"
+        - input: { target: { css: "#user" }, value: "me@co.com" }
+        - password: { target: { css: "#pass" }, env: "SITE_PASSWORD" }
+        - click: { css: "button[type=submit]" }
+    nodes:
       - name: root
         parents: []
-        context:
+        state:
           url_pattern: example.com/products
           selector_exists: table
-        interaction:
-          - type: click
-            target:
+        action:
+          - click:
               css: th.sort-price
-            click_action_type: real
-          - type: wait
-            network_idle: true
-      - name: pages
-        type: pagination
-        parents: [root]
-        context:
-          selector_exists: "a.next-page"
-        pagination:
-          pagination_type: numeric
-          selector: "a.page-link"
-          page_limit: 5
-      - name: rows
-        type: element
-        parents: [pages]
-        context:
-          selector_exists: "table tbody tr"
-        selector: "table tbody tr"
-        multiple: true
-        extract:
-          - type: text
-            name: product
-            selector: td.name
-          - type: text
-            name: price
-            selector: td.price
-    outputs:
-      - artifact: product_data
-        from: rows
-```
+            type: real
+          - wait: { idle: true }
 
-For detailed explanations of every field (selectors, context, interaction, extraction, pagination, matrix, artifacts), see `references/field-guide.md`. For the formal CUE schema, see `references/schema.cue`.
+      - name: pages
+        parents: [root]
+        expand:
+          over: pages
+          strategy: numeric
+          control: "a.page-link"
+          limit: 5
+
+      - name: rows
+        parents: [pages]
+        expand:
+          over: elements
+          scope: "table tbody tr"
+        extract:
+          - text: { name: product, css: "td.name" }
+          - text: { name: price, css: "td.price" }
+quality:
+  min_records: 10
+  min_filled_pct:
+    product: 90
+    price: 80
+```
 
 ## Extraction Rules
 
-- **DOM eval for live-page extraction.** The runner evaluates JavaScript in the browser context via `agent-browser eval -b <base64>`. Do not use HTML parsing libraries for extracting data from the live page.
+- **DOM eval for live-page extraction.** The driver evaluates JavaScript in the browser context. Do not use HTML parsing libraries for extracting data from the live page.
 - **Post-extraction processing is fine.** Once HTML is captured in JSONL, use `cheerio` and `turndown` for transformation, cleanup, and assembly.
-- **Header-based mapping for tables.** Map columns by header text, not index. Rank/index columns often occupy position 0.
-- **Sort verification required** after sort interactions — verify via DOM eval or context check before proceeding.
+- **Header-based mapping for tables.** Map columns by header text, not index.
+- **Sort verification** via child node's `state` check — verify the sort applied before extracting.
 
 ## Exploration with agent-browser
 
@@ -128,8 +133,6 @@ Hooks allow site-specific customization. They run at two levels:
 
 ### Global hooks (per-resource)
 
-Declared at the resource or deployment level. Fire for every page/record in the resource.
-
 | Hook Point | When | Use For |
 |---|---|---|
 | `post_discover` | After URL list is built | Filtering, reordering, manual URL injection |
@@ -138,25 +141,23 @@ Declared at the resource or deployment level. Fire for every page/record in the 
 | `pre_assemble` | Before final assembly | Cross-page link resolution, TOC generation |
 | `post_assemble` | After output is built | Format conversion, publishing, validation |
 
-### Per-selector hooks
+### Per-node hooks
 
-Declared on a specific selector. Fire only when that selector produces output.
+Declared on a specific node. Fire only when that node produces output.
 
 ```yaml
-selectors:
+nodes:
   - name: rows
-    multiple: true
+    expand:
+      over: elements
+      scope: "tr"
     extract: [...]
     hooks:
-      pre_extract:
-        - name: auth.inject_token
       post_extract:
         - name: ai_adapter.normalize_review
           config:
             schema: { reviewer: string, pros: string[], cons: string[] }
 ```
-
-Use per-selector hooks when: only one selector needs enrichment/transformation, and you don't want the hook to fire for every page.
 
 ### Register via module
 
@@ -171,185 +172,17 @@ export function registerHooks(registry: HookRegistry) {
 }
 ```
 
-## Named Artifacts
-
-Artifacts are the **named intermediate outputs** of a scraping pipeline. They form a hierarchy so you can build multi-step workflows where each step produces a named, typed, reusable result.
-
-### Why artifacts?
-
-Without named artifacts, multi-step pipelines are implicit — the custom runner code decides what to save, where, and in what format. With named artifacts, the profile declares the pipeline structure and the runner can orchestrate it automatically.
-
-### Schema
-
-```yaml
-artifacts:
-  - name: discovered_urls    # unique name
-    type: urls               # urls | jsonl | json | csv | markdown | html | custom
-    description: "TOC links from left nav"
-  - name: raw_pages
-    type: jsonl
-    parent: discovered_urls  # forms hierarchy: raw_pages depends on discovered_urls
-  - name: assembled_doc
-    type: markdown
-    parent: raw_pages
-```
-
-### Example: Revspin (flat — one artifact)
-
-```
-revspin_durable.yaml
-  └── resource: revspin_rubber_durable
-        └── artifact: rubber_data (jsonl)
-              produced by: rows selector (multiple: true, 200 records)
-```
-
-```yaml
-# Simple: one resource, one output artifact
-artifacts:
-  - name: rubber_data
-    type: jsonl
-
-resources:
-  - name: revspin_rubber_durable
-    outputs:
-      - artifact: rubber_data
-        from: rows
-```
-
-### Example: Splunk ITSI (hierarchical — three artifacts)
-
-The splunk-itsi scraper has a natural three-step pipeline. Without named artifacts, this required a custom `run.mjs`. With artifacts, the profile can declare it:
-
-```
-splunk-itsi-admin.yaml
-  └── artifact: discovered_urls (urls)
-        └── artifact: raw_pages (jsonl)
-              └── artifact: assembled_doc (markdown)
-```
-
-```yaml
-artifacts:
-  - name: discovered_urls
-    type: urls
-    description: "All TOC links from the left nav"
-  - name: raw_pages
-    type: jsonl
-    parent: discovered_urls
-    description: "Title + body HTML per page"
-  - name: assembled_doc
-    type: markdown
-    parent: raw_pages
-    description: "Single assembled markdown document"
-
-resources:
-  - name: discover
-    entry:
-      url: "https://help.splunk.com/.../about-administering-it-service-intelligence"
-      root: toc
-    selectors:
-      - name: toc
-        parents: []
-        context:
-          selector_exists: "a[href*='/administer/4.21/']"
-        selector: "a[href*='/administer/4.21/']"
-        multiple: true
-        extract:
-          - type: link
-            name: url
-            selector: "a[href*='/administer/4.21/']"
-    outputs:
-      - artifact: discovered_urls
-        from: toc
-        format: urls
-
-  - name: extract_pages
-    entry:
-      url: { artifact: discovered_urls }   # consumes the URL list
-      root: page
-    inputs:
-      - name: urls
-        artifact: discovered_urls
-    selectors:
-      - name: page
-        parents: []
-        context:
-          selector_exists: "article[role='article']"
-        extract:
-          - type: text
-            name: title
-            selector: "h1.title"
-          - type: html
-            name: body
-            selector: ".body"
-    outputs:
-      - artifact: raw_pages
-        from: page
-        format: jsonl
-
-  - name: assemble
-    inputs:
-      - name: pages
-        artifact: raw_pages
-    outputs:
-      - artifact: assembled_doc
-        format: markdown
-    hooks:
-      pre_assemble:
-        - name: processing.html_to_markdown
-        - name: processing.build_toc
-```
-
-### How artifacts chain
-
-```
-discover  →  discovered_urls (urls)
-                    ↓
-extract_pages  →  raw_pages (jsonl)    ← entry.url reads from discovered_urls
-                    ↓
-assemble  →  assembled_doc (markdown)  ← reads from raw_pages, hooks transform
-```
-
-Each resource declares what it **consumes** (`inputs`) and what it **produces** (`outputs`). The runner resolves the DAG and executes resources in dependency order.
-
 ## Config Composition
 
 The runner supports Hydra-like config composition via `convict` + `deepmerge`.
 
 Resolution order (later wins):
-0. Canonical config (`wise.config.yaml` or `.wiserc.yaml` — auto-loaded if present in cwd)
+0. Canonical config (`wise.config.yaml` or `.wiserc.yaml` — auto-loaded if present)
 1. Schema defaults (convict)
 2. Base profile YAML
 3. Override YAML files (`--config extra.yaml`)
 4. Environment variables (`WISE_*`)
 5. CLI `--set key=value`
-
-### Canonical config auto-load
-
-If a `wise.config.yaml` or `.wiserc.yaml` exists in the working directory, the runner loads it automatically as the base config. This is useful for project-level defaults (output dir, timeout, verbosity) shared across multiple profiles.
-
-```yaml
-# wise.config.yaml — project-level defaults
-outputDir: ./output
-verbose: true
-timeout: 30000
-retries: 3
-```
-
-### Example
-
-```bash
-# Auto-loads wise.config.yaml if present, then merges profile on top:
-node dist/run.js profile.yaml
-
-# Override at runtime:
-node dist/run.js profile.yaml --set inputs.queries=[yasaka,donic,joola]
-
-# Merge extra config on top:
-node dist/run.js profile.yaml --config prod-overrides.yaml
-
-# Environment variable:
-WISE_OUTPUT_DIR=./results node dist/run.js profile.yaml
-```
 
 ## JSONL Intermediate Format
 
@@ -357,7 +190,7 @@ Every run produces JSONL — one JSON object per line:
 
 ```json
 {
-  "selector": "rows",
+  "node": "rows",
   "url": "https://example.com/products?p=1",
   "data": {
     "product": "Widget Pro",
@@ -367,7 +200,7 @@ Every run produces JSONL — one JSON object per line:
 }
 ```
 
-JSONL is streamable, appendable, and allows resume after failure. The `data` field contains whatever the profile's `extract` rules captured. Assembly into final formats (markdown, CSV, JSON) is a separate post-processing step.
+JSONL is streamable, appendable, and allows resume after failure.
 
 ## Runner CLI Reference
 
@@ -379,7 +212,7 @@ Options:
   --output-format     jsonl | csv | json | markdown | md
   --hooks             Path to hooks module (.js)
   --set, -s           Override: --set key=value
-  --config, -c        Extra config file to merge: --config extra.yaml
+  --config, -c        Extra config file to merge
   --verbose, -v       Verbose logging
   --dry-run           Parse and validate without executing
   --timeout           Browser timeout in ms (default: 60000)

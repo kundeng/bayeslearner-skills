@@ -1,58 +1,106 @@
 # AI Adapter Pattern
 
-Use this reference when a scrape needs exploit-time AI for semantic extraction, normalization, classification, or enrichment that durable selectors cannot provide directly.
+Use this reference when a scrape needs exploit-time AI for semantic extraction, normalization, classification, or enrichment that deterministic selectors cannot provide directly.
 
 ## Purpose
 
-The AI adapter is an **optional extension path**. It should sit around the normal WISE flow, not replace exploration, DOM capture, or deterministic extraction.
+The AI adapter is an **optional extension path**. It sits around the normal WISE flow, not replacing exploration, DOM capture, or deterministic extraction.
 
-Recommended pattern:
+Pattern:
 
-1. Use `agent-browser` and normal selectors to capture the relevant source content
-2. Store the captured HTML/text/JSONL as ordinary intermediate artifacts
-3. Call a local AI CLI only for the transformation that deterministic code cannot do reliably
-4. Validate the returned structure before assembly
+1. Use `agent-browser` and normal extraction rules to capture source content
+2. AI operates on **already-extracted text** (via the `input` field reference), never on the live DOM
+3. Validate the returned structure before assembly
 
 ## When to Use
 
-Use an AI adapter when:
+Use AI extraction when:
 
-- the page contains long unstructured prose that must be normalized into a schema
-- the extraction requires semantic grouping or fuzzy interpretation
+- the page contains unstructured prose that must be normalized into a schema
+- extraction requires semantic grouping or fuzzy interpretation
 - post-processing needs judgment that would be brittle with hand-written rules
 
-Do not use an AI adapter when:
+Do NOT use AI when:
 
-- ordinary selectors can extract the needed fields directly
+- ordinary CSS selectors can extract the needed fields directly
 - simple deterministic cleanup can solve the problem
 - the agent is reaching for AI just because it is available
 
-## Interface Contract
+## Abstract Interface
 
-The adapter should be vendor-neutral at the interface level.
+The `AIAdapter` interface (`references/runner/src/ai.ts`) defines three methods:
 
-### Input
+```typescript
+interface AIAdapter {
+  /** Structured extraction: text/HTML → JSON matching an optional schema. */
+  extract(prompt: string, context: string, schema?: Record<string, unknown>): Record<string, unknown>;
 
-- task instructions
-- source context captured from the page
-- desired output schema
-- optional examples or guardrails
+  /** Classify text into one of the given categories. */
+  classify(prompt: string, text: string, categories: string[]): string;
 
-### Output
+  /** Free-form text-to-text transform. */
+  transform(prompt: string, input: string): string;
+}
+```
 
-- structured JSON preferred
-- markdown only if the downstream step expects markdown
-- enough metadata to validate success/failure
+## Shipped Implementation: AIChatAdapter
 
-## Backend Choices
+The `AIChatAdapter` (`references/runner/src/aichat-adapter.ts`) wraps the `aichat` CLI — a single-binary tool that supports multiple LLM providers.
 
-Possible backends:
+- **Install:** https://github.com/sigoden/aichat
+- **No SDK dependency** — shells out via `execSync`, passes prompt via stdin
+- **Model selection:** configure via `aichat` config or `--model` flag
 
-- `codex`
-- `claude`
-- another local AI CLI available in the environment
+## Profile Usage
 
-The agent should prefer the installed backend that is most reliable in the current workspace. Avoid hardcoding the skill to exactly one vendor.
+### AI extraction (on captured HTML)
+
+```yaml
+nodes:
+  - name: reviews
+    parents: [root]
+    extract:
+      - html: { name: raw_html, css: ".reviews" }      # deterministic capture
+      - ai:
+          name: parsed_reviews
+          prompt: "Extract reviewer name, rating, and text from these reviews."
+          input: raw_html                                # AI operates on this field
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                reviewer: { type: string }
+                rating: { type: number }
+                text: { type: string }
+```
+
+### AI classification
+
+```yaml
+extract:
+  - text: { name: description, css: ".desc" }
+  - ai:
+      name: category
+      prompt: "Classify this product."
+      input: description
+      categories: [electronics, clothing, home, food, other]
+```
+
+### AI enrichment via hooks
+
+```yaml
+hooks:
+  post_extract:
+    - name: ai_adapter.normalize
+      config:
+        prompt: "Normalize this address to JSON"
+        schema: { street: string, city: string, state: string, zip: string }
+```
+
+## Null Adapter
+
+When no AI backend is configured, the `NullAIAdapter` is used automatically. It returns placeholder values so profiles with AI extraction rules can still run (with degraded output) rather than crashing.
 
 ## Evaluation Questions
 

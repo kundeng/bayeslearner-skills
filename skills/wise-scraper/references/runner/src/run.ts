@@ -1,60 +1,70 @@
 #!/usr/bin/env node
 /**
- * WISE Scraper — generic runner CLI.
+ * WISE NER Runner — CLI entry point.
  *
- * Reads a YAML profile, interprets the declarative schema, executes via
- * agent-browser, and outputs intermediate JSONL + optional assembled output.
+ * Reads a YAML profile, validates against the Zod schema, wires up
+ * driver + AI adapter, executes via the NER engine, writes JSONL + final output.
  *
  * Usage:
- *   node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [--set k=v] [--config extra.yaml] [-v] [--dry-run]
+ *   node dist/run.js <profile.yaml> [options]
+ *
+ * Options:
+ *   --output-dir, -o    Output directory (default: ./output)
+ *   --output-format     jsonl | csv | json | markdown | md
+ *   --hooks             Path to hooks module (.js)
+ *   --ai-model          Model for aichat adapter (optional)
+ *   --driver            agent-browser (default) — extensible for future drivers
+ *   --set, -s           Override: --set key=value
+ *   --config, -c        Extra config to merge
+ *   --verbose, -v       Verbose logging
+ *   --dry-run           Validate without executing
+ *   --timeout           Browser timeout in ms (default: 60000)
+ *   --retries           Retry count (default: 2)
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
 import yaml from "js-yaml";
 
-import { Browser } from "./browser.js";
+import { Deployment as DeploymentSchema, type Deployment, type ExtractedRecord } from "./schema.js";
+import { AgentBrowserDriver } from "./agent-browser-driver.js";
+import { NullAIAdapter } from "./ai.js";
+import { AIChatAdapter } from "./aichat-adapter.js";
 import { Engine } from "./engine.js";
 import { HookRegistry } from "./hooks.js";
-import { assembleMarkdown, assembleCsv } from "./processing.js";
 import { loadConfig } from "./config.js";
-import type {
-  Deployment,
-  Resource,
-  Selector,
-  ExtractedRecord,
-  HookContext,
-} from "./types.js";
+import { assembleMarkdown, assembleCsv } from "./processing.js";
 
-// ------------------------------------------------------------------
-// Output writers
-// ------------------------------------------------------------------
+// Re-export ExtractedRecord for processing.ts compatibility
+export type { ExtractedRecord } from "./schema.js";
+
+// ── output writers ──────────────────────────────────────
 
 function writeJsonl(records: ExtractedRecord[], path: string): void {
   const lines = records.map((r) => JSON.stringify(r));
   writeFileSync(path, lines.join("\n") + "\n", "utf-8");
-  console.log(`[output] Wrote ${records.length} records to ${path}`);
+  console.log(`[output] ${records.length} records → ${path}`);
 }
 
 function writeCsv(records: ExtractedRecord[], path: string): void {
   writeFileSync(path, assembleCsv(records), "utf-8");
-  console.log(`[output] Wrote ${records.length} rows to ${path}`);
+  console.log(`[output] ${records.length} rows → ${path}`);
 }
 
 function writeJson(records: ExtractedRecord[], path: string): void {
   writeFileSync(path, JSON.stringify(records, null, 2), "utf-8");
-  console.log(`[output] Wrote ${records.length} records to ${path}`);
+  console.log(`[output] ${records.length} records → ${path}`);
 }
 
 function writeMarkdown(records: ExtractedRecord[], path: string, title?: string): void {
   const md = assembleMarkdown(records, { title });
   writeFileSync(path, md, "utf-8");
-  console.log(`[output] Wrote ${(md.length / 1024).toFixed(1)} KB to ${path}`);
+  console.log(`[output] ${(md.length / 1024).toFixed(1)} KB → ${path}`);
 }
 
 type Writer = (records: ExtractedRecord[], path: string) => void;
 
-const OUTPUT_WRITERS: Record<string, Writer> = {
+const WRITERS: Record<string, Writer> = {
   jsonl: writeJsonl,
   csv: writeCsv,
   json: writeJson,
@@ -62,145 +72,185 @@ const OUTPUT_WRITERS: Record<string, Writer> = {
   md: writeMarkdown,
 };
 
-// ------------------------------------------------------------------
-// Profile loading
-// ------------------------------------------------------------------
+// ── profile loading + validation ────────────────────────
 
 function loadProfile(profilePath: string): Deployment {
   const text = readFileSync(profilePath, "utf-8");
-  const profile = yaml.load(text) as Record<string, unknown>;
-  if (!profile) throw new Error(`Empty profile: ${profilePath}`);
+  const raw = yaml.load(text);
+  if (!raw || typeof raw !== "object") throw new Error(`Empty or invalid profile: ${profilePath}`);
 
-  // Full schema format: has resources[]
-  if (profile.resources) return profile as unknown as Deployment;
-
-  // Flat format: has entry but no resources — convert
-  if (profile.entry) return flatToSchema(profile);
-
-  throw new Error("Profile must have 'resources' (schema format) or 'entry' (flat format)");
-}
-
-function flatToSchema(flat: Record<string, unknown>): Deployment {
-  const entry = flat.entry as { url: string } | string;
-  const options = (flat.options ?? {}) as Record<string, number>;
-  const discovery = (flat.discovery ?? {}) as Record<string, string>;
-  const content = (flat.content ?? {}) as Record<string, unknown>;
-  const output = (flat.output ?? {}) as Record<string, string>;
-
-  const resource: Resource = {
-    name: (flat.name as string) ?? "default",
-    entry: {
-      url: typeof entry === "string" ? entry : entry.url,
-      root: "root",
-    },
-    globals: { timeout_ms: options.timeout_ms ?? 30000 },
-    selectors: [],
-  };
-
-  const rootSel: Selector = {
-    name: "root",
-    parents: [],
-    context: {},
-  };
-
-  if (discovery.url_pattern) {
-    rootSel.context.url_pattern = discovery.url_pattern.split("**")[0].replace(/\/$/, "");
+  // Validate with Zod
+  const result = DeploymentSchema.safeParse(raw);
+  if (!result.success) {
+    console.error("[validate] Profile validation failed:");
+    for (const issue of result.error.issues) {
+      console.error(`  ${issue.path.join(".")} — ${String(issue.message)}`);
+    }
+    throw new Error("Profile validation failed");
   }
 
-  const fields = content.fields as Record<string, Record<string, string>> | undefined;
-  if (fields) {
-    rootSel.extract = [];
-    for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      if (typeof fieldDef === "object") {
-        rootSel.extract.push({
-          type: (fieldDef.type ?? "text") as "text",
-          name: fieldName,
-          selector: fieldDef.selector ?? "",
-        });
+  return result.data;
+}
+
+// ── semantic validation ─────────────────────────────────
+
+function validateSemantics(profile: Deployment): void {
+  for (const resource of profile.resources) {
+    const nodeNames = new Set(resource.nodes.map((n: { name: string }) => n.name));
+
+    // entry.root must reference an existing node
+    if (!nodeNames.has(resource.entry.root)) {
+      throw new Error(
+        `Resource '${resource.name}': entry.root '${resource.entry.root}' references unknown node. ` +
+        `Available: ${[...nodeNames].join(", ")}`,
+      );
+    }
+
+    for (const node of resource.nodes) {
+      // parents must reference existing nodes
+      for (const parent of node.parents) {
+        if (!nodeNames.has(parent)) {
+          throw new Error(
+            `Resource '${resource.name}', node '${node.name}': ` +
+            `parent '${parent}' references unknown node`,
+          );
+        }
+      }
+    }
+
+    // Check for cycles (DFS)
+    const adj: Record<string, string[]> = {};
+    for (const node of resource.nodes) {
+      for (const parent of node.parents) {
+        if (!adj[parent]) adj[parent] = [];
+        adj[parent].push(node.name);
+      }
+    }
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    function dfs(name: string): void {
+      if (stack.has(name)) throw new Error(`Resource '${resource.name}': cycle detected at node '${name}'`);
+      if (visited.has(name)) return;
+      stack.add(name);
+      for (const child of adj[name] ?? []) dfs(child);
+      stack.delete(name);
+      visited.add(name);
+    }
+    for (const name of nodeNames) dfs(name);
+  }
+}
+
+// ── quality gate ────────────────────────────────────────
+
+function checkQuality(records: ExtractedRecord[], profile: Deployment): void {
+  const q = profile.quality;
+  if (!q) return;
+
+  const total = records.length;
+
+  if (q.min_records && total < q.min_records) {
+    console.warn(`[quality] FAIL: ${total} records < min_records ${q.min_records}`);
+  }
+
+  if (q.max_empty_pct !== undefined) {
+    const empty = records.filter((r) => Object.keys(r.data).length === 0).length;
+    const pct = total > 0 ? (empty / total) * 100 : 0;
+    if (pct > q.max_empty_pct) {
+      console.warn(`[quality] FAIL: ${pct.toFixed(1)}% empty > max_empty_pct ${q.max_empty_pct}%`);
+    }
+  }
+
+  if (q.min_filled_pct) {
+    for (const [col, threshold] of Object.entries(q.min_filled_pct)) {
+      const filled = records.filter((r) => {
+        const v = r.data[col];
+        return v !== undefined && v !== null && v !== "";
+      }).length;
+      const pct = total > 0 ? (filled / total) * 100 : 0;
+      if (pct < (threshold as number)) {
+        console.warn(`[quality] FAIL: column '${col}' ${pct.toFixed(1)}% filled < ${threshold}%`);
       }
     }
   }
-  if (!resource.selectors) resource.selectors = [];
-  resource.selectors.push(rootSel);
-
-  return {
-    name: (flat.name as string) ?? "default",
-    resources: [resource],
-    _output: {
-      format: output.intermediate ?? output.format ?? "jsonl",
-      file: output.file ?? "output",
-    },
-    _options: options,
-  };
 }
 
-// ------------------------------------------------------------------
-// Main
-// ------------------------------------------------------------------
+// ── main ────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const config = loadConfig(process.argv.slice(2));
-  const { runner, profile: profileData } = config;
+  const { runner } = config;
 
   if (!runner.profile) {
-    console.error("Usage: node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [--set k=v] [--config extra.yaml] [-v] [--dry-run]");
+    console.error("Usage: node dist/run.js <profile.yaml> [options]");
     process.exit(1);
   }
 
   const profilePath = resolve(runner.profile);
-  console.log(`[main] Loading profile: ${profilePath}`);
+  console.log(`[main] Loading: ${profilePath}`);
   const profile = loadProfile(profilePath);
-  const resources = profile.resources ?? [];
-  console.log(`[main] Profile: ${profile.name ?? "?"} (${resources.length} resources)`);
+  console.log(`[main] Profile '${profile.name}' — ${profile.resources.length} resources`);
+
+  // Semantic validation
+  validateSemantics(profile);
+  console.log("[main] Semantic validation passed");
 
   if (runner.dryRun) {
-    console.log("[main] Dry run — config resolved successfully:");
-    console.log(JSON.stringify({ runner, inputs: config.inputs }, null, 2));
+    console.log("[main] Dry run — validation passed, exiting");
     return;
   }
 
+  // Setup output directory
   const outDir = resolve(runner.outputDir);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
+  // Wire up hooks
   const hookRegistry = new HookRegistry();
   if (profile.hooks) hookRegistry.loadFromConfig(profile.hooks);
   if (runner.hooks) await hookRegistry.loadFromModule(resolve(runner.hooks));
 
-  const browser = new Browser({
+  // Wire up driver
+  const driver = new AgentBrowserDriver({
     timeoutMs: runner.timeout,
     retries: runner.retries,
   });
 
+  // Wire up AI adapter
+  const aiModel = (config.inputs as Record<string, unknown>)?.ai_model;
+  const ai = aiModel
+    ? new AIChatAdapter({ model: String(aiModel) })
+    : new NullAIAdapter();
+
   try {
     const allRecords: ExtractedRecord[] = [];
-    for (const resource of resources) {
+
+    for (const resource of profile.resources) {
       console.log(`\n=== Resource: ${resource.name} ===`);
-      const engine = new Engine(browser, hookRegistry);
+
+      // Resource-level hooks
+      if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
+
+      const engine = new Engine(driver, ai, hookRegistry);
       const records = engine.runResource(resource);
       allRecords.push(...records);
-      console.log(`[engine] Resource '${resource.name}' produced ${records.length} records`);
+      console.log(`[engine] '${resource.name}' → ${records.length} records`);
     }
 
     // pre_assemble hook
-    let ctx: HookContext = { records: allRecords, profile };
+    let ctx = { records: allRecords, profile };
     ctx = hookRegistry.invoke("pre_assemble", ctx);
     const finalRecords = ctx.records;
 
-    // Determine output format
-    const outputConfig = profile._output ?? { format: runner.outputFormat, file: profile.name ?? "output" };
-    const fmt = outputConfig.format ?? runner.outputFormat ?? "jsonl";
-    let baseName = outputConfig.file ?? profile.name ?? "output";
-    if (baseName.includes(".")) baseName = baseName.split(".").slice(0, -1).join(".");
-
-    // Always write JSONL intermediate
+    // Always write JSONL
+    const baseName = profile.name.replace(/\s+/g, "_").toLowerCase();
     const jsonlPath = resolve(outDir, `${baseName}.jsonl`);
     writeJsonl(finalRecords, jsonlPath);
 
     // Write in requested format if different
-    if (fmt !== "jsonl" && OUTPUT_WRITERS[fmt]) {
+    const fmt = runner.outputFormat ?? "jsonl";
+    if (fmt !== "jsonl" && WRITERS[fmt]) {
       const ext = fmt === "markdown" ? "md" : fmt;
       const outPath = resolve(outDir, `${baseName}.${ext}`);
-      OUTPUT_WRITERS[fmt](finalRecords, outPath);
+      WRITERS[fmt](finalRecords, outPath);
     }
 
     // post_assemble hook
@@ -208,11 +258,14 @@ async function main(): Promise<void> {
       records: finalRecords,
       outputDir: outDir,
       profile,
-    } as HookContext);
+    });
 
-    console.log(`\n=== Done: ${finalRecords.length} total records ===`);
+    // Quality gate
+    checkQuality(finalRecords, profile);
+
+    console.log(`\n=== Done: ${finalRecords.length} records ===`);
   } finally {
-    browser.close();
+    driver.close();
   }
 }
 

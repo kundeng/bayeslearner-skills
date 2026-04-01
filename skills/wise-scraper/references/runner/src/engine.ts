@@ -1,301 +1,225 @@
 /**
- * Core extraction engine — interprets a WISE scraper profile and executes it.
+ * NER Graph Engine — walks the node graph and executes deterministic scraping.
  *
- * Walks the selector tree (respecting parents/children), executes interactions,
- * handles pagination and matrix expansion, runs extractions via DOM eval,
- * and emits intermediate records.
+ * Core loop for every node:
+ *   1. Check state (preconditions)
+ *   2. Execute actions (browser interactions)
+ *   3. Observe (extract data)
+ *   4. Expand — generate successor states (elements | pages | combinations)
+ *   5. For each successor: walk children
+ *
+ * Expansion unifies what the old engine handled as three separate code paths
+ * (multiple, pagination, matrix) into a single mechanism.
  */
 
-import { Browser, escapeJs } from "./browser.js";
-import type { HookRegistry } from "./hooks.js";
+import type { BrowserDriver, DriverWait } from "./driver.js";
+import { locatorToSelector, escapeJs } from "./driver.js";
+import type { AIAdapter } from "./ai.js";
+import { HookRegistry } from "./hooks.js";
+import { InterruptHandler } from "./interrupts.js";
 import type {
-  Context,
   Resource,
-  Selector,
-  Interaction,
+  NER,
+  State,
+  Action,
   Extraction,
-  ExtractedRecord,
+  Expand,
   Locator,
-} from "./types.js";
+  ExtractedRecord,
+  SetupAction,
+  StopCondition,
+} from "./schema.js";
 
 export class Engine {
-  private browser: Browser;
-  private hooks: HookRegistry | null;
-  private seenUrls = new Set<string>();
+  private driver: BrowserDriver;
+  private ai: AIAdapter;
+  private hooks: HookRegistry;
+  private interrupts: InterruptHandler;
 
-  constructor(browser: Browser, hooks: HookRegistry | null = null) {
-    this.browser = browser;
+  constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry) {
+    this.driver = driver;
+    this.ai = ai;
     this.hooks = hooks;
+    this.interrupts = new InterruptHandler(driver);
   }
 
-  // ------------------------------------------------------------------
-  // Public API
-  // ------------------------------------------------------------------
+  // ── public API ────────────────────────────────────────
 
   runResource(resource: Resource): ExtractedRecord[] {
-    const selectors: Record<string, Selector> = {};
-    for (const s of resource.selectors ?? []) selectors[s.name] = s;
+    const nodeMap: Record<string, NER> = {};
+    for (const n of resource.nodes) nodeMap[n.name] = n;
 
-    const entry = resource.entry;
-    const globals = resource.globals ?? {};
+    const globals = resource.globals;
+    if (globals?.timeout_ms) this.driver.timeoutMs = globals.timeout_ms;
+    if (globals?.retries !== undefined) this.driver.retries = globals.retries;
 
-    if (globals.timeout_ms) this.browser.timeoutMs = globals.timeout_ms;
-    if (globals.retries) this.browser.retries = globals.retries;
+    // Run state setup if needed (auth, locale, etc.)
+    if (resource.setup) this.runSetup(resource.setup);
 
-    if (!entry) {
-      console.log(`[engine] Resource '${resource.name}' has no entry (assembly-only)`);
-      return [];
-    }
+    // Resolve entry URL
+    const entryUrl = typeof resource.entry.url === "string"
+      ? resource.entry.url
+      : null;
+    if (!entryUrl) throw new Error("Field-ref entry URLs require chaining support");
 
-    const entryUrl =
-      typeof entry.url === "string" ? entry.url : null;
-    if (!entryUrl) {
-      throw new Error("Artifact-ref entry URLs require chaining support");
-    }
-
-    console.log(`[engine] Opening entry: ${entryUrl}`);
-    if (!this.browser.open(entryUrl)) {
+    console.log(`[engine] Opening: ${entryUrl}`);
+    if (!this.driver.open(entryUrl, { wait: { idle: true } })) {
       console.error("[engine] Failed to open entry URL");
       return [];
     }
-    this.seenUrls.add(entryUrl);
 
-    const rootSel = selectors[entry.root];
-    if (!rootSel) throw new Error(`Root selector '${entry.root}' not found`);
+    // Page load delay
+    if (globals?.page_load_delay_ms) {
+      this.driver.wait({ ms: globals.page_load_delay_ms });
+    }
+
+    // Dismiss any initial interrupts (cookie banners, etc.)
+    this.interrupts.check();
+
+    const rootNode = nodeMap[resource.entry.root];
+    if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
 
     const records: ExtractedRecord[] = [];
-    this.walkSelector(rootSel, selectors, records, 0);
+    this.walkNode(rootNode, nodeMap, records, 0);
     return records;
   }
 
-  // ------------------------------------------------------------------
-  // Selector tree walker
-  // ------------------------------------------------------------------
+  // ── state setup ───────────────────────────────────────
 
-  private walkSelector(
-    sel: Selector,
-    allSelectors: Record<string, Selector>,
-    records: ExtractedRecord[],
-    depth: number,
-  ): void {
-    const indent = "  ".repeat(depth);
-    const selType = sel.type ?? "element";
-    console.log(`${indent}[selector] ${sel.name} (type=${selType})`);
-
-    if (!this.checkContext(sel.context ?? {})) {
-      console.log(`${indent}  Context check failed for '${sel.name}', skipping`);
+  private runSetup(setup: { skip_when: string; actions: SetupAction[] }): void {
+    if (this.driver.exists(setup.skip_when)) {
+      console.log("[setup] skip_when selector found, skipping setup");
       return;
     }
-
-    for (const interaction of sel.interaction ?? []) {
-      this.executeInteraction(interaction);
+    console.log("[setup] Running state setup...");
+    for (const act of setup.actions) {
+      if ("open" in act) {
+        this.driver.open(act.open, { wait: { idle: true } });
+      } else if ("click" in act) {
+        this.driver.click(act.click);
+      } else if ("input" in act) {
+        this.driver.type(act.input.target, act.input.value);
+      } else if ("password" in act) {
+        const value = process.env[act.password.env];
+        if (!value) throw new Error(`Env var '${act.password.env}' not set for password setup`);
+        this.driver.type(act.password.target, value);
+      }
     }
-
-    if (selType === "pagination") {
-      this.handlePagination(sel, allSelectors, records, depth);
-    } else if (selType === "matrix") {
-      this.handleMatrix(sel, allSelectors, records, depth);
-    } else {
-      this.handleElement(sel, allSelectors, records, depth);
-    }
+    this.driver.wait({ idle: true });
   }
 
-  // ------------------------------------------------------------------
-  // Element handler
-  // ------------------------------------------------------------------
+  // ── graph walker ──────────────────────────────────────
 
-  private handleElement(
-    sel: Selector,
-    allSelectors: Record<string, Selector>,
+  private walkNode(
+    node: NER,
+    allNodes: Record<string, NER>,
     records: ExtractedRecord[],
     depth: number,
   ): void {
     const indent = "  ".repeat(depth);
-    const css = sel.selector;
-    const multiple = sel.multiple ?? false;
-    const extractions = sel.extract ?? [];
-    const delayMs = sel.delay_ms ?? 0;
+    console.log(`${indent}[node] ${node.name}`);
 
-    if (extractions.length > 0) {
-      if (multiple && css) {
-        const rows = this.extractMultiple(css, extractions);
-        console.log(`${indent}  Extracted ${rows.length} rows from '${sel.name}'`);
-        for (const row of rows) {
-          let record = this.makeRecord(sel.name, row);
-          if (this.hooks) record = this.hooks.invoke("post_extract", record);
-          records.push(record);
+    // 1. Check state (preconditions) — with retry support
+    if (node.state && !this.checkState(node.state)) {
+      if (node.retry) {
+        const ok = this.retryNode(node, allNodes, indent);
+        if (!ok) {
+          console.log(`${indent}  State check failed after ${node.retry.max} retries, skipping`);
+          return;
         }
       } else {
-        const row = this.extractSingle(css ?? null, extractions);
-        if (row) {
-          let record = this.makeRecord(sel.name, row);
-          if (this.hooks) record = this.hooks.invoke("post_extract", record);
-          records.push(record);
-        }
+        console.log(`${indent}  State check failed, skipping`);
+        return;
       }
     }
 
-    if (delayMs) this.browser.sleep(delayMs);
+    // 2. Execute actions
+    for (const action of node.action ?? []) {
+      this.executeAction(action, records, indent);
+    }
 
-    this.walkChildren(sel.name, allSelectors, records, depth);
+    // Check for interrupts after actions (popups triggered by clicks, etc.)
+    this.interrupts.check();
+
+    // 3. Observe (extract data)
+    const extracted = this.extract(node, indent);
+    if (extracted) {
+      let record = this.makeRecord(node.name, extracted);
+      record = this.hooks.invoke("post_extract", record);
+      records.push(record);
+    }
+
+    // Node delay
+    if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
+
+    // 4. Expand + 5. Walk children
+    if (node.expand) {
+      this.expandAndDescend(node, allNodes, records, depth);
+    } else {
+      this.walkChildren(node.name, allNodes, records, depth);
+    }
   }
 
-  // ------------------------------------------------------------------
-  // Pagination handler
-  // ------------------------------------------------------------------
+  // ── retry ─────────────────────────────────────────────
 
-  private handlePagination(
-    sel: Selector,
-    allSelectors: Record<string, Selector>,
-    records: ExtractedRecord[],
-    depth: number,
-  ): void {
-    const indent = "  ".repeat(depth);
-    const pag = sel.pagination;
-    if (!pag) return;
+  /**
+   * Re-execute parent's actions and re-check this node's state,
+   * up to retry.max times. Returns true if state eventually passes.
+   */
+  private retryNode(
+    node: NER,
+    allNodes: Record<string, NER>,
+    indent: string,
+  ): boolean {
+    const retry = node.retry!;
+    for (let attempt = 1; attempt <= retry.max; attempt++) {
+      console.log(`${indent}  [retry ${attempt}/${retry.max}] waiting ${retry.delay_ms}ms...`);
+      this.driver.wait({ ms: retry.delay_ms });
 
-    const pagType = pag.pagination_type ?? "next";
-    const pagSelector = pag.selector ?? "";
-    const pageLimit = pag.page_limit ?? 10;
-
-    console.log(`${indent}  Pagination: type=${pagType}, limit=${pageLimit}`);
-
-    if (pagType === "numeric") {
-      const pageUrls = this.discoverPageUrls(pagSelector, pageLimit);
-      for (let i = 0; i < pageUrls.length; i++) {
-        console.log(`${indent}  Page ${i + 1}/${pageUrls.length}`);
-        if (i > 0) {
-          this.browser.open(pageUrls[i]);
-          this.browser.sleep(1000);
-        }
-        this.walkChildren(sel.name, allSelectors, records, depth);
-      }
-    } else if (pagType === "next") {
-      for (let page = 0; page < pageLimit; page++) {
-        console.log(`${indent}  Page ${page + 1}/${pageLimit}`);
-        this.walkChildren(sel.name, allSelectors, records, depth);
-
-        const hasNext = this.browser.evalJson<boolean>(`
-          (() => {
-            const el = document.querySelector('${escapeJs(pagSelector)}');
-            return el ? true : false;
-          })()
-        `);
-        if (!hasNext) {
-          console.log(`${indent}  No more pages`);
-          break;
-        }
-        this.browser.click({ css: pagSelector });
-        this.browser.wait({ networkIdle: true });
-        this.browser.sleep(1000);
-      }
-    } else if (pagType === "infinite") {
-      const stopCondition = pag.stop_condition;
-      for (let page = 0; page < pageLimit; page++) {
-        console.log(`${indent}  Scroll page ${page + 1}/${pageLimit}`);
-        this.walkChildren(sel.name, allSelectors, records, depth);
-        this.browser.scroll("down", 2000);
-        this.browser.sleep(1500);
-        if (stopCondition) {
-          const met = this.browser.evalJson<boolean>(`
-            (() => document.querySelector('${escapeJs(stopCondition)}') ? true : false)()
-          `);
-          if (met) {
-            console.log(`${indent}  Stop condition met`);
-            break;
+      // Re-execute parent actions to attempt state recovery
+      for (const parentName of node.parents) {
+        const parent = allNodes[parentName];
+        if (parent?.action) {
+          for (const action of parent.action) {
+            this.executeAction(action, [], indent);
           }
         }
       }
-    }
-  }
 
-  // ------------------------------------------------------------------
-  // Matrix handler
-  // ------------------------------------------------------------------
-
-  private handleMatrix(
-    sel: Selector,
-    allSelectors: Record<string, Selector>,
-    records: ExtractedRecord[],
-    depth: number,
-  ): void {
-    const indent = "  ".repeat(depth);
-    const matrix = sel.matrix;
-    if (!matrix?.axes?.length) return;
-
-    const resolved = matrix.axes.map((axis) => {
-      let values = axis.values;
-      if (values === "auto" || (Array.isArray(values) && values.length === 0)) {
-        values = this.discoverAxisValues(axis.selector, axis.action);
-      }
-      return { ...axis, values: values as string[] };
-    });
-
-    const combos = cartesian(resolved.map((a) => a.values));
-    console.log(`${indent}  Matrix: ${combos.length} combos across ${resolved.length} axes`);
-
-    for (const combo of combos) {
-      console.log(`${indent}  Combo: [${combo.join(", ")}]`);
-      for (let i = 0; i < combo.length; i++) {
-        const axis = resolved[i];
-        const val = combo[i];
-        if (axis.action === "select") {
-          this.browser.select({ css: axis.selector }, val);
-        } else if (axis.action === "type") {
-          this.browser.eval(`
-            (() => {
-              const el = document.querySelector('${escapeJs(axis.selector)}');
-              if (el) { el.value = ''; el.value = '${escapeJs(val)}'; el.dispatchEvent(new Event('input')); }
-            })()
-          `);
-        } else if (axis.action === "checkbox") {
-          this.browser.click({ css: axis.selector });
-        }
-      }
-      this.browser.wait({ networkIdle: true });
-      this.browser.sleep(1000);
-      this.walkChildren(sel.name, allSelectors, records, depth);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Children
-  // ------------------------------------------------------------------
-
-  private walkChildren(
-    parentName: string,
-    allSelectors: Record<string, Selector>,
-    records: ExtractedRecord[],
-    depth: number,
-  ): void {
-    for (const sel of Object.values(allSelectors)) {
-      if ((sel.parents ?? []).includes(parentName)) {
-        this.walkSelector(sel, allSelectors, records, depth + 1);
+      if (this.checkState(node.state!)) {
+        console.log(`${indent}  [retry] State check passed on attempt ${attempt}`);
+        return true;
       }
     }
+    return false;
   }
 
-  // ------------------------------------------------------------------
-  // Context checking
-  // ------------------------------------------------------------------
+  // ── state checking ────────────────────────────────────
 
-  private checkContext(context: Context): boolean {
-    if (!context || Object.keys(context).length === 0) return true;
-    const url = this.browser.getUrl() ?? "";
+  private checkState(state: State): boolean {
+    if (!state || Object.keys(state).length === 0) return true;
+    const url = this.driver.getUrl() ?? "";
 
-    if (context.url_pattern && !url.includes(context.url_pattern)) return false;
-    if (context.url && !url.includes(context.url)) return false;
+    if (state.url && !url.includes(state.url)) return false;
+    if (state.url_pattern && !url.includes(state.url_pattern)) return false;
 
-    if (context.selector_exists) {
-      const exists = this.browser.evalJson<boolean>(`
-        (() => document.querySelector('${escapeJs(context.selector_exists)}') ? true : false)()
+    if (state.selector_exists && !this.driver.exists(state.selector_exists)) return false;
+
+    if (state.text_in_page) {
+      const found = this.driver.evalJson<boolean>(`
+        (() => document.body.innerText.includes('${escapeJs(state.text_in_page)}'))()
       `);
-      if (!exists) return false;
+      if (!found) return false;
     }
 
-    if (context.text_in_page) {
-      const found = this.browser.evalJson<boolean>(`
-        (() => document.body.innerText.includes('${escapeJs(context.text_in_page)}'))()
+    if (state.table_headers) {
+      const headers = state.table_headers;
+      const found = this.driver.evalJson<boolean>(`
+        (() => {
+          const ths = [...document.querySelectorAll('th')].map(h => h.textContent.trim());
+          const need = ${JSON.stringify(headers)};
+          return need.every(h => ths.includes(h));
+        })()
       `);
       if (!found) return false;
     }
@@ -303,159 +227,215 @@ export class Engine {
     return true;
   }
 
-  // ------------------------------------------------------------------
-  // Interaction execution
-  // ------------------------------------------------------------------
+  // ── action execution ──────────────────────────────────
 
-  private executeInteraction(interaction: Interaction): void {
-    const itype = interaction.type;
-    console.log(`    [interaction] ${itype}`);
+  private executeAction(
+    action: Action,
+    records: ExtractedRecord[],
+    indent: string,
+  ): void {
+    if ("click" in action) {
+      console.log(`${indent}  [action] click`);
+      this.driver.click(action.click, { type: action.type });
+      if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
 
-    if (itype === "click") {
-      const target = interaction.target ?? {};
-      const actionType = interaction.click_action_type ?? "real";
+    } else if ("select" in action) {
+      console.log(`${indent}  [action] select → ${action.value}`);
+      this.driver.select(action.select, action.value);
+      if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
 
-      if (target.css) {
-        const href = this.browser.evalJson<string>(`
-          (() => {
-            const el = document.querySelector('${escapeJs(target.css)}');
-            return el ? (el.href || el.getAttribute('href') || '') : '';
-          })()
-        `);
-        if (href && typeof href === "string" && href.startsWith("http")) {
-          this.browser.open(href);
-        } else {
-          this.browser.click(target, actionType);
-        }
+    } else if ("scroll" in action) {
+      if (action.scroll === "to" && action.target) {
+        console.log(`${indent}  [action] scroll to target`);
+        this.scrollToTarget(action.target, action.ready, action.delay_ms);
       } else {
-        this.browser.click(target, actionType);
+        console.log(`${indent}  [action] scroll ${action.scroll}`);
+        this.driver.scroll(action.scroll as "down" | "up", action.px);
+        if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
       }
-      if (interaction.delay_ms) this.browser.sleep(interaction.delay_ms);
 
-    } else if (itype === "select") {
-      this.browser.select(interaction.target, interaction.value);
-      if (interaction.delay_ms) this.browser.sleep(interaction.delay_ms);
+    } else if ("wait" in action) {
+      console.log(`${indent}  [action] wait`);
+      this.driver.wait(action.wait as DriverWait);
 
-    } else if (itype === "scroll") {
-      this.browser.scroll(interaction.direction ?? "down", interaction.amount_px ?? 500);
-      if (interaction.delay_ms) this.browser.sleep(interaction.delay_ms);
-
-    } else if (itype === "wait") {
-      this.browser.wait({
-        ms: interaction.ms,
-        networkIdle: interaction.network_idle,
-        selector: interaction.selector,
-      });
-
-    } else if (itype === "reveal") {
-      const target = interaction.target;
-      if (interaction.mode === "hover") {
-        const sel = this.browser.locatorToSelector(target);
-        this.browser._run(["hover", `"${sel}"`]);
+    } else if ("reveal" in action) {
+      console.log(`${indent}  [action] reveal`);
+      if (action.mode === "hover") {
+        this.driver.hover(action.reveal);
       } else {
-        this.browser.click(target);
+        this.driver.click(action.reveal);
       }
-      if (interaction.delay_ms) this.browser.sleep(interaction.delay_ms);
+      if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
+
+    } else if ("navigate" in action) {
+      const url = this.resolveUrl(action.navigate.to, records);
+      console.log(`${indent}  [action] navigate → ${url}`);
+      this.driver.open(url, { wait: { idle: true } });
+
+    } else if ("input" in action) {
+      console.log(`${indent}  [action] input`);
+      this.driver.type(action.input.target, action.input.value);
+      if (action.delay_ms) this.driver.wait({ ms: action.delay_ms });
     }
   }
 
-  // ------------------------------------------------------------------
-  // Extraction via DOM eval
-  // ------------------------------------------------------------------
-
-  private extractSingle(
-    containerCss: string | null,
-    extractions: Extraction[],
-  ): Record<string, unknown> | null {
-    const containerJs = containerCss
-      ? `const container = document.querySelector('${escapeJs(containerCss)}') || document;`
-      : `const container = document;`;
-
-    const fieldJs = extractions.map((ext) => this.extractionToJs(ext)).join("\n");
-
-    const js = `
-      (() => {
-        ${containerJs}
-        const result = {};
-        ${fieldJs}
-        return JSON.stringify(result);
-      })()
-    `;
-    return this.browser.evalJson(js);
-  }
-
-  private extractMultiple(
-    rowCss: string,
-    extractions: Extraction[],
-  ): Record<string, unknown>[] {
-    const fieldJs = extractions.map((ext) => this.extractionToJs(ext, "row")).join("\n");
-
-    const js = `
-      (() => {
-        const rows = [...document.querySelectorAll('${escapeJs(rowCss)}')];
-        return JSON.stringify(rows.map(row => {
-          const container = row;
-          const result = {};
-          ${fieldJs}
-          return result;
-        }));
-      })()
-    `;
-    return this.browser.evalJson<Record<string, unknown>[]>(js) ?? [];
-  }
-
-  private extractionToJs(ext: Extraction, varName = "container"): string {
-    const etype = ext.type ?? "text";
-    const name = escapeJs(ext.name ?? "unnamed");
-    const selector = "selector" in ext ? escapeJs(ext.selector ?? "") : "";
-
-    switch (etype) {
-      case "text":
-        return `result['${name}'] = ${varName}.querySelector('${selector}')?.textContent?.trim() || '';`;
-      case "html":
-        return `result['${name}'] = ${varName}.querySelector('${selector}')?.innerHTML || '';`;
-      case "attr": {
-        const attr = escapeJs((ext as { attr: string }).attr ?? "");
-        return `result['${name}'] = ${varName}.querySelector('${selector}')?.getAttribute('${attr}') || '';`;
-      }
-      case "link": {
-        const attr = escapeJs((ext as { attr?: string }).attr ?? "href");
-        return `result['${name}'] = ${varName}.querySelector('${selector}')?.getAttribute('${attr}') || '';`;
-      }
-      case "table":
-        return this.tableExtractionJs(ext as Extraction & { type: "table" }, varName);
-      case "ai":
-        return `result['${name}'] = '[AI extraction not implemented]';`;
-      default:
-        return `result['${name}'] = '';`;
-    }
-  }
-
-  private tableExtractionJs(
-    ext: { name: string; selector: string; header_row?: number; columns?: Array<{ name: string; header?: string; index?: number }> },
-    varName = "container",
-  ): string {
-    const name = escapeJs(ext.name ?? "table");
-    const selector = escapeJs(ext.selector ?? "table");
-    const headerRow = ext.header_row ?? 0;
-    const columns = ext.columns ?? [];
-
-    if (columns.length > 0) {
-      const colDefs = JSON.stringify(columns);
-      return `
+  /**
+   * Scroll incrementally until target element is in the viewport,
+   * then optionally wait for a readiness condition (e.g. lazy content loaded).
+   */
+  private scrollToTarget(
+    target: Locator,
+    ready?: { idle: true } | { selector: string } | { ms: number },
+    delay_ms?: number,
+  ): void {
+    const css = locatorToSelector(target);
+    const maxScrolls = 50;
+    for (let i = 0; i < maxScrolls; i++) {
+      const visible = this.driver.evalJson<boolean>(`
         (() => {
-          const tbl = ${varName}.querySelector('${selector}');
-          if (!tbl) { result['${name}'] = []; return; }
-          const hdr = tbl.querySelectorAll('tr')[${headerRow}];
+          const el = document.querySelector('${escapeJs(css)}');
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.top >= 0 && rect.top <= window.innerHeight;
+        })()
+      `);
+      if (visible) {
+        // Target in viewport — now wait for content readiness if specified
+        if (ready) this.driver.wait(ready as DriverWait);
+        if (delay_ms) this.driver.wait({ ms: delay_ms });
+        return;
+      }
+      this.driver.scroll("down", 500);
+      this.driver.wait({ ms: 300 });
+    }
+    console.log(`    [scroll-to] Target not visible after ${maxScrolls} scrolls`);
+  }
+
+  private resolveUrl(template: string, records: ExtractedRecord[]): string {
+    // Replace {field_ref} with the most recent matching extracted value
+    return template.replace(/\{(\w+)\}/g, (_match, field: string) => {
+      for (let i = records.length - 1; i >= 0; i--) {
+        const val = records[i].data[field];
+        if (val !== undefined && val !== null) return String(val);
+      }
+      return `{${field}}`; // unresolved — leave as-is
+    });
+  }
+
+  // ── extraction ────────────────────────────────────────
+
+  private extract(node: NER, indent: string): Record<string, unknown> | null {
+    const rules = node.extract;
+    if (!rules || rules.length === 0) return null;
+
+    const result: Record<string, unknown> = {};
+    for (const rule of rules) {
+      if ("text" in rule) {
+        const { name, css, regex } = rule.text;
+        let val = this.domText(css);
+        if (regex && val) {
+          const m = val.match(new RegExp(regex));
+          val = m ? m[0] : val;
+        }
+        result[name] = val ?? "";
+
+      } else if ("attr" in rule) {
+        result[rule.attr.name] = this.domAttr(rule.attr.css, rule.attr.attr) ?? "";
+
+      } else if ("html" in rule) {
+        result[rule.html.name] = this.domHtml(rule.html.css) ?? "";
+
+      } else if ("link" in rule) {
+        result[rule.link.name] = this.domAttr(rule.link.css, rule.link.attr) ?? "";
+
+      } else if ("image" in rule) {
+        result[rule.image.name] = this.domAttr(rule.image.css, "src") ?? "";
+
+      } else if ("table" in rule) {
+        result[rule.table.name] = this.domTable(rule.table);
+
+      } else if ("grouped" in rule) {
+        const { name, css, attr } = rule.grouped;
+        result[name] = this.domGrouped(css, attr);
+
+      } else if ("ai" in rule) {
+        const { name, prompt, input, schema, categories } = rule.ai;
+        const context = input ? String(result[input] ?? "") : "";
+        if (categories && categories.length > 0) {
+          result[name] = this.ai.classify(prompt, context, categories);
+        } else {
+          const aiResult = this.ai.extract(prompt, context, schema);
+          result[name] = aiResult;
+        }
+      }
+    }
+
+    if (Object.keys(result).length > 0) {
+      console.log(`${indent}  Extracted ${Object.keys(result).length} fields`);
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  // ── DOM extraction helpers ────────────────────────────
+
+  private domText(css: string): string | null {
+    return this.driver.evalJson<string>(`
+      (() => {
+        const el = document.querySelector('${escapeJs(css)}');
+        return el ? el.textContent.trim() : null;
+      })()
+    `);
+  }
+
+  private domAttr(css: string, attr: string): string | null {
+    return this.driver.evalJson<string>(`
+      (() => {
+        const el = document.querySelector('${escapeJs(css)}');
+        return el ? el.getAttribute('${escapeJs(attr)}') : null;
+      })()
+    `);
+  }
+
+  private domHtml(css: string): string | null {
+    return this.driver.evalJson<string>(`
+      (() => {
+        const el = document.querySelector('${escapeJs(css)}');
+        return el ? el.innerHTML : null;
+      })()
+    `);
+  }
+
+  private domGrouped(css: string, attr?: string): string[] {
+    return this.driver.evalJson<string[]>(`
+      (() => {
+        const els = [...document.querySelectorAll('${escapeJs(css)}')];
+        return els.map(el => ${attr ? `el.getAttribute('${escapeJs(attr)}')` : "el.textContent.trim()"});
+      })()
+    `) ?? [];
+  }
+
+  private domTable(cfg: {
+    css: string;
+    header_row: number;
+    columns?: Array<{ name: string; header?: string; index?: number }>;
+  }): Record<string, string>[] {
+    const columns = cfg.columns ?? [];
+    if (columns.length > 0) {
+      // Header-based mapping (preferred)
+      return this.driver.evalJson<Record<string, string>[]>(`
+        (() => {
+          const tbl = document.querySelector('${escapeJs(cfg.css)}');
+          if (!tbl) return [];
+          const hdr = tbl.querySelectorAll('tr')[${cfg.header_row}];
           const headers = [...(hdr?.querySelectorAll('th, td') || [])].map(c => c.textContent.trim());
-          const colDefs = ${colDefs};
+          const colDefs = ${JSON.stringify(columns)};
           const colMap = colDefs.map(cd => {
             if (cd.header) return headers.indexOf(cd.header);
             if (cd.index !== undefined) return cd.index;
             return -1;
           });
-          const dataRows = [...tbl.querySelectorAll('tr')].slice(${headerRow + 1});
-          result['${name}'] = dataRows.map(row => {
+          const dataRows = [...tbl.querySelectorAll('tr')].slice(${cfg.header_row + 1});
+          return dataRows.map(row => {
             const cells = [...row.querySelectorAll('td, th')];
             const obj = {};
             colDefs.forEach((cd, i) => {
@@ -464,63 +444,398 @@ export class Engine {
             });
             return obj;
           });
-        })();
-      `;
+        })()
+      `) ?? [];
     }
 
-    return `
+    // No columns defined — return all cells as arrays
+    return this.driver.evalJson<Record<string, string>[]>(`
       (() => {
-        const tbl = ${varName}.querySelector('${selector}');
-        if (!tbl) { result['${name}'] = []; return; }
-        result['${name}'] = [...tbl.querySelectorAll('tr')].map(row =>
+        const tbl = document.querySelector('${escapeJs(cfg.css)}');
+        if (!tbl) return [];
+        const rows = [...tbl.querySelectorAll('tr')].slice(${cfg.header_row + 1});
+        return rows.map(row =>
           [...row.querySelectorAll('td, th')].map(c => c.textContent.trim())
         );
-      })();
-    `;
-  }
-
-  // ------------------------------------------------------------------
-  // Helpers
-  // ------------------------------------------------------------------
-
-  private discoverPageUrls(pagSelector: string, pageLimit: number): string[] {
-    const result = this.browser.evalJson<string[]>(`
-      (() => {
-        const links = [...document.querySelectorAll('${escapeJs(pagSelector)}')];
-        const current = window.location.href;
-        const urls = [current, ...links.map(a => a.href)].filter((v, i, s) => s.indexOf(v) === i);
-        return JSON.stringify(urls);
       })()
-    `);
-    if (Array.isArray(result)) return result.slice(0, pageLimit);
-    return [this.browser.getUrl() ?? ""];
+    `) ?? [];
   }
 
-  private discoverAxisValues(selector: string, action: string): string[] {
+  // ── expansion ─────────────────────────────────────────
+
+  private expandAndDescend(
+    node: NER,
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+  ): void {
+    const expand = node.expand!;
+    const indent = "  ".repeat(depth);
+
+    if (expand.over === "elements") {
+      this.expandElements(node, expand, allNodes, records, depth, indent);
+    } else if (expand.over === "pages") {
+      this.expandPages(node, expand, allNodes, records, depth, indent);
+    } else if (expand.over === "combinations") {
+      this.expandCombinations(node, expand, allNodes, records, depth, indent);
+    }
+  }
+
+  // ── expand: elements ──────────────────────────────────
+
+  private expandElements(
+    node: NER,
+    expand: { over: "elements"; scope: string; limit?: number; order: "dfs" | "bfs" },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    // Extract data from all matching elements
+    const extractRules = node.extract ?? [];
+    const rows = this.extractMultiple(expand.scope, extractRules, expand.limit);
+    console.log(`${indent}  Expand elements: ${rows.length} matches`);
+
+    if (expand.order === "bfs") {
+      // BFS: collect all observations first, then walk children for each
+      const batchRecords: ExtractedRecord[] = [];
+      for (const row of rows) {
+        let record = this.makeRecord(node.name, row);
+        record = this.hooks.invoke("post_extract", record);
+        batchRecords.push(record);
+        records.push(record);
+      }
+      for (const _rec of batchRecords) {
+        this.walkChildren(node.name, allNodes, records, depth);
+      }
+    } else {
+      // DFS: process each element fully before moving to next
+      for (const row of rows) {
+        let record = this.makeRecord(node.name, row);
+        record = this.hooks.invoke("post_extract", record);
+        records.push(record);
+        this.walkChildren(node.name, allNodes, records, depth);
+      }
+    }
+  }
+
+  private extractMultiple(
+    scope: string,
+    rules: Extraction[],
+    limit?: number,
+  ): Record<string, unknown>[] {
+    if (rules.length === 0) {
+      // No extraction rules — just count elements for iteration
+      const count = this.driver.evalJson<number>(`
+        (() => document.querySelectorAll('${escapeJs(scope)}').length)()
+      `) ?? 0;
+      return Array.from({ length: Math.min(count, limit ?? count) }, () => ({}));
+    }
+
+    const fieldJs = rules
+      .map((rule) => this.extractionToJs(rule))
+      .join("\n");
+
+    const limitJs = limit ? `.slice(0, ${limit})` : "";
+
+    return this.driver.evalJson<Record<string, unknown>[]>(`
+      (() => {
+        const rows = [...document.querySelectorAll('${escapeJs(scope)}')]${limitJs};
+        return rows.map(container => {
+          const result = {};
+          ${fieldJs}
+          return result;
+        });
+      })()
+    `) ?? [];
+  }
+
+  // ── expand: pages ─────────────────────────────────────
+
+  private expandPages(
+    node: NER,
+    expand: {
+      over: "pages";
+      strategy: "next" | "numeric" | "infinite";
+      control: string;
+      limit: number;
+      start: number;
+      stop?: StopCondition;
+      order: "dfs" | "bfs";
+    },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    console.log(`${indent}  Expand pages: strategy=${expand.strategy}, limit=${expand.limit}`);
+
+    if (expand.strategy === "numeric") {
+      this.expandNumericPages(node, expand, allNodes, records, depth, indent);
+    } else if (expand.strategy === "next") {
+      this.expandNextPages(node, expand, allNodes, records, depth, indent);
+    } else if (expand.strategy === "infinite") {
+      this.expandInfiniteScroll(node, expand, allNodes, records, depth, indent);
+    }
+  }
+
+  private expandNumericPages(
+    node: NER,
+    expand: { control: string; limit: number; order: "dfs" | "bfs" },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    // Discover all page URLs from pagination links
+    const pageUrls = this.driver.evalJson<string[]>(`
+      (() => {
+        const links = [...document.querySelectorAll('${escapeJs(expand.control)}')];
+        const current = window.location.href;
+        const urls = [current, ...links.map(a => a.href)].filter((v,i,s) => s.indexOf(v) === i);
+        return urls;
+      })()
+    `) ?? [];
+
+    const limited = pageUrls.slice(0, expand.limit);
+    console.log(`${indent}  Discovered ${limited.length} pages`);
+
+    if (expand.order === "bfs") {
+      // BFS: discover all pages, then walk children on each
+      const urls = [...limited];
+      for (let i = 0; i < urls.length; i++) {
+        console.log(`${indent}  Page ${i + 1}/${urls.length}`);
+        if (i > 0) {
+          this.driver.open(urls[i], { wait: { idle: true } });
+        }
+        this.walkChildren(node.name, allNodes, records, depth);
+      }
+    } else {
+      // DFS: process each page fully
+      for (let i = 0; i < limited.length; i++) {
+        console.log(`${indent}  Page ${i + 1}/${limited.length}`);
+        if (i > 0) {
+          this.driver.open(limited[i], { wait: { idle: true } });
+        }
+        this.walkChildren(node.name, allNodes, records, depth);
+      }
+    }
+  }
+
+  private expandNextPages(
+    node: NER,
+    expand: { control: string; limit: number; stop?: StopCondition },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    for (let page = 0; page < expand.limit; page++) {
+      console.log(`${indent}  Page ${page + 1}/${expand.limit}`);
+      this.walkChildren(node.name, allNodes, records, depth);
+
+      // Check if next button exists
+      if (!this.driver.exists(expand.control)) {
+        console.log(`${indent}  No more pages (control not found)`);
+        break;
+      }
+
+      // Check stop conditions
+      if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) {
+        console.log(`${indent}  Sentinel found`);
+        break;
+      }
+      if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) {
+        console.log(`${indent}  Sentinel gone`);
+        break;
+      }
+
+      this.driver.click({ css: expand.control });
+      this.driver.wait({ idle: true });
+    }
+  }
+
+  private expandInfiniteScroll(
+    node: NER,
+    expand: { limit: number; stop?: StopCondition },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    const maxIter = expand.stop?.limit ?? expand.limit;
+    let stableCount = 0;
+    let lastCount = -1;
+
+    for (let page = 0; page < maxIter; page++) {
+      console.log(`${indent}  Scroll ${page + 1}/${maxIter}`);
+      this.walkChildren(node.name, allNodes, records, depth);
+      this.driver.scroll("down", 2000);
+      this.driver.wait({ ms: 1500 });
+
+      // Check sentinel: a specific element appeared
+      if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) {
+        console.log(`${indent}  Sentinel found: ${expand.stop.sentinel}`);
+        break;
+      }
+
+      // Check sentinel_gone: a specific element disappeared
+      if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) {
+        console.log(`${indent}  Sentinel gone: ${expand.stop.sentinel_gone}`);
+        break;
+      }
+
+      // Check stability: element count stopped changing
+      if (expand.stop?.stable) {
+        const currentCount = this.driver.evalJson<number>(`
+          document.querySelectorAll('${escapeJs(expand.stop.stable.css)}').length
+        `) ?? 0;
+
+        if (currentCount === lastCount) {
+          stableCount++;
+          if (stableCount >= (expand.stop.stable.after ?? 2)) {
+            console.log(`${indent}  Stable: ${currentCount} elements unchanged for ${stableCount} scrolls`);
+            break;
+          }
+        } else {
+          stableCount = 0;
+        }
+        lastCount = currentCount;
+      }
+    }
+  }
+
+  // ── expand: combinations ──────────────────────────────
+
+  private expandCombinations(
+    node: NER,
+    expand: {
+      over: "combinations";
+      axes: Array<{ action: "select" | "type" | "checkbox"; control: string; values: string[] | "auto" }>;
+      order: "dfs" | "bfs";
+    },
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+    indent: string,
+  ): void {
+    // Resolve "auto" values from DOM
+    const resolvedAxes = expand.axes.map((axis) => {
+      if (axis.values === "auto") {
+        const values = this.discoverAxisValues(axis.control, axis.action);
+        return { ...axis, values };
+      }
+      return { ...axis, values: axis.values as string[] };
+    });
+
+    const combos = cartesian(resolvedAxes.map((a) => a.values));
+    console.log(`${indent}  Expand combinations: ${combos.length} combos across ${resolvedAxes.length} axes`);
+
+    for (const combo of combos) {
+      console.log(`${indent}  Combo: [${combo.join(", ")}]`);
+
+      // Apply each axis value
+      for (let i = 0; i < combo.length; i++) {
+        const axis = resolvedAxes[i];
+        const val = combo[i];
+        if (axis.action === "select") {
+          this.driver.select({ css: axis.control }, val);
+        } else if (axis.action === "type") {
+          this.driver.type({ css: axis.control }, val);
+        } else if (axis.action === "checkbox") {
+          this.driver.click({ css: axis.control });
+        }
+      }
+
+      this.driver.wait({ idle: true });
+      this.walkChildren(node.name, allNodes, records, depth);
+    }
+  }
+
+  private discoverAxisValues(control: string, action: string): string[] {
     if (action === "select") {
-      return this.browser.evalJson<string[]>(`
+      return this.driver.evalJson<string[]>(`
         (() => {
-          const opts = [...document.querySelectorAll('${escapeJs(selector)} option')];
-          return JSON.stringify(opts.map(o => o.value).filter(v => v !== ''));
+          const opts = [...document.querySelectorAll('${escapeJs(control)} option')];
+          return opts.map(o => o.value).filter(v => v !== '');
         })()
       `) ?? [];
     }
     return [];
   }
 
-  private makeRecord(selectorName: string, data: Record<string, unknown>): ExtractedRecord {
+  // ── children ──────────────────────────────────────────
+
+  private walkChildren(
+    parentName: string,
+    allNodes: Record<string, NER>,
+    records: ExtractedRecord[],
+    depth: number,
+  ): void {
+    for (const node of Object.values(allNodes)) {
+      if ((node.parents ?? []).includes(parentName)) {
+        this.walkNode(node, allNodes, records, depth + 1);
+      }
+    }
+  }
+
+  // ── helpers ───────────────────────────────────────────
+
+  private makeRecord(nodeName: string, data: Record<string, unknown>): ExtractedRecord {
     return {
-      selector: selectorName,
-      url: this.browser.getUrl() ?? "",
+      node: nodeName,
+      url: this.driver.getUrl() ?? "",
       data,
       extracted_at: new Date().toISOString(),
     };
   }
+
+  /**
+   * Compile an extraction rule to inline JS for use inside evalJson.
+   * Operates relative to a `container` variable (the scoped element).
+   */
+  private extractionToJs(rule: Extraction): string {
+    if ("text" in rule) {
+      const { name, css, regex } = rule.text;
+      const base = `container.querySelector('${escapeJs(css)}')?.textContent?.trim() || ''`;
+      if (regex) {
+        return `result['${escapeJs(name)}'] = (() => { const v = ${base}; const m = v.match(${regex}); return m ? m[0] : v; })();`;
+      }
+      return `result['${escapeJs(name)}'] = ${base};`;
+
+    } else if ("attr" in rule) {
+      return `result['${escapeJs(rule.attr.name)}'] = container.querySelector('${escapeJs(rule.attr.css)}')?.getAttribute('${escapeJs(rule.attr.attr)}') || '';`;
+
+    } else if ("html" in rule) {
+      return `result['${escapeJs(rule.html.name)}'] = container.querySelector('${escapeJs(rule.html.css)}')?.innerHTML || '';`;
+
+    } else if ("link" in rule) {
+      return `result['${escapeJs(rule.link.name)}'] = container.querySelector('${escapeJs(rule.link.css)}')?.getAttribute('${escapeJs(rule.link.attr)}') || '';`;
+
+    } else if ("image" in rule) {
+      return `result['${escapeJs(rule.image.name)}'] = container.querySelector('${escapeJs(rule.image.css)}')?.getAttribute('src') || '';`;
+
+    } else if ("grouped" in rule) {
+      const { name, css, attr } = rule.grouped;
+      const read = attr
+        ? `el.getAttribute('${escapeJs(attr)}')`
+        : "el.textContent.trim()";
+      return `result['${escapeJs(name)}'] = [...container.querySelectorAll('${escapeJs(css)}')].map(el => ${read});`;
+
+    } else if ("table" in rule) {
+      // Table extraction in multi-element context — simplified
+      return `result['${escapeJs(rule.table.name)}'] = '[table in multi-scope unsupported]';`;
+
+    } else if ("ai" in rule) {
+      // AI extraction deferred to post-processing
+      return `result['${escapeJs(rule.ai.name)}'] = '[ai:deferred]';`;
+    }
+
+    return "";
+  }
 }
 
-// ------------------------------------------------------------------
-// Utility
-// ------------------------------------------------------------------
+// ── utilities ───────────────────────────────────────────
 
 function cartesian(arrays: string[][]): string[][] {
   if (arrays.length === 0) return [[]];

@@ -1,23 +1,28 @@
-selectors:
-  - name: search_matrix
-    type: matrix
+# Matrix — cartesian product of filter/search axes.
+# Each combination produces a successor state; children run in each.
+nodes:
+  - name: search_combos
     parents: [root]
-    multiple: true
-    matrix:
-      auto_discover: true
+    expand:
+      over: combinations
       axes:
         - action: type
-          selector: "#search-box"
+          control: "#search-box"
           values: ["laptop", "tablet"]
         - action: select
-          selector: "#brand-dropdown"
+          control: "#brand-dropdown"
           values: auto
         - action: checkbox
-          selector: "#in-stock"
-          values: []
+          control: "#in-stock"
+          values: ["on"]
+    action:
+      - wait: { idle: true }
 
-  - name: search_results
-    type: element
-    selector: ".result-row"
-    multiple: true
-    parents: [search_matrix]
+  - name: results
+    parents: [search_combos]
+    expand:
+      over: elements
+      scope: ".result-row"
+    extract:
+      - text: { name: title, css: ".title" }
+      - text: { name: price, css: ".price" }

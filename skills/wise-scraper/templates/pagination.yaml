@@ -1,14 +1,18 @@
-selectors:
-  - name: pagination
-    type: pagination
-    selector: ".next-page"
-    pagination:
-      pagination_type: next
-      selector: ".next-page"
+# Pagination — expand over pages, children run once per page.
+# Compose: put extraction nodes as children of "pages".
+nodes:
+  - name: pages
     parents: [root]
+    expand:
+      over: pages
+      strategy: next
+      control: ".next-page"
+      limit: 10
 
-  - name: item
-    type: element
-    selector: ".item"
-    multiple: true
-    parents: [pagination]
+  - name: items
+    parents: [pages]
+    expand:
+      over: elements
+      scope: ".item"
+    extract:
+      - text: { name: title, css: ".title" }

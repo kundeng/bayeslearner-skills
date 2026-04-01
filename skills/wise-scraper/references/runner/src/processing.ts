@@ -7,7 +7,7 @@
 
 import * as cheerio from "cheerio";
 import TurndownService from "turndown";
-import type { ExtractedRecord } from "./types.js";
+import type { ExtractedRecord } from "./schema.js";
 
 // ------------------------------------------------------------------
 // HTML → Markdown

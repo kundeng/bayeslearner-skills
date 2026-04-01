@@ -9,7 +9,10 @@
  *   post_assemble  — after final output is built
  */
 
-import type { HookDef, Hooks } from "./types.js";
+import type { HookDef } from "./schema.js";
+
+/** Hook config shape — matches both ResourceHooks and deployment-level hooks. */
+type Hooks = Partial<Record<HookPoint, HookDef[]>>;
 
 export type HookFn<T = unknown> = (ctx: T) => T | void;
 
