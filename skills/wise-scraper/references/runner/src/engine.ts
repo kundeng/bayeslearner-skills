@@ -243,28 +243,26 @@ export class Engine {
     this.interrupts.check();
 
     // 3. Observe (extract data) — merge with ancestor context
-    const extracted = this.extract(node, indent);
-    const childContext = extracted ? { ...context, ...extracted } : context;
+    // Skip node-level extraction if this node has expand — expansion handles
+    // per-element extraction. Node-level extract + expand would double-count.
+    if (!node.expand) {
+      const extracted = this.extract(node, indent);
+      const childContext = extracted ? { ...context, ...extracted } : context;
 
-    if (extracted) {
-      // The record contains the FULL accumulated context, not just this node's fields
-      const data = { ...context, ...extracted };
-      let record = this.makeRecord(node.name, data);
-      record = this.hooks.invoke("post_extract", record);
-      records.push(record);
+      if (extracted) {
+        const data = { ...context, ...extracted };
+        let record = this.makeRecord(node.name, data);
+        record = this.hooks.invoke("post_extract", record);
+        records.push(record);
+        this.yieldToArtifacts(node, record);
+      }
 
-      // Yield into artifact stream(s)
-      this.yieldToArtifacts(node, record);
-    }
-
-    // Node delay
-    if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
-
-    // 4. Expand + 5. Walk children — pass childContext down the tree
-    if (node.expand) {
-      this.expandAndDescend(node, allNodes, records, depth, childContext);
-    } else {
+      if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
       this.walkChildren(node.name, allNodes, records, depth, childContext);
+    } else {
+      // 4. Expand handles extraction per-element, passing context down
+      if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
+      this.expandAndDescend(node, allNodes, records, depth, context);
     }
   }
 
