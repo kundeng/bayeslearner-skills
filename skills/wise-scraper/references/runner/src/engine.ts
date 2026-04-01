@@ -837,7 +837,7 @@ export class Engine {
     node: NER,
     expand: {
       over: "combinations";
-      axes: Array<{ action: "select" | "type" | "checkbox"; control: string; values: string[] | "auto" }>;
+      axes: Array<{ action: "select" | "type" | "checkbox" | "click"; control: string; values: string[] | "auto" }>;
       order: "dfs" | "bfs";
     },
     allNodes: Record<string, NER>,
@@ -868,6 +868,16 @@ export class Engine {
           this.driver.type({ css: axis.control }, val);
         } else if (axis.action === "checkbox") {
           this.driver.click({ css: axis.control });
+        } else if (axis.action === "click") {
+          // Click the Nth button/swatch matching the control selector
+          // val is the button text or value to match
+          this.driver.eval(`
+            (() => {
+              const btns = [...document.querySelectorAll('${escapeJs(axis.control)}')];
+              const target = btns.find(b => b.textContent.trim() === '${escapeJs(val)}' || b.value === '${escapeJs(val)}');
+              if (target) target.click();
+            })()
+          `);
         }
       }
       this.driver.wait({ idle: true });
@@ -881,6 +891,15 @@ export class Engine {
         (() => {
           const opts = [...document.querySelectorAll('${escapeJs(control)} option')];
           return opts.map(o => o.value).filter(v => v !== '');
+        })()
+      `) ?? [];
+    }
+    if (action === "click") {
+      // Discover button text values from matching elements
+      return this.driver.evalJson<string[]>(`
+        (() => {
+          const btns = [...document.querySelectorAll('${escapeJs(control)}')];
+          return btns.filter(b => !b.disabled).map(b => b.textContent.trim()).filter(v => v !== '');
         })()
       `) ?? [];
     }

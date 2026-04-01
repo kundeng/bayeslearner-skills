@@ -218,8 +218,8 @@ export const PageExpand = z.object({
 });
 
 export const Axis = z.object({
-  action: z.enum(["select", "type", "checkbox"]),
-  control: z.string(), // CSS for the form control
+  action: z.enum(["select", "type", "checkbox", "click"]),
+  control: z.string(), // CSS for the form control or button group
   values: z.union([z.array(z.string()), z.literal("auto")]),
 });
 

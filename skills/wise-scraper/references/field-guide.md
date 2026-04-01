@@ -149,7 +149,11 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 
 **Tables:** always prefer header-based column mapping over positional index.
 
+**Relative URLs:** The `link` extraction type uses `getAttribute('href')` which returns the raw attribute value — often a relative path like `/en/docs/page`. When a consuming resource navigates to these URLs, prepend the base URL in the `entry.url` template: `"https://example.com{url}"`. Do NOT rely on the resolved `.href` property.
+
 **AI extraction:** operates on already-extracted text (via `input` field reference), never on live DOM. Uses the abstract `AIAdapter` interface.
+
+**Expand scope vs extract scope:** When using `expand: { over: elements }`, the extract CSS selectors run *relative to each expanded element*. If you expand over `<a>` tags directly and try to extract `link: { css: "a" }`, the extractor looks for `<a>` *children* of the `<a>` and finds nothing. Expand over the parent wrapper instead (e.g., `.link-wrapper:has(a)`).
 
 ### Expansion (successor states)
 
@@ -275,6 +279,8 @@ These work at the **node level** (within a resource) and at the **resource level
 | Resource (cross-resource) | `resource.produces` | `resource.consumes` | Topological sort |
 
 **Key rule:** An artifact that is `yields`-ed into with BFS expansion will have ALL records before any consumer reads it. An artifact `yields`-ed into with DFS expansion will have records appear incrementally — but sibling consumers still see the full set because they run after the yielding node completes.
+
+**Precedence: don't use both `yields` and `produces` for the same artifact.** If a node declares `yields: my_data` AND the resource declares `produces: my_data`, records get written twice. Use `produces` on the resource (common case — one flat table per resource) OR `yields` on specific nodes (when different nodes write to different artifacts). Not both for the same artifact name.
 
 ### Website State Setup
 

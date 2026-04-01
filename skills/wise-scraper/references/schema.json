@@ -771,7 +771,8 @@
                                     "enum": [
                                       "select",
                                       "type",
-                                      "checkbox"
+                                      "checkbox",
+                                      "click"
                                     ]
                                   },
                                   "control": {
