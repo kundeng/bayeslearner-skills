@@ -334,7 +334,7 @@ export const ArtifactSchema = z.object({
 export const Resource = z.object({
   name: z.string(),
   entry: z.object({
-    url: z.union([z.string(), z.object({ from: z.string() })]),
+    url: z.string(),               // literal URL or "{field_ref}" template (resolved from consumes)
     root: z.string(),
   }),
   nodes: z.array(NER).min(1),

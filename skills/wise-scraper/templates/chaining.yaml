@@ -36,7 +36,7 @@ resources:
 
   - name: extract_pages
     entry:
-      url: { from: "page_urls" }
+      url: "{url}"
       root: page
     consumes: page_urls
     produces: page_content

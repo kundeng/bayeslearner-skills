@@ -62,18 +62,6 @@ export class ArtifactStore {
     return this.store.get(artifactName) ?? [];
   }
 
-  /** Get all URLs from an artifact (extracts the 'url' field from data, or the record URL). */
-  getUrls(artifactName: string): string[] {
-    const records = this.get(artifactName);
-    return records.map((r) => {
-      // Prefer a 'url' field in data (explicitly extracted link)
-      const dataUrl = r.data.url;
-      if (typeof dataUrl === "string" && dataUrl.startsWith("http")) return dataUrl;
-      // Fall back to the record's page URL
-      return r.url;
-    }).filter((u) => u !== "");
-  }
-
   /** Check if an artifact has any records. */
   has(artifactName: string): boolean {
     return (this.store.get(artifactName)?.length ?? 0) > 0;
@@ -145,6 +133,78 @@ export class ArtifactStore {
     if (order.length !== resources.length) {
       const missing = resources.map((r) => r.name).filter((n) => !order.includes(n));
       throw new Error(`Cycle detected in resource dependencies: ${missing.join(", ")}`);
+    }
+
+    return order;
+  }
+
+  /**
+   * Topological sort of nodes within a resource based on yields/consumes.
+   * Nodes without artifact dependencies keep their YAML order relative to
+   * each other but come before any node that consumes an artifact they don't yield.
+   *
+   * Returns node names in execution order.
+   */
+  static resolveNodeOrder(nodes: Array<{ name: string; yields?: string; consumes?: string; parents: string[] }>): string[] {
+    // Build yields → consumes edges
+    const yielder = new Map<string, string>(); // artifact → node name
+    for (const n of nodes) {
+      if (n.yields) yielder.set(n.yields, n.name);
+    }
+
+    const adj = new Map<string, string[]>();
+    const inDeg = new Map<string, number>();
+    for (const n of nodes) {
+      if (!adj.has(n.name)) adj.set(n.name, []);
+      if (!inDeg.has(n.name)) inDeg.set(n.name, 0);
+    }
+
+    // parent edges (existing DAG)
+    for (const n of nodes) {
+      for (const parent of n.parents) {
+        if (adj.has(parent)) {
+          adj.get(parent)!.push(n.name);
+          inDeg.set(n.name, (inDeg.get(n.name) ?? 0) + 1);
+        }
+      }
+    }
+
+    // artifact edges: yielder must run before consumer
+    for (const n of nodes) {
+      if (n.consumes) {
+        const producer = yielder.get(n.consumes);
+        if (producer && producer !== n.name) {
+          // Only add if not already an edge (e.g. already a parent)
+          const existing = adj.get(producer) ?? [];
+          if (!existing.includes(n.name)) {
+            existing.push(n.name);
+            adj.set(producer, existing);
+            inDeg.set(n.name, (inDeg.get(n.name) ?? 0) + 1);
+          }
+        }
+      }
+    }
+
+    // Kahn's — stable: preserve YAML order for ties
+    const queue: string[] = [];
+    for (const n of nodes) {
+      if ((inDeg.get(n.name) ?? 0) === 0) queue.push(n.name);
+    }
+
+    const order: string[] = [];
+    while (queue.length > 0) {
+      const name = queue.shift()!;
+      order.push(name);
+      for (const next of adj.get(name) ?? []) {
+        const newDeg = (inDeg.get(next) ?? 1) - 1;
+        inDeg.set(next, newDeg);
+        if (newDeg === 0) queue.push(next);
+      }
+    }
+
+    if (order.length !== nodes.length) {
+      const missing = nodes.map((n) => n.name).filter((n) => !order.includes(n));
+      throw new Error(`Cycle detected in node dependencies: ${missing.join(", ")}`);
     }
 
     return order;

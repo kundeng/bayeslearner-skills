@@ -17,7 +17,7 @@ import { locatorToSelector, escapeJs } from "./driver.js";
 import type { AIAdapter } from "./ai.js";
 import { HookRegistry } from "./hooks.js";
 import { InterruptHandler } from "./interrupts.js";
-import type { ArtifactStore } from "./store.js";
+import { ArtifactStore } from "./store.js";
 import type {
   Resource,
   NER,
@@ -59,82 +59,87 @@ export class Engine {
     // Run state setup if needed (auth, locale, etc.)
     if (resource.setup) this.runSetup(resource.setup);
 
-    // Resolve entry URLs
-    const entryUrls = this.resolveEntryUrls(resource);
-    if (entryUrls.length === 0) {
-      console.error("[engine] No entry URLs resolved");
-      return [];
-    }
-
     const rootNode = nodeMap[resource.entry.root];
     if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
 
+    // If resource consumes an artifact, iterate over its records.
+    // Each record's fields are available for {field_ref} in entry.url.
+    if (resource.consumes && this.store) {
+      const consumed = this.store.get(resource.consumes);
+      if (consumed.length === 0) {
+        console.warn(`[engine] Consumed artifact '${resource.consumes}' is empty`);
+        return [];
+      }
+      console.log(`[engine] Consuming ${consumed.length} records from '${resource.consumes}'`);
+      return this.runResourceOverRecords(resource, rootNode, nodeMap, consumed);
+    }
+
+    // Otherwise: single entry URL, run once
+    return this.runResourceOnce(resource, rootNode, nodeMap, resource.entry.url, null);
+  }
+
+  /** Run the resource once per consumed record, resolving {field_ref} in entry URL. */
+  private runResourceOverRecords(
+    resource: Resource,
+    rootNode: NER,
+    nodeMap: Record<string, NER>,
+    records: ExtractedRecord[],
+  ): ExtractedRecord[] {
+    const globals = resource.globals;
     const allRecords: ExtractedRecord[] = [];
 
-    for (let i = 0; i < entryUrls.length; i++) {
-      const url = entryUrls[i];
-      if (entryUrls.length > 1) {
-        console.log(`[engine] Page ${i + 1}/${entryUrls.length}: ${url}`);
-      } else {
-        console.log(`[engine] Opening: ${url}`);
-      }
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      const url = this.resolveTemplate(resource.entry.url, rec.data);
+      console.log(`[engine] [${i + 1}/${records.length}] ${url}`);
 
-      if (!this.driver.open(url, { wait: { idle: true } })) {
-        console.error(`[engine] Failed to open: ${url}`);
-        continue;
-      }
+      const result = this.runResourceOnce(resource, rootNode, nodeMap, url, rec.data);
+      allRecords.push(...result);
 
-      if (globals?.page_load_delay_ms) {
-        this.driver.wait({ ms: globals.page_load_delay_ms });
-      }
-
-      // Dismiss interrupts on first page (cookie banners etc.)
-      if (i === 0) this.interrupts.check();
-
-      const records: ExtractedRecord[] = [];
-      this.walkNode(rootNode, nodeMap, records, 0);
-      allRecords.push(...records);
-
-      // Request interval between pages
-      if (globals?.request_interval_ms && i < entryUrls.length - 1) {
+      if (globals?.request_interval_ms && i < records.length - 1) {
         this.driver.wait({ ms: globals.request_interval_ms });
       }
     }
-
     return allRecords;
   }
 
-  // ── entry URL resolution ──────────────────────────────
+  /** Run the resource on a single URL. */
+  private runResourceOnce(
+    resource: Resource,
+    rootNode: NER,
+    nodeMap: Record<string, NER>,
+    url: string,
+    consumedData: Record<string, unknown> | null,
+  ): ExtractedRecord[] {
+    const globals = resource.globals;
 
-  private resolveEntryUrls(resource: Resource): string[] {
-    const entry = resource.entry.url;
-
-    // Direct URL string
-    if (typeof entry === "string") return [entry];
-
-    // Artifact reference: { from: "artifact_name" } or { from: "resource.node.field" }
-    if ("from" in entry && this.store) {
-      const ref = entry.from;
-      // Try as artifact name first
-      const urls = this.store.getUrls(ref);
-      if (urls.length > 0) {
-        console.log(`[engine] Resolved ${urls.length} URLs from artifact '${ref}'`);
-        return urls;
-      }
-      // Try as dotted path: "resource_name.node_name.field_name" → look up artifact by resource.consumes
-      if (resource.consumes) {
-        const fromUrls = this.store.getUrls(resource.consumes);
-        if (fromUrls.length > 0) {
-          console.log(`[engine] Resolved ${fromUrls.length} URLs from consumed artifact '${resource.consumes}'`);
-          return fromUrls;
-        }
-      }
-      console.warn(`[engine] No URLs found for reference '${ref}'`);
+    if (!url.startsWith("http")) {
+      console.error(`[engine] Invalid URL: ${url}`);
       return [];
     }
 
-    console.error("[engine] Cannot resolve entry URL — no store configured for artifact references");
-    return [];
+    if (!this.driver.open(url, { wait: { idle: true } })) {
+      console.error(`[engine] Failed to open: ${url}`);
+      return [];
+    }
+
+    if (globals?.page_load_delay_ms) {
+      this.driver.wait({ ms: globals.page_load_delay_ms });
+    }
+
+    this.interrupts.check();
+
+    const records: ExtractedRecord[] = [];
+    this.walkNode(rootNode, nodeMap, records, 0);
+    return records;
+  }
+
+  /** Resolve {field_ref} placeholders in a template string from a data record. */
+  private resolveTemplate(template: string, data: Record<string, unknown>): string {
+    return template.replace(/\{(\w+)\}/g, (_match, field: string) => {
+      const val = data[field];
+      return (val !== undefined && val !== null) ? String(val) : `{${field}}`;
+    });
   }
 
   // ── state setup ───────────────────────────────────────
@@ -874,10 +879,17 @@ export class Engine {
     records: ExtractedRecord[],
     depth: number,
   ): void {
-    for (const node of Object.values(allNodes)) {
-      if ((node.parents ?? []).includes(parentName)) {
-        this.walkNode(node, allNodes, records, depth + 1);
-      }
+    // Collect children of this parent
+    const children = Object.values(allNodes).filter(
+      (n) => (n.parents ?? []).includes(parentName),
+    );
+    if (children.length === 0) return;
+
+    // Topological sort: if any child yields/consumes, respect artifact dependencies.
+    // For children without artifact deps, this preserves YAML order (stable sort).
+    const sorted = ArtifactStore.resolveNodeOrder(children);
+    for (const name of sorted) {
+      this.walkNode(allNodes[name], allNodes, records, depth + 1);
     }
   }
 

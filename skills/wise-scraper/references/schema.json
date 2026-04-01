@@ -77,23 +77,7 @@
                 "type": "object",
                 "properties": {
                   "url": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "from": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "from"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
+                    "type": "string"
                   },
                   "root": {
                     "type": "string"
