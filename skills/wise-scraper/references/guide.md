@@ -105,6 +105,70 @@ quality:
     price: 80
 ```
 
+## Data Flow: Artifacts, Yields, Consumes
+
+Artifacts are **named, typed streams of records**. They serve three purposes:
+1. **Validation** — each record checked against declared fields at extraction time
+2. **Chaining** — nodes and resources wire together via `yields`/`consumes`
+3. **Output** — artifacts marked `output: true` are written as deliverables
+
+### Declaring artifacts
+
+```yaml
+artifacts:
+  page_urls:
+    fields:
+      url:   { type: string, required: true }
+      title: { type: string, required: true }
+
+  page_content:
+    fields:
+      title: { type: string, required: true }
+      body:  { type: string, required: true }
+    consumes: page_urls           # DAG edge: depends on page_urls
+    output: true                  # written to disk as final output
+    format: markdown              # in this format
+```
+
+### Node-level data flow (within a resource)
+
+```yaml
+nodes:
+  - name: toc
+    yields: page_urls             # records go into this artifact
+    expand: { over: elements, scope: "nav a", order: bfs }
+    extract:
+      - link: { name: url, css: "a" }
+
+  - name: pages
+    consumes: page_urls           # iterates over artifact records
+    action:
+      - navigate: { to: "{url}" }
+    extract:
+      - text: { name: title, css: "h1" }
+    yields: page_content
+```
+
+### Resource-level data flow (cross-resource)
+
+```yaml
+resources:
+  - name: discover
+    produces: page_urls
+    ...
+  - name: extract
+    consumes: page_urls
+    entry: { url: { from: "page_urls" }, root: page }
+    produces: page_content
+    ...
+```
+
+### BFS is required for discovery + yields
+
+When a node discovers URLs on a page and yields them into an artifact, it **must use `order: bfs`**. DFS would navigate away after the first URL, destroying the DOM context for further discovery. BFS collects all records into the artifact first, then children (or sibling consumers) process them.
+
+See `references/field-guide.md § BFS × yields` for a detailed example.
+
 ## Extraction Rules
 
 - **DOM eval for live-page extraction.** The driver evaluates JavaScript in the browser context. Do not use HTML parsing libraries for extracting data from the live page.

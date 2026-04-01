@@ -155,15 +155,62 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 
 This is the unifying concept. Instead of separate selector types, **any node can expand**:
 
-| `expand.over` | What it does | Old equivalent |
-|---|---|---|
-| **elements** | `querySelectorAll(scope)` — one successor per match | `multiple: true` |
-| **pages** | Navigate pages — one successor per page | `type: pagination` |
-| **combinations** | Cartesian product of axes — one successor per combo | `type: matrix` |
+| `expand.over` | What it does |
+|---|---|
+| **elements** | `querySelectorAll(scope)` — one successor per CSS match |
+| **pages** | Navigate pages — one successor per page (next/numeric/infinite) |
+| **combinations** | Cartesian product of filter axes — one successor per combo |
 
-Each expansion type supports **`order: dfs | bfs`**:
-- **DFS** (default): process each successor fully before the next. Streams results, uses minimal memory.
-- **BFS**: collect all successors first, then process children across all. Good for URL discovery → batch extraction.
+#### BFS vs DFS ordering
+
+Each expansion supports **`order: dfs | bfs`** (default: `dfs`). This controls when children run relative to expansion:
+
+**DFS** (default) — process each successor fully before the next:
+```
+Expand element 1 → extract → yield → walk children
+Expand element 2 → extract → yield → walk children
+...
+```
+Use DFS when: extracting rows from a table, paginating and extracting per page. Records stream out incrementally.
+
+**BFS** — collect ALL successors first, then walk children across all:
+```
+Expand element 1 → extract → yield
+Expand element 2 → extract → yield
+...all done...
+Walk children for element 1
+Walk children for element 2
+...
+```
+Use BFS when: discovering URLs that you'll navigate to later. **BFS is required when a node yields into an artifact that a sibling consumes** — because navigating to a discovered URL would destroy the DOM context needed to discover the next URL.
+
+#### BFS × yields: the discovery pattern
+
+```yaml
+nodes:
+  - name: toc
+    parents: [root]
+    expand:
+      over: elements
+      scope: "nav a[href*='/docs/']"
+      order: bfs                    # ← MUST be bfs: collect all URLs first
+    extract:
+      - link: { name: url, css: "a" }
+      - text: { name: title, css: "a" }
+    yields: page_urls               # all 80 URLs go into artifact BEFORE children
+
+  - name: pages
+    parents: [root]                 # sibling of toc, runs AFTER toc completes
+    consumes: page_urls             # iterates over all 80 URLs
+    action:
+      - navigate: { to: "{url}" }  # {url} from consumed record
+    extract:
+      - text: { name: title, css: "h1" }
+      - html: { name: body, css: ".body" }
+    yields: page_content
+```
+
+**Ordering rule:** A consuming node must run after its yielding node. For siblings (same parent), this is guaranteed by **YAML declaration order** — nodes listed first are walked first. For cross-resource chaining, the runner resolves order via topological sort on `produces`/`consumes`.
 
 #### Element expansion
 
@@ -172,7 +219,7 @@ expand:
   over: elements
   scope: "table tbody tr"    # CSS — each match = one successor
   limit: 200                  # optional cap
-  order: dfs
+  order: dfs                  # process each row fully (default)
 ```
 
 #### Page expansion
@@ -182,9 +229,22 @@ expand:
   over: pages
   strategy: next              # next | numeric | infinite
   control: "a.next-page"     # CSS for pagination element
-  limit: 10
-  stop: ".no-results"        # CSS for stop condition (infinite only)
+  limit: 25                   # safety cap
+  stop:                       # observable completion strategies
+    sentinel: ".no-results"   # stop when this element appears
+    stable:                   # OR stop when item count stabilizes
+      css: ".product-card"
+      after: 2                # unchanged for 2 consecutive scrolls
 ```
+
+**Stop conditions** (composable — first one that triggers wins):
+
+| Strategy | What the exploration agent observed | Map entry |
+|---|---|---|
+| `sentinel` | "A `.no-results` div appeared" | `sentinel: ".no-results"` |
+| `sentinel_gone` | "The loading spinner disappeared" | `sentinel_gone: ".spinner"` |
+| `stable` | "Item count stopped changing" | `stable: { css: ".item", after: 2 }` |
+| `limit` | Safety net — always present | `limit: 50` |
 
 #### Combination expansion
 
@@ -199,6 +259,22 @@ expand:
       control: "#search"
       values: ["laptop", "tablet"]
 ```
+
+### Yields and Consumes (data flow)
+
+Any node can participate in artifact data flow:
+
+- **`yields: artifact_name`** — extracted records are written into this artifact stream (like a generator/yield)
+- **`consumes: artifact_name`** — the node runs once per record in the artifact, with that record's fields available as `{field_ref}` in actions
+
+These work at the **node level** (within a resource) and at the **resource level** (cross-resource):
+
+| Scope | Yields/produces | Consumes | Ordering |
+|---|---|---|---|
+| Node (intra-resource) | `node.yields` | `node.consumes` | YAML declaration order |
+| Resource (cross-resource) | `resource.produces` | `resource.consumes` | Topological sort |
+
+**Key rule:** An artifact that is `yields`-ed into with BFS expansion will have ALL records before any consumer reads it. An artifact `yields`-ed into with DFS expansion will have records appear incrementally — but sibling consumers still see the full set because they run after the yielding node completes.
 
 ### Website State Setup
 
