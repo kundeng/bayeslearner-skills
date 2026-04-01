@@ -278,9 +278,15 @@ async function main(): Promise<void> {
       const engine = new Engine(driver, ai, hookRegistry, store);
       const records = engine.runResource(resource);
 
-      // Store records in artifact(s) if resource declares produces
+      // Store records in artifact(s) if resource declares produces.
+      // Skip artifacts that nodes already yielded to (prevent double-write).
+      const nodeYields = new Set(resource.nodes.flatMap((n) => toArray(n.yields)));
       for (const name of toArray(resource.produces)) {
-        store.put(name, records);
+        if (nodeYields.has(name)) {
+          console.log(`[main] Skipping resource-level store for '${name}' (nodes already yielded)`);
+        } else {
+          store.put(name, records);
+        }
       }
 
       allRecords.push(...records);
