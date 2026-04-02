@@ -149,7 +149,7 @@ artifacts:
 ```yaml
 nodes:
   - name: toc
-    emit: page_urls               # records go into this artifact
+    emit: page_urls               # subtree snapshots go into this artifact
     expand: { over: elements, scope: "nav a", order: bfs }
     extract:
       - link: { name: url, css: "a" }
@@ -188,7 +188,7 @@ See `references/field-guide.md § BFS × emit` for a detailed example.
 ## Extraction Rules
 
 - **DOM eval for live-page extraction.** The driver evaluates JavaScript in the browser context. Do not use HTML parsing libraries for extracting data from the live page.
-- **Post-extraction processing is fine.** Once HTML is captured in JSONL, use `cheerio` and `turndown` for transformation, cleanup, and assembly.
+- **Post-extraction processing is fine.** Once HTML is captured in JSON output, use `cheerio` and `turndown` for transformation, cleanup, and assembly.
 - **Header-based mapping for tables.** Map columns by header text, not index.
 - **Sort verification** via child node's `state` check — verify the sort applied before extracting.
 
