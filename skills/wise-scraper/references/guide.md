@@ -7,8 +7,8 @@ Read this after SKILL.md. This is the essential reference — it gives you the b
 You are building a **working scraping project** for a JS-rendered site. Here is what's shipped and how the pieces fit:
 
 ```
-YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDriver  ──→  JSON  ──→  Assembly
-  (what)            (gate)              (walk)       (browser)          (intermediate)  (final)
+YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDriver  ──→  TreeRecord → Assembly
+  (what)            (gate)              (walk)       (browser)          (intermediate)     (final)
 ```
 
 **Profile** — a declarative YAML file that describes *what* to scrape: which URLs, which NER nodes, what actions, what to extract, how to expand. You build this by assembling composable template fragments from `templates/*.yaml`.
@@ -105,9 +105,23 @@ quality:
     price: 80
 ```
 
-## Data Flow: Artifacts, Emit, Consumes
+## Data Flow: Tree Records, Artifacts, Emit, Consumes
 
-Artifacts are **named, typed streams of records**. They serve three purposes:
+The engine builds **TreeRecord** objects as it walks the NER graph. Each node's extraction lands in `data`; descendant nodes nest in `children`. Nodes with their own `emit` snip themselves off the parent tree and snapshot into a separate artifact bucket.
+
+```typescript
+interface TreeRecord {
+  node: string;
+  url: string;
+  data: Record<string, unknown>;
+  children: Record<string, TreeRecord[]>;  // child node name → records
+  extracted_at: string;
+}
+```
+
+Context accumulates top-down: child fields shadow parent fields with the same name. Without `emit`, data flows to children via context but is NOT written to any artifact.
+
+**Artifacts** are named, typed buckets. They serve three purposes:
 1. **Validation** — each record checked against declared fields at extraction time
 2. **Chaining** — nodes and resources wire together via `emit`/`consumes`
 3. **Output** — artifacts marked `output: true` are written as deliverables
@@ -158,7 +172,9 @@ resources:
     ...
   - name: extract
     consumes: page_urls
-    entry: { url: { from: "page_urls" }, root: page }
+    entry:
+      url: "https://example.com{url}"   # template resolved from consumed record
+      root: page
     produces: page_content
     ...
 ```
@@ -250,23 +266,46 @@ Resolution order (later wins):
 
 ## Intermediate Output Format
 
-Every run produces a JSON array of records (the default), or JSONL if configured:
+The engine produces **TreeRecord** objects. The on-disk format depends on the artifact's `structure` setting:
+
+**Nested (default, `structure: "nested"`)** — tree JSON preserving parent/child relationships:
 
 ```json
 [
   {
-    "node": "rows",
+    "node": "pages",
     "url": "https://example.com/products?p=1",
-    "data": {
-      "product": "Widget Pro",
-      "price": "$29.99"
+    "data": { "page_title": "Products" },
+    "children": {
+      "rows": [
+        {
+          "node": "rows",
+          "url": "https://example.com/products?p=1",
+          "data": { "product": "Widget Pro", "price": "$29.99" },
+          "children": {},
+          "extracted_at": "2026-03-15T17:00:00.000Z"
+        }
+      ]
     },
     "extracted_at": "2026-03-15T17:00:00.000Z"
   }
 ]
 ```
 
-JSON is the default format (pretty-printed array). Use `--output-format jsonl` for streaming/append scenarios. JSONL writes one JSON object per line, which is useful for large-scale runs with resume-on-failure requirements.
+**Flat (`structure: "flat"`)** — denormalized records. Interior node data spreads as context into leaf records:
+
+```json
+[
+  {
+    "node": "rows",
+    "url": "https://example.com/products?p=1",
+    "data": { "page_title": "Products", "product": "Widget Pro", "price": "$29.99" },
+    "extracted_at": "2026-03-15T17:00:00.000Z"
+  }
+]
+```
+
+CSV, markdown, and JSONL formats always flatten automatically. Use `--output-format jsonl` for streaming/append scenarios.
 
 ## Runner CLI Reference
 
@@ -311,13 +350,13 @@ Common pitfalls observed during testing, and how to resolve them.
 
 **Fix:** During exploration, verify the exact URL that produces the expected DOM. Record the full URL (including path suffixes) in the profile's `entry.url`.
 
-### Double records in JSONL output
+### Double records in output
 
 **Symptom:** Every record appears twice in the output.
 
 **Cause:** A node declares `emit: "my_data"` AND the resource declares `produces: my_data`. Both write to the same artifact, duplicating records.
 
-**Fix:** Use one or the other. Use `produces` on the resource for the common case (one flat table). Use `emit` on specific nodes when different nodes write to different artifacts. Never both for the same artifact name.
+**Fix:** The runner now detects and prevents double-writes when `emit` and `produces` overlap for the same artifact. If you still see duplicates, check for multiple emit targets pointing to the same artifact name.
 
 ### Expand over leaf elements breaks extraction
 

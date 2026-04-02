@@ -40,6 +40,7 @@ FieldDef: {
 
 ArtifactSchema: {
 	fields:       [string]: FieldDef       // field name → type + constraints
+	structure?:   "nested" | "flat" | *"nested"  // nested = tree, flat = denormalized
 	consumes?:    string | [...string]     // upstream artifact(s) (DAG edge)
 	dedupe?:      string                   // field name to deduplicate by
 	output?:      bool | *false            // true = final deliverable
@@ -75,9 +76,9 @@ NER: {
 	extract?:  [...Extraction]
 	expand?:   Expand
 
-	// emit — explicitly write observation + context to artifact(s).
-	// String shorthand: emit: "artifact_name" (flat, no transform)
-	// Full form: emit: [{ to: "artifact", flatten: "field" }]
+	// emit — snapshot this node's subtree into artifact bucket(s).
+	// String shorthand: emit: "artifact_name" (nested subtree, no flatten)
+	// Full form: emit: [{ to: "artifact", flatten: true | "child_name" }]
 	emit?:     string | [...EmitTarget]
 
 	consumes?: string | [...string]        // iterate over records from artifact(s)
@@ -93,14 +94,14 @@ NER: {
 
 EmitTarget: {
 	to:       string                       // artifact name
-	flatten?: string                       // field containing array to unpack into per-row records
+	flatten?: true | string                // true = denormalize entire subtree; string = flatten only named child
 }
 
 // ── State (preconditions) ───────────────────────────────
 
 State: {
 	url?:              string
-	url_pattern?:      string
+	url_pattern?:      string               // Substring match against current URL (not regex)
 	selector_exists?:  string
 	text_in_page?:     string
 	table_headers?:    [...string]
@@ -321,4 +322,28 @@ QualityGate: {
 	max_empty_pct?:  number & >=0 & <=100
 	max_failed_pct?: number & >=0 & <=100
 	min_filled_pct?: [string]: number & >=0 & <=100
+}
+
+// ── Record Types ───────────────────────────────────────
+// Internal representations used by the engine.
+
+// Tree-structured record — each node's extraction is in `data`;
+// descendant nodes nest in `children`.
+// Nodes with their own `emit` snip themselves off — they don't
+// appear in the parent's children.
+TreeRecord: {
+	node:         string
+	url:          string
+	data:         _
+	children:     [string]: [...TreeRecord]
+	extracted_at: string
+}
+
+// Flat extracted record — produced by flattening a TreeRecord.
+// All ancestor fields are denormalized into `data`.
+ExtractedRecord: {
+	node:         string
+	url:          string
+	data:         _
+	extracted_at: string
 }

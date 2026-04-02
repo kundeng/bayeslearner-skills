@@ -51,8 +51,14 @@ artifacts:
 ```
 
 Each field has:
-- **`type`** — `string` (default), `number`, `boolean`, `array`, `object`
+- **`type`** — `string` (default), `number`, `boolean`, `array`, `object`, `url`, `binary`
 - **`required`** — `true` (default) or `false` — if true, empty/missing values are flagged during extraction
+
+Artifact-level settings:
+- **`structure`** — `"nested"` (default) or `"flat"`. Nested writes tree JSON (TreeRecord with children). Flat writes denormalized records (ExtractedRecord). CSV, markdown, and JSONL formats always flatten regardless of this setting.
+- **`format`** — `"json"` (default), `"jsonl"`, `"csv"`, `"markdown"`
+- **`output`** — `true` if this is a final deliverable written to disk
+- **`dedupe`** — field name to deduplicate records by
 
 Artifacts can declare **`consumes`** to form a dependency DAG:
 
@@ -79,7 +85,8 @@ resources:
     consumes: page_urls       # reads from this artifact
     produces: page_content
     entry:
-      url: { from: "page_urls" }   # iterate over URLs in the artifact
+      url: "https://example.com{url}"  # template resolved from consumed record
+      root: page
     ...
 ```
 
@@ -141,10 +148,10 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 | **text** | `.textContent.trim()` | `name`, `css`, `regex?` |
 | **attr** | `.getAttribute(attr)` | `name`, `css`, `attr` |
 | **html** | `.innerHTML` | `name`, `css` |
-| **link** | `.getAttribute('href')` | `name`, `css`, `attr?` |
-| **image** | `.getAttribute('src')` | `name`, `css` |
+| **link** | attr shortcut: `.getAttribute(attr)` (default `"href"`) | `name`, `css`, `attr?` |
+| **image** | attr shortcut: `.getAttribute('src')` | `name`, `css` |
 | **table** | Header-mapped row objects | `name`, `css`, `columns?`, `header_row?` |
-| **grouped** | Multiple elements → array | `name`, `css`, `attr?` |
+| **grouped** | Multiple elements → array of strings | `name`, `css`, `attr?` |
 | **ai** | AI-generated structured data | `name`, `prompt`, `input?`, `schema?`, `categories?` |
 
 **Tables:** always prefer header-based column mapping over positional index. `table` extraction works both standalone and inside `expand: { over: elements }` scope — the engine compiles it to inline JS scoped to the expanded container. When the `css` selector matches within the container, it extracts from that match; otherwise it treats the container itself as the table.
@@ -190,6 +197,8 @@ Walk children for element 2
 ```
 Use BFS when: discovering URLs that you'll navigate to later. **BFS is required when a node emits into an artifact that a sibling consumes** — because navigating to a discovered URL would destroy the DOM context needed to discover the next URL.
 
+In the tree model, BFS collects all element trees first (building TreeRecords with data + children), then walks children. The DOM preservation argument is the same: collect all observations from the current page before any child navigates away.
+
 #### BFS × emit: the discovery pattern
 
 ```yaml
@@ -203,7 +212,7 @@ nodes:
     extract:
       - link: { name: url, css: "a" }
       - text: { name: title, css: "a" }
-    emit: page_urls                 # all 80 URLs go into artifact BEFORE children
+    emit: page_urls                 # subtree snapshots go into artifact BEFORE children
 
   - name: pages
     parents: [root]                 # sibling of toc, runs AFTER toc completes
@@ -268,11 +277,10 @@ expand:
 
 ### Emit and Consumes (data flow)
 
-`extract` captures data locally (node-private context). `emit` writes that data to artifact(s).
+`extract` captures data locally into the node's TreeRecord. `emit` snapshots the node's subtree (its `data` + nested `children`) into named artifact bucket(s). Children without their own `emit` nest inside the parent's tree. Children WITH their own `emit` snip off — they do not appear in the parent's children.
 
-- **`emit: "artifact_name"`** — shorthand: write extracted records to this artifact
-- **`emit: [{ to: "artifact", flatten: "field" }]`** — full form: multiple targets with per-target shaping
-  - **`flatten`** — if the named field contains an array of objects, unpack each into a separate record (for table extraction)
+- **`emit: "artifact_name"`** — shorthand: snapshot nested subtree to this artifact
+- **`emit: [{ to: "artifact", flatten: ... }]`** — full form: multiple targets with per-target shaping (see Flatten below)
 - **`consumes: artifact_name`** — the node runs once per record in the artifact, with that record's fields available as `{field_ref}` in actions
 
 Without `emit`, extracted data flows to children via accumulated context but is NOT written to any artifact.
@@ -286,11 +294,29 @@ These work at the **node level** (within a resource) and at the **resource level
 
 **Key rule:** An artifact that is emitted into with BFS expansion will have ALL records before any consumer reads it. An artifact emitted into with DFS expansion will have records appear incrementally — but sibling consumers still see the full set because they run after the emitting node completes.
 
-**Precedence: don't use both `emit` and `produces` for the same artifact.** If a node declares `emit: "my_data"` AND the resource declares `produces: my_data`, records get written twice. Use `produces` on the resource (common case — one flat table per resource) OR `emit` on specific nodes (when different nodes write to different artifacts). Not both for the same artifact name.
+**Double-write prevention:** The runner detects when `emit` and `produces` overlap for the same artifact and prevents duplicates automatically.
 
-#### Flatten (table row unpacking)
+#### Flatten (three modes)
 
-When a table extraction returns an array of row objects in a single field, `flatten` unpacks each element into a separate artifact record:
+`flatten` on an emit target controls how the subtree is denormalized into flat records. Three modes:
+
+**`flatten: true`** — denormalize the entire subtree. Interior nodes spread their data as context into leaf records. Only leaves produce output records.
+
+```yaml
+emit:
+  - to: full_data
+    flatten: true               # all leaf records with ancestor context merged in
+```
+
+**`flatten: "child_name"`** — flatten only the named child node's records, merging parent context.
+
+```yaml
+emit:
+  - to: row_data
+    flatten: "rows"             # flatten records from the "rows" child node
+```
+
+**`flatten: "field_name"`** — unpack an array data field into separate records (the table extraction pattern).
 
 ```yaml
 extract:
@@ -307,7 +333,7 @@ emit:
     flatten: salary_data        # each row object → one record in salary_records
 ```
 
-Without `flatten`, the entire array would be stored as one record. With `flatten`, each array element becomes its own record, merged with accumulated context from ancestors.
+Without `flatten`, the subtree is written as nested TreeRecord JSON. With `flatten`, each leaf or array element becomes its own flat record, merged with accumulated context from ancestors.
 
 ### Website State Setup
 

@@ -13,7 +13,7 @@ WISE teaches an AI coding agent **structured, repeatable web scraping** for JS-r
 > **Rule 0 — Orient before acting.** Before opening a browser or writing any code, read `references/guide.md § Big Picture` to understand what you're building and what decisions you need to make. Only then start exploration.
 
 ```
-Orient → Explore → Evidence → Choose tier → Exploit → JSON → Assemble
+Orient → Explore → Evidence → Choose tier → Exploit → TreeRecord → Assemble
 ```
 
 1. **Orient** — read the schema, templates, and runner options; understand what's shipped
@@ -21,7 +21,7 @@ Orient → Explore → Evidence → Choose tier → Exploit → JSON → Assembl
 3. **Evidence** — record selector proof and DOM observations before designing the exploit
 4. **Choose tier** — prefer shipped plumbing, escalate only when justified; ask about runtime preference if unclear
 5. **Exploit** — assemble a profile from template fragments, run it, extend with hooks or task-local code
-6. **Process** — JSON is the intermediate truth; assemble markdown/CSV from it later
+6. **Process** — TreeRecord is internal truth; flatten for flat output. Assemble markdown/CSV from artifacts.
 
 Use when: JS-rendered sites, pagination, UI state, filter combos, structured repeatable output.
 Not when: a stable API/export exists, or static `curl` is clearly enough.
@@ -36,8 +36,17 @@ WISE profiles define a **graph of NER nodes**. Each node is a deterministic **(s
 | **Action** | `action` | "What deterministic thing do I do?" — browser primitives |
 | **Observation** | `extract` | "What do I read/emit from this state?" — extraction rules |
 | **Successors** | `expand` | "How many successor states?" — elements, pages, or combinations |
+| **Retry** | `retry` | "Re-execute parent actions if state check fails" — `{ max, delay_ms }` |
 
 Nodes form a DAG via `parents[]`. The engine walks top-down: check state, execute actions, extract, expand, recurse into children.
+
+### Extraction types
+
+`text`, `attr`, `link`, `table`, `ai`, `html`, `image`, `grouped`. See `references/field-guide.md § Extraction` for details.
+
+### Action types
+
+`click`, `select`, `scroll`, `wait`, `reveal`, `navigate`, `input`. See `references/field-guide.md § Actions` for details.
 
 ### Expansion (unified)
 
@@ -50,6 +59,10 @@ Instead of separate `type: pagination` / `type: matrix` / `multiple: true`, all 
 | `combinations` | Cartesian product of filter axes | `type: matrix` |
 
 Each `expand` block supports `order: dfs | bfs` (default: dfs).
+
+**Stop conditions on page expansion:** `sentinel` (CSS appears), `sentinel_gone` (CSS disappears), `stable` (element count stops changing), `limit` (hard cap). See `references/field-guide.md § Stop Conditions`.
+
+**Emit + expand interaction:** When a node has both `emit` and `expand`, node-level extraction is skipped; extraction happens per-element inside the expansion. See `references/guide.md § Data Flow`.
 
 ### Artifact Schemas (exploration output contract)
 
@@ -64,24 +77,51 @@ artifacts:
     fields:
       url:   { type: string, required: true }
       title: { type: string, required: true }
+    dedupe: url                # deduplicate by this field
   page_content:
     fields:
       title: { type: string, required: true }
       body:  { type: string, required: true }
-    consumes: page_urls   # ← DAG edge: this depends on page_urls
+    consumes: page_urls        # DAG edge: depends on page_urls
+    output: true               # final deliverable (written to disk)
+    format: jsonl              # output format: jsonl | csv | json | markdown
+    structure: nested          # nested (tree JSON, default) or flat (denormalized)
 ```
 
-Resources declare `produces` and `consumes` to link into the artifact DAG. The runner resolves execution order automatically.
+Full artifact fields: `fields`, `consumes`, `output`, `format`, `dedupe`, `structure`, `description`. See schema.ts `ArtifactSchema`.
 
-### Data Flow: emit and consumes
+Resources declare `produces` and `consumes` to link into the artifact DAG. The runner resolves execution order automatically. The runner prevents double-writes automatically — when nodes emit directly, the resource-level store write is skipped.
 
-`extract` captures data into the node's local context. `emit` writes that data to named artifacts:
+### Data Flow: TreeRecord, emit, and consumes
 
-- **`emit: "artifact_name"`** — shorthand: write records to this artifact
-- **`emit: [{ to: "artifact", flatten: "field" }]`** — full form with per-target shaping (flatten unpacks arrays into per-row records)
-- **`consumes: artifact_name`** — node runs once per record in the artifact, with fields available as `{field_ref}`
+The internal representation is **TreeRecord** (schema.ts):
 
-At the resource level, `produces` / `consumes` wire resources together. Don't use both `emit` and `produces` for the same artifact — that causes double writes.
+```typescript
+interface TreeRecord {
+  node: string;       // which NER node
+  url: string;        // page URL at extraction time
+  data: Record<string, unknown>;  // extracted payload
+  children: Record<string, TreeRecord[]>;  // nested subtrees
+  extracted_at: string;
+}
+```
+
+Children without `emit` nest inside their parent's `children`. Children with `emit` snip off into their own artifact bucket. `emit` copies/flattens subtrees into artifacts.
+
+**emit modes:**
+- **`emit: "artifact_name"`** — shorthand: snapshot nested subtree to this artifact
+- **`emit: [{ to: "artifact", flatten: ... }]`** — full form with per-target shaping
+  - `flatten: true` — denormalize entire subtree (leaves only; interior nodes contribute context)
+  - `flatten: "child_name"` — flatten only a named child node's records or data field
+
+**ArtifactSchema.structure** controls output shape:
+- `"nested"` (default) — tree JSON preserved
+- `"flat"` — denormalized via `flattenTree` (records at leaves only)
+
+**consumes — two levels:**
+- **Resource-level** `consumes` — drives entry URL iteration (the resource runs once per record in the consumed artifact)
+- **Node-level** `consumes` — iterates within a walk (the node runs once per record, with fields available as `{field_ref}`)
+- `consumes` accepts a string or string[] (multiple artifacts merged)
 
 **BFS is required for discovery + emit.** When a node discovers URLs and emits them, use `order: bfs` so all URLs are collected before any child navigates away.
 
@@ -103,22 +143,28 @@ See `references/field-guide.md § Emit and Consumes` and `references/guide.md §
 | 1 | Target fits declarative flow | Assemble template fragments + shipped runner |
 | 2 | Target needs adaptation | Copy/adapt runner modules, hooks, AI adapter |
 | 3 | Target exceeds reference boundary | Bespoke project, carrying WISE discipline |
-| 4 | User prefers alternative runtime | Same YAML profile, different backend |
+| 4 | User prefers alternative runtime | Same YAML profile, different backend (profile format is runtime-agnostic by design; no multi-backend runner is shipped today) |
 
 ### Architecture
 
 ```
-YAML profile → Zod validation → Engine → BrowserDriver → JSON → Assembly
+YAML profile → Zod validation → Engine → BrowserDriver → TreeRecord → Assembly
                                    ↕            ↕
                               AIAdapter    agent-browser
-                              (aichat)     (or Playwright)
 ```
 
 - **Schema** — Zod is the single source of truth (`schema.ts`): runtime validation, TypeScript types, JSON Schema export
-- **BrowserDriver** — abstract interface; `AgentBrowserDriver` (CLI) is shipped, `PlaywrightDriver` (library) is preferred for production
-- **AIAdapter** — abstract interface for exploitation-phase NLP; `AIChatAdapter` wraps the `aichat` CLI
+- **BrowserDriver** — abstract interface; `AgentBrowserDriver` (CLI) is shipped. The interface is abstract and additional drivers can be implemented.
+- **AIAdapter** — abstract interface for exploitation-phase NLP. Default is `NullAIAdapter` (no-op); `AIChatAdapter` wraps `aichat` CLI and is opt-in via `--ai-model` flag
 - **Engine** — walks the NER graph with unified `expand` (elements/pages/combinations)
-- **Hooks** — 5 lifecycle points for site-specific logic
+- **Hooks** — 3 lifecycle hooks invoked at runtime: `post_extract` (engine, per-node), `pre_assemble` and `post_assemble` (run.ts). Additional hooks are declared in the schema (`post_discover`, node-level `pre_extract`) but not yet called.
+- **StateSetup** — auth/login flow executed before resource walk. Declares `skip_when` (CSS check if already logged in) and a sequence of setup actions (`open`, `click`, `input`, `password`). See schema.ts `StateSetup`.
+- **InterruptHandler** — auto-dismisses cookie banners, modals, and other overlays during navigation
+- **URL dedup** — visited Set per resource prevents re-visiting the same URL
+
+### Resource globals
+
+Resources support a `globals` block for timing and retry defaults: `timeout_ms`, `retries`, `user_agent`, `request_interval_ms`, `page_load_delay_ms`. See schema.ts `Resource.globals`.
 
 ## Read Next — by step
 
@@ -141,7 +187,7 @@ Do **not** read all references upfront. Read only what the current step needs:
 - **Header-based table mapping** — not positional
 - **Sort verification required** — verify state changed via child's `state` check
 - **Avoid ambiguous clicks** — scope by CSS/role/context
-- **JSON is intermediate truth** — assemble final formats (markdown/CSV) later
+- **TreeRecord is internal truth** — flatten for flat output; assemble final formats (markdown/CSV) from artifacts
 - **BFS for URL discovery** — use `order: bfs` when you need to collect all URLs before visiting
 
 ## Common Patterns
