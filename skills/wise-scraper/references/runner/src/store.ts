@@ -8,7 +8,7 @@
  * No external dependencies — just a Map<string, Record[]>.
  */
 
-import type { ArtifactSchema, FieldDef, ExtractedRecord, Deployment } from "./schema.js";
+import type { ArtifactSchema, FieldDef, ExtractedRecord, TreeRecord, Deployment } from "./schema.js";
 
 /** Normalize string | string[] | undefined → string[] */
 export function toArray(val: string | string[] | undefined): string[] {
@@ -32,6 +32,7 @@ export interface ValidationError {
 
 export class ArtifactStore {
   private store = new Map<string, ExtractedRecord[]>();
+  private treeStore = new Map<string, TreeRecord[]>();
   private schemas: Record<string, ArtifactSchema>;
 
   constructor(schemas?: Record<string, ArtifactSchema>) {
@@ -40,7 +41,19 @@ export class ArtifactStore {
 
   // ── write ─────────────────────────────────────────────
 
-  /** Store records for an artifact. Validates against schema if declared. */
+  /** Store tree records for an artifact (nested structure). */
+  putTree(artifactName: string, trees: TreeRecord[]): void {
+    const existing = this.treeStore.get(artifactName) ?? [];
+    this.treeStore.set(artifactName, [...existing, ...trees]);
+    console.log(`[store] ${artifactName}: ${trees.length} tree records stored (${existing.length + trees.length} total)`);
+  }
+
+  /** Get tree records for an artifact. */
+  getTree(artifactName: string): TreeRecord[] {
+    return this.treeStore.get(artifactName) ?? [];
+  }
+
+  /** Store flat records for an artifact. Validates against schema if declared. */
   put(artifactName: string, records: ExtractedRecord[]): ValidationError[] {
     const existing = this.store.get(artifactName) ?? [];
     const errors: ValidationError[] = [];

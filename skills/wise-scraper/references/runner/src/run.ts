@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
 import yaml from "js-yaml";
 
-import { Deployment as DeploymentSchema, type Deployment, type ExtractedRecord } from "./schema.js";
+import { Deployment as DeploymentSchema, type Deployment, type ExtractedRecord, type TreeRecord } from "./schema.js";
 import { AgentBrowserDriver } from "./agent-browser-driver.js";
 import { NullAIAdapter } from "./ai.js";
 import { AIChatAdapter } from "./aichat-adapter.js";
@@ -258,7 +258,7 @@ async function main(): Promise<void> {
       console.log(`[main] Execution order: ${executionOrder.join(" → ")}`);
     }
 
-    const allRecords: ExtractedRecord[] = [];
+    const allTrees: TreeRecord[] = [];
 
     for (const resourceName of executionOrder) {
       const resource = resourceMap.get(resourceName)!;
@@ -276,11 +276,10 @@ async function main(): Promise<void> {
       if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
 
       const engine = new Engine(driver, ai, hookRegistry, store);
-      const records = engine.runResource(resource);
+      const trees = engine.runResourceTree(resource);
 
-      // Store records in artifact(s) if resource declares produces.
-      // Skip artifacts that nodes already yielded to (prevent double-write).
-      // Collect artifact names that nodes emit to directly
+      // Store trees in artifact(s) if resource declares produces.
+      // Skip artifacts that nodes already emit to (prevent double-write).
       const nodeEmits = new Set(resource.nodes.flatMap((n) => {
         if (!n.emit) return [];
         if (typeof n.emit === "string") return [n.emit];
@@ -290,18 +289,13 @@ async function main(): Promise<void> {
         if (nodeEmits.has(name)) {
           console.log(`[main] Skipping resource-level store for '${name}' (nodes already emit)`);
         } else {
-          store.put(name, records);
+          store.putTree(name, trees);
         }
       }
 
-      allRecords.push(...records);
-      console.log(`[engine] '${resource.name}' → ${records.length} records`);
+      allTrees.push(...trees);
+      console.log(`[engine] '${resource.name}' → ${trees.length} tree records`);
     }
-
-    // pre_assemble hook
-    let ctx = { records: allRecords, profile };
-    ctx = hookRegistry.invoke("pre_assemble", ctx);
-    const finalRecords = ctx.records;
 
     const baseName = profile.name.replace(/\s+/g, "_").toLowerCase();
 
@@ -311,20 +305,42 @@ async function main(): Promise<void> {
 
     if (outputArtifacts.length > 0) {
       for (const [name, schema] of outputArtifacts) {
-        const records = store.get(name);
+        const trees = store.getTree(name);
+        const flatRecords = store.get(name);
+
+        // Choose nested or flat based on artifact structure setting
+        const structure = schema.structure ?? "nested";
         const fmt = schema.format ?? runner.outputFormat ?? "json";
         const ext = fmt === "markdown" ? "md" : fmt;
         const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
 
-        if (WRITERS[fmt]) {
-          WRITERS[fmt](records, outPath);
-        } else {
-          writeJsonl(records, outPath);
+        if (structure === "flat" || fmt === "csv" || fmt === "markdown" || fmt === "jsonl") {
+          // Flat formats: use flat records from store, or flatten trees
+          const records = flatRecords.length > 0 ? flatRecords : Engine.flattenTree(trees);
+          if (WRITERS[fmt]) {
+            WRITERS[fmt](records, outPath);
+          } else {
+            writeJson(records, outPath);
+          }
+        } else if (trees.length > 0) {
+          // Nested: write tree records directly
+          writeFileSync(outPath, JSON.stringify(trees, null, 2), "utf-8");
+          console.log(`[output] ${trees.length} tree records → ${outPath}`);
+        } else if (flatRecords.length > 0) {
+          // No trees but have flat records (e.g., field flatten) — write as flat JSON
+          writeJson(flatRecords, outPath);
         }
       }
     }
 
-    // Always write all records as JSON array (the complete intermediate truth)
+    // Always write all trees as JSON (the complete intermediate truth)
+    const allFlat = Engine.flattenTree(allTrees);
+
+    // pre_assemble hook (operates on flat records for backward compat)
+    let ctx = { records: allFlat, profile };
+    ctx = hookRegistry.invoke("pre_assemble", ctx);
+    const finalRecords = ctx.records;
+
     const fmt = runner.outputFormat ?? "json";
     const ext = fmt === "markdown" ? "md" : fmt;
     const allPath = resolve(outDir, `${baseName}.${ext}`);
@@ -338,15 +354,17 @@ async function main(): Promise<void> {
       profile,
     });
 
-    // Quality gate — check against artifact store when output artifacts exist,
-    // since emit+flatten may reshape records (e.g., 3 nested → 77 flat).
+    // Quality gate — check flat records from output artifacts
     let qualityRecords = finalRecords;
     if (outputArtifacts.length > 0) {
-      qualityRecords = outputArtifacts.flatMap(([name]) => store.get(name));
+      qualityRecords = outputArtifacts.flatMap(([name]) => {
+        const flat = store.get(name);
+        return flat.length > 0 ? flat : Engine.flattenTree(store.getTree(name));
+      });
     }
     const qualityOk = checkQuality(qualityRecords, profile);
 
-    console.log(`\n=== Done: ${finalRecords.length} records (${qualityRecords.length} in output artifacts) ===`);
+    console.log(`\n=== Done: ${allTrees.length} tree records (${qualityRecords.length} flat in output artifacts) ===`);
     if (!qualityOk) {
       console.error("[main] Quality gate failed");
       process.exitCode = 1;

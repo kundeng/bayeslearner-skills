@@ -107,7 +107,7 @@ export const Action = z.union([
 export const State = z
   .object({
     url: z.string().optional(),
-    url_pattern: z.string().optional(),
+    url_pattern: z.string().optional().describe("Substring match against current URL (not regex)"),
     selector_exists: z.string().optional(),
     text_in_page: z.string().optional(),
     table_headers: z.array(z.string()).optional(),
@@ -262,19 +262,22 @@ export const Retry = z.object({
   delay_ms: z.number().int().nonnegative().default(1000),
 });
 
-// ── emit (explicit artifact writing) ────────────────────
-// extract = local observation (node-private)
-// emit = project observation + context into artifact(s)
+// ── emit (subtree snapshot into artifact bucket) ────────
+// emit = copy this node's subtree (data + nested children) into named artifact(s).
+// Descendants without their own emit nest inside. Descendants WITH emit snip off.
 // Without emit, extracted data is available to children via context
 // but is NOT written to any artifact.
 
 export const EmitTarget = z.object({
   to: z.string(),                                  // artifact name
-  flatten: z.string().optional(),                   // field name containing array to unpack into per-row records
+  flatten: z.union([                               // flatten subtree into flat records
+    z.literal(true),                               // true = denormalize entire subtree
+    z.string(),                                    // string = flatten only this child node's records
+  ]).optional(),
 });
 
 export const Emit = z.union([
-  z.string(),                                       // shorthand: emit to this artifact, no flatten
+  z.string(),                                       // shorthand: emit nested subtree to this artifact
   z.array(EmitTarget),                              // full form: multiple targets with per-target shaping
 ]);
 
@@ -297,10 +300,10 @@ export const NER = z.object({
   // expand — how many successor states does this node produce?
   expand: Expand.optional(),
 
-  // emit — explicitly write observation + context to artifact(s).
-  // String shorthand: emit: "artifact_name" (flat, no transform)
-  // Full form: emit: [{ to: "artifact", flatten: "field" }]
-  //   flatten: unpack an array field into per-row records (for table extraction)
+  // emit — snapshot this node's subtree into artifact bucket(s).
+  // String shorthand: emit: "artifact_name" (nested subtree, no flatten)
+  // Full form: emit: [{ to: "artifact", flatten: true | "child_name" }]
+  //   flatten: true = denormalize entire subtree; string = flatten only named child
   emit: Emit.optional(),
 
   // consumes — iterate over records from artifact stream(s).
@@ -340,6 +343,7 @@ export const FieldDef = z.object({
 
 export const ArtifactSchema = z.object({
   fields: z.record(FieldDef),             // field name → type + constraints
+  structure: z.enum(["nested", "flat"]).default("nested"),  // nested = tree, flat = denormalized
   consumes: z.union([z.string(), z.array(z.string())]).optional(), // upstream artifact(s)
   dedupe: z.string().optional(),           // field name to deduplicate by
   output: z.boolean().default(false),      // true = final deliverable
@@ -425,7 +429,20 @@ export type Resource = z.infer<typeof Resource>;
 export type QualityGate = z.infer<typeof QualityGate>;
 export type Deployment = z.infer<typeof Deployment>;
 
-/** A single extracted record in the JSONL intermediate format. */
+/** A tree-structured record — the internal representation.
+ *  Each node's extraction is in `data`; descendant nodes nest in `children`.
+ *  Nodes with their own `emit` snip themselves off — they don't appear in
+ *  the parent's children. */
+export interface TreeRecord {
+  node: string;
+  url: string;
+  data: Record<string, unknown>;
+  children: Record<string, TreeRecord[]>;
+  extracted_at: string;
+}
+
+/** A flat extracted record — produced by flattening a TreeRecord.
+ *  All ancestor fields are denormalized into `data`. */
 export interface ExtractedRecord {
   node: string;
   url: string;

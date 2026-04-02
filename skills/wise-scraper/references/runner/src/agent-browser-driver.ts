@@ -14,7 +14,7 @@ import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { BrowserDriver, DriverWait } from "./driver.js";
-import { locatorToSelector, escapeJs } from "./driver.js";
+import { locatorToSelector, escapeJs, shellEscape } from "./driver.js";
 import type { Locator } from "./schema.js";
 
 export class AgentBrowserDriver implements BrowserDriver {
@@ -77,10 +77,10 @@ export class AgentBrowserDriver implements BrowserDriver {
   // ── lifecycle ─────────────────────────────────────────
 
   open(url: string, opts?: { wait?: DriverWait }): boolean {
-    const args = ["open", `"${url}"`];
+    const args = ["open", shellEscape(url)];
     const w = opts?.wait;
     if (w && "idle" in w) args.push("--wait", "networkidle");
-    else if (w && "selector" in w) args.push("--wait", `selector=${w.selector}`);
+    else if (w && "selector" in w) args.push("--wait", shellEscape(`selector=${w.selector}`));
     args.push("--timeout", String(this.timeoutMs));
     return this.runRetry(args) !== null;
   }
@@ -101,7 +101,7 @@ export class AgentBrowserDriver implements BrowserDriver {
     const tmpFile = join(tmpdir(), `wise-eval-${process.pid}.js`);
     try {
       writeFileSync(tmpFile, js, "utf-8");
-      return this.runRetry(["eval", `"$(cat ${tmpFile})"`]);
+      return this.runRetry(["eval", `"$(cat ${shellEscape(tmpFile)})"`]);
     } finally {
       try { unlinkSync(tmpFile); } catch { /* ignore */ }
     }
@@ -141,13 +141,13 @@ export class AgentBrowserDriver implements BrowserDriver {
     if (opts?.type === "scripted") {
       this.eval(`document.querySelector('${escapeJs(sel)}')?.click()`);
     } else {
-      this.run(["click", `"${sel}"`]);
+      this.run(["click", shellEscape(sel)]);
     }
   }
 
   select(target: Locator, value: string): void {
     const sel = locatorToSelector(target);
-    this.run(["select", `"${sel}"`, `"${value}"`]);
+    this.run(["select", shellEscape(sel), shellEscape(value)]);
   }
 
   scroll(direction: "down" | "up" = "down", px = 500): void {
@@ -159,7 +159,7 @@ export class AgentBrowserDriver implements BrowserDriver {
     if ("idle" in condition) {
       this.run(["wait", "--load", "networkidle"]);
     } else if ("selector" in condition) {
-      this.run(["wait", "--selector", `"${condition.selector}"`]);
+      this.run(["wait", "--selector", shellEscape(condition.selector)]);
     } else if ("ms" in condition) {
       this.sleep(condition.ms);
     }
@@ -167,7 +167,7 @@ export class AgentBrowserDriver implements BrowserDriver {
 
   hover(target: Locator): void {
     const sel = locatorToSelector(target);
-    this.run(["hover", `"${sel}"`]);
+    this.run(["hover", shellEscape(sel)]);
   }
 
   type(target: Locator, value: string): void {

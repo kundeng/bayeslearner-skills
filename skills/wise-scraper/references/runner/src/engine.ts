@@ -27,6 +27,7 @@ import type {
   Expand,
   Locator,
   ExtractedRecord,
+  TreeRecord,
   SetupAction,
   StopCondition,
 } from "./schema.js";
@@ -48,6 +49,461 @@ export class Engine {
   }
 
   // ── public API ────────────────────────────────────────
+
+  /**
+   * Run a resource and return tree-structured records.
+   * Each root-level tree record contains nested children.
+   * Emit declarations snapshot subtrees into artifact buckets.
+   */
+  runResourceTree(resource: Resource): TreeRecord[] {
+    const nodeMap: Record<string, NER> = {};
+    for (const n of resource.nodes) nodeMap[n.name] = n;
+
+    const globals = resource.globals;
+    if (globals?.timeout_ms) this.driver.timeoutMs = globals.timeout_ms;
+    if (globals?.retries !== undefined) this.driver.retries = globals.retries;
+
+    if (resource.setup) this.runSetup(resource.setup);
+
+    const rootNode = nodeMap[resource.entry.root];
+    if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
+
+    const consumeNames = this.toArray(resource.consumes);
+    if (consumeNames.length > 0 && this.store) {
+      const consumed = this.mergeConsumed(consumeNames);
+      if (consumed.length === 0) {
+        console.warn(`[engine] Consumed artifacts empty: ${consumeNames.join(", ")}`);
+        return [];
+      }
+      console.log(`[engine] Consuming ${consumed.length} records from [${consumeNames.join(", ")}]`);
+      return this.runResourceTreeOverRecords(resource, rootNode, nodeMap, consumed);
+    }
+
+    return this.runResourceTreeOnce(resource, rootNode, nodeMap, resource.entry.url, null);
+  }
+
+  private runResourceTreeOverRecords(
+    resource: Resource, rootNode: NER, nodeMap: Record<string, NER>,
+    records: ExtractedRecord[],
+  ): TreeRecord[] {
+    const globals = resource.globals;
+    const all: TreeRecord[] = [];
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      const url = this.resolveTemplate(resource.entry.url, rec.data);
+      console.log(`[engine] [${i + 1}/${records.length}] ${url}`);
+      all.push(...this.runResourceTreeOnce(resource, rootNode, nodeMap, url, rec.data));
+      if (globals?.request_interval_ms && i < records.length - 1) {
+        this.driver.wait({ ms: globals.request_interval_ms });
+      }
+    }
+    return all;
+  }
+
+  private runResourceTreeOnce(
+    resource: Resource, rootNode: NER, nodeMap: Record<string, NER>,
+    url: string, consumedData: Record<string, unknown> | null,
+  ): TreeRecord[] {
+    const globals = resource.globals;
+    if (!url.startsWith("http")) { console.error(`[engine] Invalid URL: ${url}`); return []; }
+    if (this.visited.has(url)) { console.log(`[engine] Skipping visited: ${url}`); return []; }
+    this.visited.add(url);
+    if (!this.driver.open(url, { wait: { idle: true } })) { console.error(`[engine] Failed to open: ${url}`); return []; }
+    if (globals?.page_load_delay_ms) this.driver.wait({ ms: globals.page_load_delay_ms });
+    this.interrupts.check();
+    return this.walkNodeTree(rootNode, nodeMap, 0, consumedData ?? {});
+  }
+
+  // ── tree walker ──────────────────────────────────────
+
+  /**
+   * Walk a node and return TreeRecord(s). Children nest inside parent.
+   * If the node has consumes, it runs once per consumed record.
+   */
+  private walkNodeTree(
+    node: NER, allNodes: Record<string, NER>,
+    depth: number, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    const consumeNames = this.toArray(node.consumes);
+    if (consumeNames.length > 0 && this.store) {
+      const consumed = this.mergeConsumed(consumeNames);
+      if (consumed.length === 0) return [];
+      const results: TreeRecord[] = [];
+      for (const rec of consumed) {
+        const merged = { ...context, ...rec.data };
+        results.push(...this.walkNodeTreeOnce(node, allNodes, depth, merged));
+      }
+      return results;
+    }
+    return this.walkNodeTreeOnce(node, allNodes, depth, context);
+  }
+
+  /**
+   * Execute a single pass of a node and return tree records.
+   * The core NER loop: state → action → extract → expand → children.
+   * Children are collected into the parent's `children` field unless they have their own emit.
+   */
+  private walkNodeTreeOnce(
+    node: NER, allNodes: Record<string, NER>,
+    depth: number, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    const indent = "  ".repeat(depth);
+    console.log(`${indent}[node] ${node.name}`);
+
+    // 1. State check
+    if (node.state && !this.checkState(node.state)) {
+      if (node.retry) {
+        if (!this.retryNode(node, allNodes, indent)) return [];
+      } else {
+        console.log(`${indent}  State check failed, skipping`);
+        return [];
+      }
+    }
+
+    // 2. Actions
+    for (const action of node.action ?? []) {
+      this.executeAction(action, [], indent, context);
+    }
+    this.interrupts.check();
+
+    // 3 & 4. Extract + Expand → build tree records
+    if (!node.expand) {
+      // No expansion: extract once, collect children
+      const extracted = this.extract(node, indent);
+      if (!extracted && !this.hasChildren(node.name, allNodes)) return [];
+
+      const nodeData = extracted ?? {};
+      const childContext = { ...context, ...nodeData };
+      const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, childContext);
+
+      const tree: TreeRecord = {
+        node: node.name,
+        url: this.driver.getUrl() ?? "",
+        data: nodeData,
+        children: childrenMap,
+        extracted_at: new Date().toISOString(),
+      };
+
+      let record = this.hooks.invoke("post_extract", tree);
+      this.emitTreeToArtifacts(node, record as TreeRecord, context);
+
+      if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
+      return [record as TreeRecord];
+    } else {
+      // Expansion: per-element/page/combo tree records
+      if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
+      return this.expandTree(node, allNodes, depth, indent, context);
+    }
+  }
+
+  /** Check if a node has any children in the graph. */
+  private hasChildren(parentName: string, allNodes: Record<string, NER>): boolean {
+    return Object.values(allNodes).some(n => (n.parents ?? []).includes(parentName));
+  }
+
+  /** Collect children that DON'T have their own emit — they nest into parent.
+   *  Children WITH emit are processed but their results go to the store, not parent. */
+  private collectChildrenTree(
+    parentName: string, allNodes: Record<string, NER>,
+    depth: number, context: Record<string, unknown>,
+  ): Record<string, TreeRecord[]> {
+    const children = Object.values(allNodes).filter(
+      (n) => (n.parents ?? []).includes(parentName),
+    );
+    if (children.length === 0) return {};
+
+    const sorted = ArtifactStore.resolveNodeOrder(children);
+    const result: Record<string, TreeRecord[]> = {};
+
+    for (const name of sorted) {
+      const childNode = allNodes[name];
+      const childTrees = this.walkNodeTree(childNode, allNodes, depth + 1, context);
+
+      if (childNode.emit) {
+        // Child has its own emit — it handles its own storage.
+        // Don't nest into parent. (emitTreeToArtifacts already called in walkNodeTreeOnce)
+      } else {
+        // Nest into parent under child's node name
+        if (childTrees.length > 0) {
+          result[name] = childTrees;
+        }
+      }
+    }
+    return result;
+  }
+
+  /** Expand node via elements/pages/combinations and return tree records. */
+  private expandTree(
+    node: NER, allNodes: Record<string, NER>,
+    depth: number, indent: string, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    const expand = node.expand!;
+
+    if (expand.over === "elements") {
+      return this.expandElementsTree(node, expand, allNodes, depth, indent, context);
+    } else if (expand.over === "pages") {
+      return this.expandPagesTree(node, expand, allNodes, depth, indent, context);
+    } else if (expand.over === "combinations") {
+      return this.expandCombinationsTree(node, expand, allNodes, depth, indent, context);
+    }
+    return [];
+  }
+
+  private expandElementsTree(
+    node: NER,
+    expand: { over: "elements"; scope: string; limit?: number; order: "dfs" | "bfs" },
+    allNodes: Record<string, NER>,
+    depth: number, indent: string, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    const extractRules = node.extract ?? [];
+    const rows = this.extractMultiple(expand.scope, extractRules, expand.limit);
+    console.log(`${indent}  Expand elements: ${rows.length} matches`);
+
+    const trees: TreeRecord[] = [];
+
+    if (expand.order === "bfs") {
+      // BFS: collect all, then walk children
+      const batch: Array<{ data: Record<string, unknown>; nodeData: Record<string, unknown> }> = [];
+      for (const row of rows) {
+        batch.push({ data: { ...context, ...row }, nodeData: row });
+      }
+      for (const { data, nodeData } of batch) {
+        const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, data);
+        const tree: TreeRecord = {
+          node: node.name, url: this.driver.getUrl() ?? "",
+          data: nodeData, children: childrenMap,
+          extracted_at: new Date().toISOString(),
+        };
+        let record = this.hooks.invoke("post_extract", tree);
+        this.emitTreeToArtifacts(node, record as TreeRecord, context);
+        trees.push(record as TreeRecord);
+      }
+    } else {
+      // DFS: process each fully
+      for (const row of rows) {
+        const data = { ...context, ...row };
+        const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, data);
+        const tree: TreeRecord = {
+          node: node.name, url: this.driver.getUrl() ?? "",
+          data: row, children: childrenMap,
+          extracted_at: new Date().toISOString(),
+        };
+        let record = this.hooks.invoke("post_extract", tree);
+        this.emitTreeToArtifacts(node, record as TreeRecord, context);
+        trees.push(record as TreeRecord);
+      }
+    }
+    return trees;
+  }
+
+  private expandPagesTree(
+    node: NER,
+    expand: { over: "pages"; strategy: string; control: string; limit: number; stop?: StopCondition; order: "dfs" | "bfs" },
+    allNodes: Record<string, NER>,
+    depth: number, indent: string, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    // Pages expansion: walk children on each page, collecting tree results.
+    // Reuses existing page navigation logic but returns trees.
+    const trees: TreeRecord[] = [];
+
+    if (expand.strategy === "next") {
+      for (let page = 0; page < expand.limit; page++) {
+        console.log(`${indent}  Page ${page + 1}/${expand.limit}`);
+        trees.push(...this.collectPageTree(node, allNodes, depth, context));
+
+        if (!this.driver.exists(expand.control)) {
+          console.log(`${indent}  No more pages (control not found)`);
+          break;
+        }
+        if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) break;
+        if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) break;
+        this.driver.click({ css: expand.control });
+        this.driver.wait({ idle: true });
+      }
+    } else if (expand.strategy === "numeric") {
+      const current = this.driver.getUrl() ?? "";
+      const links = this.driver.evalJson<string[]>(`
+        (() => [...document.querySelectorAll('${escapeJs(expand.control)}')].map(a => a.href))()
+      `) ?? [];
+      const urls = [current, ...links].filter((v, i, s) => s.indexOf(v) === i);
+      const limited = urls.slice(0, expand.limit);
+      for (let i = 0; i < limited.length; i++) {
+        if (i > 0) {
+          this.driver.open(limited[i], { wait: { idle: true } });
+          this.interrupts.check();
+        }
+        console.log(`${indent}  Page ${i + 1}/${limited.length}`);
+        trees.push(...this.collectPageTree(node, allNodes, depth, context));
+      }
+    } else if (expand.strategy === "infinite") {
+      const maxIter = expand.stop?.limit ?? expand.limit;
+      let stableCount = 0;
+      let lastCount = -1;
+      for (let page = 0; page < maxIter; page++) {
+        console.log(`${indent}  Scroll ${page + 1}/${maxIter}`);
+        trees.push(...this.collectPageTree(node, allNodes, depth, context));
+        this.driver.scroll("down", 2000);
+        this.driver.wait({ ms: 1500 });
+        if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) break;
+        if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) break;
+        if (expand.stop?.stable) {
+          const cc = this.driver.evalJson<number>(`
+            document.querySelectorAll('${escapeJs(expand.stop.stable.css)}').length
+          `) ?? 0;
+          if (cc === lastCount) { stableCount++; if (stableCount >= (expand.stop.stable.after ?? 2)) break; }
+          else stableCount = 0;
+          lastCount = cc;
+        }
+      }
+    }
+    return trees;
+  }
+
+  /** Collect tree records from children on the current page. */
+  private collectPageTree(
+    node: NER, allNodes: Record<string, NER>,
+    depth: number, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    // For page expansion, the node itself may have extract rules
+    // but children handle element expansion. Collect children as trees.
+    const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, context);
+    // If the page node itself extracts, make a tree record for the page
+    const extracted = this.extract(node, "  ".repeat(depth));
+    if (extracted || Object.keys(childrenMap).length > 0) {
+      const tree: TreeRecord = {
+        node: node.name, url: this.driver.getUrl() ?? "",
+        data: extracted ?? {}, children: childrenMap,
+        extracted_at: new Date().toISOString(),
+      };
+      this.emitTreeToArtifacts(node, tree, context);
+      return [tree];
+    }
+    // No extraction, just return children's trees flattened
+    return Object.values(childrenMap).flat();
+  }
+
+  private expandCombinationsTree(
+    node: NER,
+    expand: { over: "combinations"; axes: Array<{ action: string; control: string; values: string[] | "auto" }>; order: "dfs" | "bfs" },
+    allNodes: Record<string, NER>,
+    depth: number, indent: string, context: Record<string, unknown>,
+  ): TreeRecord[] {
+    const resolvedAxes = expand.axes.map((axis) => {
+      if (axis.values === "auto") return { ...axis, values: this.discoverAxisValues(axis.control, axis.action) };
+      return { ...axis, values: axis.values as string[] };
+    });
+    const combos = cartesian(resolvedAxes.map((a) => a.values));
+    console.log(`${indent}  Expand combinations: ${combos.length} combos`);
+
+    const trees: TreeRecord[] = [];
+    for (const combo of combos) {
+      const comboContext: Record<string, unknown> = {};
+      for (let i = 0; i < combo.length; i++) {
+        const axis = resolvedAxes[i];
+        const val = combo[i];
+        comboContext[axis.control] = val;
+        if (axis.action === "select") this.driver.select({ css: axis.control }, val);
+        else if (axis.action === "type") this.driver.type({ css: axis.control }, val);
+        else if (axis.action === "checkbox") this.driver.click({ css: axis.control });
+        else if (axis.action === "click") {
+          this.driver.eval(`(() => { const btns=[...document.querySelectorAll('${escapeJs(axis.control)}')]; const t=btns.find(b=>b.textContent.trim()==='${escapeJs(val)}'||b.value==='${escapeJs(val)}'); if(t)t.click(); })()`);
+        }
+      }
+      this.driver.wait({ idle: true });
+      const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, { ...context, ...comboContext });
+      const tree: TreeRecord = {
+        node: node.name, url: this.driver.getUrl() ?? "",
+        data: comboContext, children: childrenMap,
+        extracted_at: new Date().toISOString(),
+      };
+      this.emitTreeToArtifacts(node, tree, context);
+      trees.push(tree);
+    }
+    return trees;
+  }
+
+  // ── tree emit ────────────────────────────────────────
+
+  /** Emit a tree record into artifact(s) per the node's emit declaration. */
+  private emitTreeToArtifacts(node: NER, tree: TreeRecord, _context: Record<string, unknown>): void {
+    if (!node.emit || !this.store) return;
+    const emit = node.emit;
+
+    if (typeof emit === "string") {
+      this.store.putTree(emit, [tree]);
+      return;
+    }
+
+    for (const target of emit) {
+      if (target.flatten === true) {
+        // Flatten entire subtree into flat records
+        const flat = Engine.flattenTree([tree]);
+        this.store.put(target.to, flat);
+        console.log(`    [emit] Flattened ${flat.length} records → ${target.to}`);
+      } else if (typeof target.flatten === "string") {
+        // Check if flatten names a child node or a data field
+        const childTrees = tree.children[target.flatten];
+        if (childTrees && childTrees.length > 0) {
+          // Flatten named child's subtrees
+          const flat = Engine.flattenTree(childTrees, tree.data);
+          this.store.put(target.to, flat);
+          console.log(`    [emit] Flattened ${flat.length} records from child '${target.flatten}' → ${target.to}`);
+        } else {
+          // Fall back: flatten a data field containing an array (table extraction pattern)
+          const arrayVal = tree.data[target.flatten];
+          if (Array.isArray(arrayVal)) {
+            const rows = arrayVal.map((row: unknown) => {
+              const rowData = typeof row === "object" && row !== null
+                ? { ...(row as Record<string, unknown>) }
+                : { [target.flatten as string]: row };
+              return { node: tree.node, url: tree.url, data: rowData, extracted_at: tree.extracted_at };
+            });
+            this.store.put(target.to, rows);
+            console.log(`    [emit] Flattened ${rows.length} rows from field '${target.flatten}' → ${target.to}`);
+          } else {
+            // Neither child nor array field — emit as nested
+            this.store.putTree(target.to, [tree]);
+          }
+        }
+      } else {
+        this.store.putTree(target.to, [tree]);
+      }
+    }
+  }
+
+  // ── tree utilities ───────────────────────────────────
+
+  /**
+   * Flatten a tree into denormalized flat records.
+   * Ancestor data is spread into each leaf record.
+   * If a tree has no children, it becomes one flat record.
+   * If it has children, only leaves produce records (ancestors provide context).
+   */
+  static flattenTree(trees: TreeRecord[], parentData?: Record<string, unknown>): ExtractedRecord[] {
+    const results: ExtractedRecord[] = [];
+    for (const tree of trees) {
+      const mergedData = parentData ? { ...parentData, ...tree.data } : { ...tree.data };
+      const childKeys = Object.keys(tree.children);
+
+      if (childKeys.length === 0) {
+        // Leaf node — produce a flat record
+        results.push({
+          node: tree.node,
+          url: tree.url,
+          data: mergedData,
+          extracted_at: tree.extracted_at,
+        });
+      } else {
+        // Interior node — recurse into children, spreading this node's data as context
+        for (const childTrees of Object.values(tree.children)) {
+          results.push(...Engine.flattenTree(childTrees, mergedData));
+        }
+      }
+    }
+    return results;
+  }
+
+  // ── legacy flat API (backward compat) ────────────────
 
   runResource(resource: Resource): ExtractedRecord[] {
     const nodeMap: Record<string, NER> = {};
@@ -283,14 +739,15 @@ export class Engine {
 
     // Full form: emit: [{ to, flatten? }]
     for (const target of emit) {
-      if (target.flatten) {
-        // Flatten: unpack an array field into per-row records
-        const arrayVal = record.data[target.flatten];
+      if (target.flatten && typeof target.flatten === "string") {
+        // Flatten: unpack a named array field into per-row records (legacy flat path)
+        const flattenField = target.flatten;
+        const arrayVal = record.data[flattenField];
         if (Array.isArray(arrayVal)) {
           const rows = arrayVal.map((row: unknown) => {
             const rowData = typeof row === "object" && row !== null
               ? { ...context, ...(row as Record<string, unknown>) }
-              : { ...context, [target.flatten!]: row };
+              : { ...context, [flattenField]: row };
             return this.makeRecord(node.name, rowData);
           });
           this.store.put(target.to, rows);
@@ -311,12 +768,20 @@ export class Engine {
     return Array.isArray(val) ? val : [val];
   }
 
-  /** Merge records from multiple consumed artifacts. */
+  /** Merge records from multiple consumed artifacts.
+   *  Checks flat store first, then falls back to flattening tree store. */
   private mergeConsumed(artifactNames: string[]): ExtractedRecord[] {
     if (!this.store) return [];
     const all: ExtractedRecord[] = [];
     for (const name of artifactNames) {
-      all.push(...this.store.get(name));
+      const flat = this.store.get(name);
+      if (flat.length > 0) {
+        all.push(...flat);
+      } else {
+        // Flatten tree records for consumption
+        const trees = this.store.getTree(name);
+        all.push(...Engine.flattenTree(trees));
+      }
     }
     return all;
   }
@@ -362,6 +827,7 @@ export class Engine {
     const url = this.driver.getUrl() ?? "";
 
     if (state.url && !url.includes(state.url)) return false;
+    // Intentional substring match (not regex) — simpler and sufficient for URL preconditions
     if (state.url_pattern && !url.includes(state.url_pattern)) return false;
 
     if (state.selector_exists && !this.driver.exists(state.selector_exists)) return false;
@@ -620,15 +1086,28 @@ export class Engine {
       `) ?? [];
     }
 
-    // No columns defined — return all cells as arrays
+    // No columns defined — auto-generate column names from header row (col_0, col_1, ...)
     return this.driver.evalJson<Record<string, string>[]>(`
       (() => {
         const tbl = document.querySelector('${escapeJs(cfg.css)}');
         if (!tbl) return [];
+        const hdr = tbl.querySelectorAll('tr')[${cfg.header_row}];
+        const headerCells = [...(hdr?.querySelectorAll('th, td') || [])];
+        const colNames = headerCells.map((c, i) => {
+          const text = c.textContent.trim();
+          return text || ('col_' + i);
+        });
         const rows = [...tbl.querySelectorAll('tr')].slice(${cfg.header_row + 1});
-        return rows.map(row =>
-          [...row.querySelectorAll('td, th')].map(c => c.textContent.trim())
-        );
+        return rows.map(row => {
+          const cells = [...row.querySelectorAll('td, th')];
+          const obj = {};
+          const maxCols = Math.max(colNames.length, cells.length);
+          for (let i = 0; i < maxCols; i++) {
+            const key = i < colNames.length ? colNames[i] : ('col_' + i);
+            obj[key] = i < cells.length ? cells[i].textContent.trim() : '';
+          }
+          return obj;
+        });
       })()
     `) ?? [];
   }
@@ -666,8 +1145,9 @@ export class Engine {
     context: Record<string, unknown>,
   ): void {
     const extractRules = node.extract ?? [];
-    const rows = this.extractMultiple(expand.scope, extractRules, expand.limit);
-    console.log(`${indent}  Expand elements: ${rows.length} matches`);
+    const offset = typeof context._extractOffset === "number" ? context._extractOffset : 0;
+    const rows = this.extractMultiple(expand.scope, extractRules, expand.limit, offset);
+    console.log(`${indent}  Expand elements: ${rows.length} matches (offset ${offset})`);
 
     if (expand.order === "bfs") {
       // BFS: collect all observations, then walk children
@@ -700,24 +1180,27 @@ export class Engine {
     scope: string,
     rules: Extraction[],
     limit?: number,
+    offset = 0,
   ): Record<string, unknown>[] {
     if (rules.length === 0) {
       // No extraction rules — just count elements for iteration
       const count = this.driver.evalJson<number>(`
         (() => document.querySelectorAll('${escapeJs(scope)}').length)()
       `) ?? 0;
-      return Array.from({ length: Math.min(count, limit ?? count) }, () => ({}));
+      const effective = Math.max(0, count - offset);
+      return Array.from({ length: Math.min(effective, limit ?? effective) }, () => ({}));
     }
 
     const fieldJs = rules
       .map((rule) => this.extractionToJs(rule))
       .join("\n");
 
-    const limitJs = limit ? `.slice(0, ${limit})` : "";
+    const sliceStart = offset > 0 ? `.slice(${offset})` : "";
+    const sliceLimit = limit ? `.slice(0, ${limit})` : "";
 
     return this.driver.evalJson<Record<string, unknown>[]>(`
       (() => {
-        const rows = [...document.querySelectorAll('${escapeJs(scope)}')]${limitJs};
+        const rows = [...document.querySelectorAll('${escapeJs(scope)}')]${sliceStart}${sliceLimit};
         return rows.map(container => {
           const result = {};
           ${fieldJs}
@@ -828,10 +1311,15 @@ export class Engine {
     const maxIter = expand.stop?.limit ?? expand.limit;
     let stableCount = 0;
     let lastCount = -1;
+    let extractedCount = 0;
 
     for (let page = 0; page < maxIter; page++) {
       console.log(`${indent}  Scroll ${page + 1}/${maxIter}`);
-      this.walkChildren(node.name, allNodes, records, depth, context);
+      // Pass offset so child element-expansions only process newly-appeared elements
+      const scrollCtx = { ...context, _extractOffset: extractedCount };
+      const recordsBefore = records.length;
+      this.walkChildren(node.name, allNodes, records, depth, scrollCtx);
+      extractedCount += records.length - recordsBefore;
       this.driver.scroll("down", 2000);
       this.driver.wait({ ms: 1500 });
 
@@ -889,9 +1377,12 @@ export class Engine {
 
     for (const combo of combos) {
       console.log(`${indent}  Combo: [${combo.join(", ")}]`);
+      // Build context with combination values so children know which combo produced them
+      const comboContext: Record<string, unknown> = {};
       for (let i = 0; i < combo.length; i++) {
         const axis = resolvedAxes[i];
         const val = combo[i];
+        comboContext[axis.control] = val;
         if (axis.action === "select") {
           this.driver.select({ css: axis.control }, val);
         } else if (axis.action === "type") {
@@ -911,7 +1402,7 @@ export class Engine {
         }
       }
       this.driver.wait({ idle: true });
-      this.walkChildren(node.name, allNodes, records, depth, context);
+      this.walkChildren(node.name, allNodes, records, depth, { ...context, ...comboContext });
     }
   }
 
@@ -977,7 +1468,7 @@ export class Engine {
       const { name, css, regex } = rule.text;
       const base = `container.querySelector('${escapeJs(css)}')?.textContent?.trim() || ''`;
       if (regex) {
-        return `result['${escapeJs(name)}'] = (() => { const v = ${base}; const m = v.match(${regex}); return m ? m[0] : v; })();`;
+        return `result['${escapeJs(name)}'] = (() => { const v = ${base}; const m = v.match(new RegExp('${escapeJs(regex)}')); return m ? m[0] : v; })();`;
       }
       return `result['${escapeJs(name)}'] = ${base};`;
 

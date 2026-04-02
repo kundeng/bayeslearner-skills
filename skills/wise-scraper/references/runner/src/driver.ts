@@ -72,3 +72,9 @@ export function locatorToSelector(loc: Locator): string {
 export function escapeJs(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
+
+/** Escape a string for safe embedding in shell commands (wraps in single quotes). */
+export function shellEscape(s: string): string {
+  // Replace each embedded single quote with: end quote, escaped quote, start quote
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
