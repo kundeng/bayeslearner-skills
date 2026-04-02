@@ -40,7 +40,7 @@
   .node-box.extract { border-color: var(--green); }
   .node-box.expand { border-color: var(--accent); }
   .node-box.navigate { border-color: var(--orange); }
-  .node-box.yields-box { border-color: var(--purple); }
+  .node-box.emit-box { border-color: var(--purple); }
 
   .node-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
   .node-name .type { font-weight: 400; color: var(--muted); font-size: 0.75rem; }
@@ -98,7 +98,7 @@
   <div class="legend-item"><div class="legend-dot" style="border-color:var(--accent)"></div> Expand</div>
   <div class="legend-item"><div class="legend-dot" style="border-color:var(--green)"></div> Extract</div>
   <div class="legend-item"><div class="legend-dot" style="border-color:var(--orange)"></div> Navigate</div>
-  <div class="legend-item"><div class="legend-dot" style="border-color:var(--purple)"></div> Artifact yield/consume</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:var(--purple)"></div> Artifact emit/consume</div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ -->
@@ -131,10 +131,10 @@
     <span class="step">2.</span> <span class="label">[node] root</span> → state check passes<br>
     <span class="step">3.</span> <span class="label">[node] products</span> → <span class="action">expand elements</span> → 117 .thumbnail matches<br>
     <span class="step">4.</span> <span class="dim">for each match:</span> <span class="data">extract {title, price, description, rating}</span> → push record<br>
-    <span class="step">5.</span> → <span class="data">118 records</span> → JSONL
+    <span class="step">5.</span> → <span class="data">118 records</span> → JSON
   </div>
 
-  <p><strong>Data flow:</strong> Node → records[] → JSONL file. No artifacts involved.</p>
+  <p><strong>Data flow:</strong> Node → records[] → JSON file. No artifacts involved.</p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ -->
@@ -176,7 +176,7 @@
     <span class="dim">│</span> <span class="step">Page 2:</span> <span class="action">click next</span> → walk children → <span class="data">extract 6 rows</span><br>
     <span class="dim">│</span> <span class="step">...</span><br>
     <span class="dim">│</span> <span class="step">Page 20:</span> next button gone → stop<br>
-    <span class="step">3.</span> → <span class="data">117 records</span> → JSONL
+    <span class="step">3.</span> → <span class="data">117 records</span> → JSON
   </div>
 
   <p><strong>Data flow:</strong> Nested expansion (pages × elements). Each page is a successor state; within each, elements expand. Still no artifacts — everything stays in the records[] array.</p>
@@ -205,7 +205,7 @@
 
   <div class="flow">
     <div class="flow-step">
-      <div class="node-box yields-box">
+      <div class="node-box emit-box">
         <div class="node-name">Resource: discover</div>
         <div class="node-field"><span class="key">produces:</span> <span class="artifact-ref">page_urls</span></div>
         <div class="node-field"><span class="key">node:</span> toc</div>
@@ -214,7 +214,7 @@
       </div>
     </div>
     <div class="flow-step">
-      <div class="node-box yields-box">
+      <div class="node-box emit-box">
         <div class="node-name">Resource: extract_pages</div>
         <div class="node-field"><span class="key">consumes:</span> <span class="artifact-ref">page_urls</span></div>
         <div class="node-field"><span class="key">produces:</span> <span class="artifact-ref">page_content</span></div>
@@ -250,7 +250,7 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ -->
-<h2>Case 4: Node-Level Chaining (single resource, yields/consumes)</h2>
+<h2>Case 4: Node-Level Chaining (single resource, emit/consumes)</h2>
 <p>Same Splunk use case, but using node-level data flow instead of two resources.</p>
 
 <div class="case">
@@ -260,7 +260,7 @@
     <span class="badge internal">internal</span>
     <span>page_urls</span>
     <span class="arrow">→</span>
-    <span>toc yields → pages consumes</span>
+    <span>toc emit → pages consumes</span>
   </div>
 
   <div class="flow">
@@ -270,15 +270,15 @@
       </div>
     </div>
     <div class="flow-step">
-      <div class="node-box yields-box">
-        <div class="node-name">toc <span class="type">yields</span></div>
+      <div class="node-box emit-box">
+        <div class="node-name">toc <span class="type">emit</span></div>
         <div class="node-field"><span class="key">expand:</span> elements, <span class="val">order: bfs</span></div>
         <div class="node-field"><span class="key">extract:</span> <span class="val">url, title</span></div>
-        <div class="node-field"><span class="key">yields:</span> <span class="artifact-ref">page_urls</span></div>
+        <div class="node-field"><span class="key">emit:</span> <span class="artifact-ref">page_urls</span></div>
       </div>
     </div>
     <div class="flow-step">
-      <div class="node-box yields-box">
+      <div class="node-box emit-box">
         <div class="node-name">pages <span class="type">consumes</span></div>
         <div class="node-field"><span class="key">consumes:</span> <span class="artifact-ref">page_urls</span></div>
         <div class="node-field"><span class="key">action:</span> <span class="action">navigate {url}</span></div>
@@ -292,7 +292,7 @@
     <span class="step">1.</span> <span class="label">[node] root</span> → walk children in YAML order<br><br>
     <span class="step">2.</span> <span class="label">[node] toc</span> <span class="dim">(first child of root)</span><br>
     <span class="dim">│</span> expand 80 elements (BFS) → extract {url, title} × 80<br>
-    <span class="dim">│</span> <span class="artifact">store.put("page_urls", [record])</span> <span class="dim">← called 80 times via node.yields</span><br>
+    <span class="dim">│</span> <span class="artifact">store.put("page_urls", [record])</span> <span class="dim">← called 80 times via node.emit</span><br>
     <span class="dim">│</span> BFS: all 80 records in artifact BEFORE children walk<br><br>
     <span class="step">3.</span> <span class="label">[node] pages</span> <span class="dim">(second child of root — runs after toc)</span><br>
     <span class="dim">│</span> <span class="artifact">store.get("page_urls")</span> → 80 records<br>
@@ -322,8 +322,8 @@
   </div>
   <div class="link-box">
     <h4>Node-Level (logical, YAML-ordered)</h4>
-    <p>No dependency resolution. Engine walks children of each parent in <strong>YAML array order</strong>. A yielding node writes to <code>store.put()</code> during expansion. A consuming sibling reads via <code>store.get()</code>.</p>
-    <p style="margin-top: 0.5rem;"><strong>Linking:</strong> Same <code>ArtifactStore</code> instance shared across all nodes. <code>yields</code> writes per-record. <code>consumes</code> reads the full artifact and iterates.</p>
+    <p>No dependency resolution. Engine walks children of each parent in <strong>YAML array order</strong>. An emitting node writes to <code>store.put()</code> during expansion. A consuming sibling reads via <code>store.get()</code>.</p>
+    <p style="margin-top: 0.5rem;"><strong>Linking:</strong> Same <code>ArtifactStore</code> instance shared across all nodes. <code>emit</code> writes per-record. <code>consumes</code> reads the full artifact and iterates.</p>
     <p style="margin-top: 0.5rem; color: var(--orange);">⚠ Ordering depends on YAML declaration order</p>
   </div>
 </div>
@@ -376,7 +376,7 @@
     </tr>
     <tr style="border-bottom: 1px solid var(--border);">
       <td style="padding: 0.5rem; color: var(--text);">Discover URLs → extract each</td>
-      <td style="padding: 0.5rem;">Node <code>yields</code> + sibling <code>consumes</code> (intra-resource)</td>
+      <td style="padding: 0.5rem;">Node <code>emit</code> + sibling <code>consumes</code> (intra-resource)</td>
       <td style="padding: 0.5rem;">Same globals, simple pipeline</td>
     </tr>
     <tr style="border-bottom: 1px solid var(--border);">

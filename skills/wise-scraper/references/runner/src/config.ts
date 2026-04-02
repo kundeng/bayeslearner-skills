@@ -48,7 +48,7 @@ const runnerSchema = {
   outputFormat: {
     doc: "Output format: jsonl, csv, json, markdown",
     format: ["jsonl", "csv", "json", "markdown", "md"],
-    default: "jsonl" as string,
+    default: "json" as string,
     arg: "output-format",
     env: "WISE_OUTPUT_FORMAT",
   },
@@ -132,7 +132,7 @@ export interface ResolvedConfig {
  */
 export function loadConfig(argv: string[]): ResolvedConfig {
   // Parse our own args first (before convict sees them)
-  const { positional, sets, configExtras } = parseCustomArgs(argv);
+  const { positional, sets, configExtras, cliOverrides } = parseCustomArgs(argv);
 
   // Build convict config for runner settings
   const conf = convict(runnerSchema);
@@ -200,6 +200,11 @@ export function loadConfig(argv: string[]): ResolvedConfig {
   // Extract input parameters from profile
   const inputs: InputConfig = (profileData.inputs ?? profileData._inputs ?? {}) as InputConfig;
 
+  // Apply short-alias CLI overrides (convict only knows long-form --output-dir, not -o)
+  for (const [key, val] of Object.entries(cliOverrides)) {
+    conf.set(key, val);
+  }
+
   // Validate runner config
   conf.validate({ allowed: "warn" });
 
@@ -216,12 +221,14 @@ interface ParsedArgs {
   positional: string[];
   sets: Array<{ key: string; value: string }>;
   configExtras: string[];
+  cliOverrides: Record<string, string>;
 }
 
 function parseCustomArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   const sets: Array<{ key: string; value: string }> = [];
   const configExtras: string[] = [];
+  const cliOverrides: Record<string, string> = {};
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -237,14 +244,17 @@ function parseCustomArgs(argv: string[]): ParsedArgs {
     } else if (arg === "--config" || arg === "-c") {
       const path = argv[++i];
       if (path) configExtras.push(path);
-    } else if (arg === "--output-dir" || arg === "-o") {
-      i++; // skip value, convict handles it
+    } else if (arg === "-o") {
+      const val = argv[++i];
+      if (val) cliOverrides.outputDir = val;
+    } else if (arg === "--output-dir") {
+      i++; // convict handles long form
     } else if (arg === "--hooks") {
-      i++; // skip value, convict handles it
+      i++; // convict handles long form
     } else if (arg === "--output-format") {
-      i++; // skip value, convict handles it
+      i++; // convict handles long form
     } else if (arg === "--timeout" || arg === "--retries" || arg === "--concurrency") {
-      i++; // skip value, convict handles it
+      i++; // convict handles long form
     } else if (arg === "-v" || arg === "--verbose" || arg === "--dry-run") {
       // flag, no value to skip
     } else if (!arg.startsWith("-")) {
@@ -252,7 +262,7 @@ function parseCustomArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { positional, sets, configExtras };
+  return { positional, sets, configExtras, cliOverrides };
 }
 
 // ------------------------------------------------------------------

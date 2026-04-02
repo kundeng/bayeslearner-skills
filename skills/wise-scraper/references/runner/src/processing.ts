@@ -152,9 +152,9 @@ export function assembleMarkdown(
     if (typeof data.body_md === "string") {
       md = data.body_md;
     } else if (typeof data.body === "string") {
-      md = data.body.startsWith("<") ? htmlToMarkdown(data.body) : data.body;
+      md = data.body.trimStart().startsWith("<") ? htmlToMarkdown(data.body) : data.body;
     } else if (typeof data.content === "string") {
-      md = data.content.startsWith("<") ? htmlToMarkdown(data.content) : data.content;
+      md = data.content.trimStart().startsWith("<") ? htmlToMarkdown(data.content) : data.content;
     } else if (typeof data.body_html === "string") {
       md = htmlToMarkdown(data.body_html);
     }

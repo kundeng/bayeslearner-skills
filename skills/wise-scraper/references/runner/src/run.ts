@@ -3,14 +3,14 @@
  * WISE NER Runner — CLI entry point.
  *
  * Reads a YAML profile, validates against the Zod schema, wires up
- * driver + AI adapter, executes via the NER engine, writes JSONL + final output.
+ * driver + AI adapter, executes via the NER engine, writes JSON + final output.
  *
  * Usage:
  *   node dist/run.js <profile.yaml> [options]
  *
  * Options:
  *   --output-dir, -o    Output directory (default: ./output)
- *   --output-format     jsonl | csv | json | markdown | md
+ *   --output-format     json | jsonl | csv | markdown | md  (default: json)
  *   --hooks             Path to hooks module (.js)
  *   --ai-model          Model for aichat adapter (optional)
  *   --driver            agent-browser (default) — extensible for future drivers
@@ -312,7 +312,7 @@ async function main(): Promise<void> {
     if (outputArtifacts.length > 0) {
       for (const [name, schema] of outputArtifacts) {
         const records = store.get(name);
-        const fmt = schema.format ?? runner.outputFormat ?? "jsonl";
+        const fmt = schema.format ?? runner.outputFormat ?? "json";
         const ext = fmt === "markdown" ? "md" : fmt;
         const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
 
@@ -324,17 +324,12 @@ async function main(): Promise<void> {
       }
     }
 
-    // Always write all records as JSONL (the complete intermediate truth)
-    const jsonlPath = resolve(outDir, `${baseName}.jsonl`);
-    writeJsonl(finalRecords, jsonlPath);
-
-    // Also write in CLI-requested format if different and no output artifacts declared
-    const fmt = runner.outputFormat ?? "jsonl";
-    if (outputArtifacts.length === 0 && fmt !== "jsonl" && WRITERS[fmt]) {
-      const ext = fmt === "markdown" ? "md" : fmt;
-      const outPath = resolve(outDir, `${baseName}.${ext}`);
-      WRITERS[fmt](finalRecords, outPath);
-    }
+    // Always write all records as JSON array (the complete intermediate truth)
+    const fmt = runner.outputFormat ?? "json";
+    const ext = fmt === "markdown" ? "md" : fmt;
+    const allPath = resolve(outDir, `${baseName}.${ext}`);
+    const writer = WRITERS[fmt] ?? writeJson;
+    writer(finalRecords, allPath);
 
     // post_assemble hook
     hookRegistry.invoke("post_assemble", {
@@ -343,10 +338,15 @@ async function main(): Promise<void> {
       profile,
     });
 
-    // Quality gate
-    const qualityOk = checkQuality(finalRecords, profile);
+    // Quality gate — check against artifact store when output artifacts exist,
+    // since emit+flatten may reshape records (e.g., 3 nested → 77 flat).
+    let qualityRecords = finalRecords;
+    if (outputArtifacts.length > 0) {
+      qualityRecords = outputArtifacts.flatMap(([name]) => store.get(name));
+    }
+    const qualityOk = checkQuality(qualityRecords, profile);
 
-    console.log(`\n=== Done: ${finalRecords.length} records ===`);
+    console.log(`\n=== Done: ${finalRecords.length} records (${qualityRecords.length} in output artifacts) ===`);
     if (!qualityOk) {
       console.error("[main] Quality gate failed");
       process.exitCode = 1;

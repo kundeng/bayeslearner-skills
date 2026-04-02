@@ -104,18 +104,18 @@ This requires multiple artifacts written from different tree depths in the same 
 ```yaml
 nodes:
   - name: product
-    yields: products           # writes {id, title, category, base_price}
+    emit: products             # writes {id, title, category, base_price}
     extract: [...]
 
   - name: variants
     parents: [product]
-    yields: variants           # writes {product_id, color, hdd, price, stock}
+    emit: variants             # writes {product_id, color, hdd, price, stock}
     expand: { over: combinations, ... }
     extract: [...]
 
   - name: images
     parents: [product]
-    yields: images             # writes {product_id, image_url}
+    emit: images               # writes {product_id, image_url}
     expand: { over: elements, scope: ".gallery img" }
     extract: [...]
 ```
@@ -160,9 +160,11 @@ The node-level topological sort already detects static cycles. For dynamic loops
 ## Issue: produces/consumes as arrays and glob patterns
 
 ```yaml
-# A node that produces two artifact streams
+# A node that emits to two artifact streams
 - name: product_page
-  yields: [product_data, product_images]
+  emit:
+    - { to: product_data }
+    - { to: product_images }
 
 # A resource that consumes all section artifacts
 - name: assembler
@@ -171,13 +173,13 @@ The node-level topological sort already detects static cycles. For dynamic loops
 
 When consuming a glob, the runner resolves matching artifact names at execution time and merges their records in artifact-creation order.
 
-## Issue: Default yields inference
+## Issue: Default emit inference
 
-If a node has `extract` but no `yields`, and the resource has `produces`:
+If a node has `extract` but no `emit`, and the resource has `produces`:
 - The node's records go into the resource's `produces` artifact
 - This is the common case — one flat table per resource
 
-If a node has explicit `yields`, it overrides the default:
+If a node has explicit `emit`, it overrides the default:
 - The node writes to its specified artifact instead
 - The resource's `produces` may still receive records from other nodes
 
@@ -223,6 +225,39 @@ Scope:
 
 ## Test Results Summary
 
+### Emit semantics validation (v2.0 — 2026-04-02)
+
+Eight test runs validated the emit/flatten rewrite and end-to-end skill workflow.
+
+**Runner-only tests (pre-written profiles):**
+
+| # | Test | Records | Result | Bugs found |
+|---|------|---------|--------|------------|
+| 1 | Laptop simple | 117 | PASS | — |
+| 2 | Laptop paginated | 117 / 20pp | PASS | — |
+| 3 | Revspin sort+paginate | 200 / 2pp | PASS | — |
+| 4 | Variants AJAX (chaining) | 24 (6×4) | PASS | Quality gate checked raw engine records instead of artifact store |
+| 5 | Splunk docs (chaining) | 9pp / 86KB | PASS | Stale DOM selector (`div.toc` → `.toc-item-wrapper`) |
+| 6 | UM Salary (flatten) | 77 flat | PASS | Same quality gate bug as #4 |
+| 7 | Amazon matrix (brand filters) | 288 (3×2×48) | PASS | Brand context not propagated to child resource walk |
+
+**End-to-end skill tests (agent explores + generates + validates + runs):**
+
+| # | Test | Agent A (explore) | Hard gate (dry-run) | Agent B (run) | Notes |
+|---|------|-------------------|--------------------|----|-------|
+| 8 | Books to Scrape (Mystery) | PASS | PASS | PASS (32 records) | Agent correctly chose attr for title (truncation) and rating (CSS class) |
+| 9 | Tables | PASS | PASS | FAIL | Hit table-in-expand limitation; doc gap found and fixed |
+
+**Bugs fixed:**
+1. Quality gate checked raw engine records instead of artifact store for output artifacts — flatten produced 77 flat records in the store but quality saw 3 nested engine records. Fixed in run.ts.
+2. Consumed data context not propagated into resource walk — `runResourceOnce` passed `{}` instead of `consumedData` to `walkNode`. Fixed in engine.ts.
+
+**Doc gaps found and fixed:**
+1. `table` extraction inside `expand: elements` scope returns stub — documented in field-guide and troubleshooting.
+2. Splunk help site changed DOM — `div.toc` → `.toc-item-wrapper`.
+
+### Original test runs (v2.0 development — 2026-03)
+
 Five end-to-end test runs validated the WISE framework against real scraping targets. Each tested a different capability surface.
 
 ### Test 1: Simple extract (117 records)
@@ -256,7 +291,7 @@ Five end-to-end test runs validated the WISE framework against real scraping tar
 **Findings:**
 - Combination expansion only supports `select`/`type`/`checkbox`/`click` axis actions. Agent needed 3 separate click nodes as a workaround for unsupported button-group patterns. Now documented; click axis support addresses this.
 - Relative URLs from `link` extraction required prepending the base URL in the entry template. Confirmed as a recurring pattern (also in Test 5). Added to common patterns.
-- Using both `yields` and `produces` for the same artifact caused double records. Already documented in field-guide; added to troubleshooting for discoverability.
+- Using both `emit` and `produces` for the same artifact caused double records. Already documented in field-guide; added to troubleshooting for discoverability.
 
 ### Test 5: Multi-page documentation scrape (9 pages, 86KB markdown)
 

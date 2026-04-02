@@ -33,14 +33,15 @@ Deployment: {
 // Can be internal (plumbing) or output (deliverables).
 
 FieldDef: {
-	type?:        "string" | "number" | "boolean" | "array" | "object" | *"string"
+	type?:        "string" | "number" | "boolean" | "array" | "object" | "url" | "binary" | *"string"
 	required?:    bool | *true
 	description?: string
 }
 
 ArtifactSchema: {
 	fields:       [string]: FieldDef       // field name → type + constraints
-	consumes?:    string                    // upstream artifact (DAG edge)
+	consumes?:    string | [...string]     // upstream artifact(s) (DAG edge)
+	dedupe?:      string                   // field name to deduplicate by
 	output?:      bool | *false            // true = final deliverable
 	format?:      "jsonl" | "csv" | "json" | "markdown"  // output format hint
 	description?: string
@@ -49,12 +50,12 @@ ArtifactSchema: {
 Resource: {
 	name:  string
 	entry: {
-		url:  string | {from: string}
+		url:  string
 		root: string
 	}
 	nodes:     [...NER] & [_, ...]
-	produces?: string                       // artifact this resource writes to
-	consumes?: string                       // artifact this resource reads from
+	produces?: string | [...string]        // artifact(s) this resource writes to
+	consumes?: string | [...string]        // artifact(s) this resource reads from
 	globals?: {
 		timeout_ms?:          int & >0 | *60000
 		retries?:             int & >=0 | *2
@@ -73,14 +74,26 @@ NER: {
 	action?:   [...Action]
 	extract?:  [...Extraction]
 	expand?:   Expand
-	yields?:   string                       // write records into this artifact stream
-	consumes?: string                       // iterate over records from this artifact
+
+	// emit — explicitly write observation + context to artifact(s).
+	// String shorthand: emit: "artifact_name" (flat, no transform)
+	// Full form: emit: [{ to: "artifact", flatten: "field" }]
+	emit?:     string | [...EmitTarget]
+
+	consumes?: string | [...string]        // iterate over records from artifact(s)
 	retry?:    Retry
 	hooks?: {
 		pre_extract?:  [...Hook]
 		post_extract?: [...Hook]
 	}
 	delay_ms?: int & >=0
+}
+
+// ── Emit Target ────────────────────────────────────────
+
+EmitTarget: {
+	to:       string                       // artifact name
+	flatten?: string                       // field containing array to unpack into per-row records
 }
 
 // ── State (preconditions) ───────────────────────────────
@@ -119,14 +132,18 @@ SelectAction: {
 }
 
 ScrollAction: {
-	scroll:    "down" | "up"
+	scroll:    "down" | "up" | "to"
 	px?:       int & >0 | *500
+	target?:   Locator                     // for "to": scroll until visible
+	ready?:    WaitCondition               // for "to": wait after target visible
 	delay_ms?: int & >=0
 }
 
 WaitAction: {
-	wait: {idle: true} | {selector: string} | {ms: int & >0}
+	wait: WaitCondition
 }
+
+WaitCondition: {idle: true} | {selector: string} | {ms: int & >0}
 
 RevealAction: {
 	reveal:    Locator
@@ -227,6 +244,8 @@ Retry: {
 }
 
 // ── Stop Condition ──────────────────────────────────────
+// Observable completion strategies for pagination/scroll.
+// Three composable strategies — first one that triggers wins.
 
 StopCondition: {
 	sentinel?:      string                  // CSS — stop when this appears
@@ -266,7 +285,7 @@ CombinationExpand: {
 }
 
 Axis: {
-	action:  "select" | "type" | "checkbox"
+	action:  "select" | "type" | "checkbox" | "click"
 	control: string
 	values:  [...string] | "auto"
 }
@@ -298,8 +317,8 @@ SetupAction: {open: string} | {click: Locator} | {input: {target: Locator, value
 // ── Quality Gate ────────────────────────────────────────
 
 QualityGate: {
-	min_records?:   int & >0
-	max_empty_pct?: number & >=0 & <=100
+	min_records?:    int & >0
+	max_empty_pct?:  number & >=0 & <=100
 	max_failed_pct?: number & >=0 & <=100
 	min_filled_pct?: [string]: number & >=0 & <=100
 }

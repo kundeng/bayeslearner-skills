@@ -137,7 +137,7 @@ export class Engine {
     this.interrupts.check();
 
     const records: ExtractedRecord[] = [];
-    this.walkNode(rootNode, nodeMap, records, 0, {});
+    this.walkNode(rootNode, nodeMap, records, 0, consumedData ?? {});
     return records;
   }
 
@@ -950,7 +950,7 @@ export class Engine {
     );
     if (children.length === 0) return;
 
-    // Topological sort: respect artifact yields/consumes dependencies
+    // Topological sort: respect artifact emit/consumes dependencies
     const sorted = ArtifactStore.resolveNodeOrder(children);
     for (const name of sorted) {
       this.walkNode(allNodes[name], allNodes, records, depth + 1, context);

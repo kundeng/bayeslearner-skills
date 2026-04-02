@@ -134,7 +134,7 @@ An ordered list of browser actions executed **before** extraction. Each step is 
 
 ### Extraction (observation)
 
-Fields to read from the DOM once actions are complete. Each rule produces a named field in the JSONL output.
+Fields to read from the DOM once actions are complete. Each rule produces a named field in the output record.
 
 | Type | What it reads | Key fields |
 |---|---|---|
@@ -147,7 +147,7 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 | **grouped** | Multiple elements → array | `name`, `css`, `attr?` |
 | **ai** | AI-generated structured data | `name`, `prompt`, `input?`, `schema?`, `categories?` |
 
-**Tables:** always prefer header-based column mapping over positional index.
+**Tables:** always prefer header-based column mapping over positional index. **Limitation:** `table` extraction does not work inside `expand: { over: elements }` scope — the engine cannot compile table extraction into per-element inline JS. Use `table` extraction on nodes without element expansion (e.g., a node whose parent handles pagination but the node itself extracts the whole table). If you need to expand over multiple tables, use `text` extraction with per-cell CSS selectors instead, or extract the table without expansion and use `emit` with `flatten` to unpack rows.
 
 **Attr vs text:** When an element's visible text is truncated (CSS `text-overflow: ellipsis`) or cluttered by child elements, the full value often lives in the `title` or `aria-label` attribute. During exploration, compare `el.textContent` with `el.getAttribute('title')` to decide. Use `attr` extraction when the attribute is more reliable.
 
@@ -188,9 +188,9 @@ Walk children for element 1
 Walk children for element 2
 ...
 ```
-Use BFS when: discovering URLs that you'll navigate to later. **BFS is required when a node yields into an artifact that a sibling consumes** — because navigating to a discovered URL would destroy the DOM context needed to discover the next URL.
+Use BFS when: discovering URLs that you'll navigate to later. **BFS is required when a node emits into an artifact that a sibling consumes** — because navigating to a discovered URL would destroy the DOM context needed to discover the next URL.
 
-#### BFS × yields: the discovery pattern
+#### BFS × emit: the discovery pattern
 
 ```yaml
 nodes:
@@ -203,7 +203,7 @@ nodes:
     extract:
       - link: { name: url, css: "a" }
       - text: { name: title, css: "a" }
-    yields: page_urls               # all 80 URLs go into artifact BEFORE children
+    emit: page_urls                 # all 80 URLs go into artifact BEFORE children
 
   - name: pages
     parents: [root]                 # sibling of toc, runs AFTER toc completes
@@ -213,10 +213,10 @@ nodes:
     extract:
       - text: { name: title, css: "h1" }
       - html: { name: body, css: ".body" }
-    yields: page_content
+    emit: page_content
 ```
 
-**Ordering rule:** A consuming node must run after its yielding node. For siblings (same parent), this is guaranteed by **YAML declaration order** — nodes listed first are walked first. For cross-resource chaining, the runner resolves order via topological sort on `produces`/`consumes`.
+**Ordering rule:** A consuming node must run after its emitting node. For siblings (same parent), this is guaranteed by **YAML declaration order** — nodes listed first are walked first. For cross-resource chaining, the runner resolves order via topological sort on `produces`/`consumes`.
 
 #### Element expansion
 
@@ -266,23 +266,48 @@ expand:
       values: ["laptop", "tablet"]
 ```
 
-### Yields and Consumes (data flow)
+### Emit and Consumes (data flow)
 
-Any node can participate in artifact data flow:
+`extract` captures data locally (node-private context). `emit` writes that data to artifact(s).
 
-- **`yields: artifact_name`** — extracted records are written into this artifact stream (like a generator/yield)
+- **`emit: "artifact_name"`** — shorthand: write extracted records to this artifact
+- **`emit: [{ to: "artifact", flatten: "field" }]`** — full form: multiple targets with per-target shaping
+  - **`flatten`** — if the named field contains an array of objects, unpack each into a separate record (for table extraction)
 - **`consumes: artifact_name`** — the node runs once per record in the artifact, with that record's fields available as `{field_ref}` in actions
+
+Without `emit`, extracted data flows to children via accumulated context but is NOT written to any artifact.
 
 These work at the **node level** (within a resource) and at the **resource level** (cross-resource):
 
-| Scope | Yields/produces | Consumes | Ordering |
+| Scope | Emit/produces | Consumes | Ordering |
 |---|---|---|---|
-| Node (intra-resource) | `node.yields` | `node.consumes` | YAML declaration order |
+| Node (intra-resource) | `node.emit` | `node.consumes` | YAML declaration order |
 | Resource (cross-resource) | `resource.produces` | `resource.consumes` | Topological sort |
 
-**Key rule:** An artifact that is `yields`-ed into with BFS expansion will have ALL records before any consumer reads it. An artifact `yields`-ed into with DFS expansion will have records appear incrementally — but sibling consumers still see the full set because they run after the yielding node completes.
+**Key rule:** An artifact that is emitted into with BFS expansion will have ALL records before any consumer reads it. An artifact emitted into with DFS expansion will have records appear incrementally — but sibling consumers still see the full set because they run after the emitting node completes.
 
-**Precedence: don't use both `yields` and `produces` for the same artifact.** If a node declares `yields: my_data` AND the resource declares `produces: my_data`, records get written twice. Use `produces` on the resource (common case — one flat table per resource) OR `yields` on specific nodes (when different nodes write to different artifacts). Not both for the same artifact name.
+**Precedence: don't use both `emit` and `produces` for the same artifact.** If a node declares `emit: "my_data"` AND the resource declares `produces: my_data`, records get written twice. Use `produces` on the resource (common case — one flat table per resource) OR `emit` on specific nodes (when different nodes write to different artifacts). Not both for the same artifact name.
+
+#### Flatten (table row unpacking)
+
+When a table extraction returns an array of row objects in a single field, `flatten` unpacks each element into a separate artifact record:
+
+```yaml
+extract:
+  - table:
+      name: salary_data
+      css: "table.results"
+      columns:
+        - name: name
+          header: "Name"
+        - name: title
+          header: "Title"
+emit:
+  - to: salary_records
+    flatten: salary_data        # each row object → one record in salary_records
+```
+
+Without `flatten`, the entire array would be stored as one record. With `flatten`, each array element becomes its own record, merged with accumulated context from ancestors.
 
 ### Website State Setup
 

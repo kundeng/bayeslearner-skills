@@ -159,9 +159,9 @@ export class ArtifactStore {
   }
 
   /**
-   * Topological sort of nodes within a resource based on yields/consumes.
+   * Topological sort of nodes within a resource based on emit/consumes.
    * Nodes without artifact dependencies keep their YAML order relative to
-   * each other but come before any node that consumes an artifact they don't yield.
+   * each other but come before any node that consumes an artifact they don't emit.
    *
    * Returns node names in execution order.
    */

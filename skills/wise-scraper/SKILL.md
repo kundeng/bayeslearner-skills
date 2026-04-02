@@ -13,7 +13,7 @@ WISE teaches an AI coding agent **structured, repeatable web scraping** for JS-r
 > **Rule 0 — Orient before acting.** Before opening a browser or writing any code, read `references/guide.md § Big Picture` to understand what you're building and what decisions you need to make. Only then start exploration.
 
 ```
-Orient → Explore → Evidence → Choose tier → Exploit → JSONL → Assemble
+Orient → Explore → Evidence → Choose tier → Exploit → JSON → Assemble
 ```
 
 1. **Orient** — read the schema, templates, and runner options; understand what's shipped
@@ -21,7 +21,7 @@ Orient → Explore → Evidence → Choose tier → Exploit → JSONL → Assemb
 3. **Evidence** — record selector proof and DOM observations before designing the exploit
 4. **Choose tier** — prefer shipped plumbing, escalate only when justified; ask about runtime preference if unclear
 5. **Exploit** — assemble a profile from template fragments, run it, extend with hooks or task-local code
-6. **Process** — JSONL is the intermediate truth; assemble markdown/CSV/JSON later
+6. **Process** — JSON is the intermediate truth; assemble markdown/CSV from it later
 
 Use when: JS-rendered sites, pagination, UI state, filter combos, structured repeatable output.
 Not when: a stable API/export exists, or static `curl` is clearly enough.
@@ -73,6 +73,20 @@ artifacts:
 
 Resources declare `produces` and `consumes` to link into the artifact DAG. The runner resolves execution order automatically.
 
+### Data Flow: emit and consumes
+
+`extract` captures data into the node's local context. `emit` writes that data to named artifacts:
+
+- **`emit: "artifact_name"`** — shorthand: write records to this artifact
+- **`emit: [{ to: "artifact", flatten: "field" }]`** — full form with per-target shaping (flatten unpacks arrays into per-row records)
+- **`consumes: artifact_name`** — node runs once per record in the artifact, with fields available as `{field_ref}`
+
+At the resource level, `produces` / `consumes` wire resources together. Don't use both `emit` and `produces` for the same artifact — that causes double writes.
+
+**BFS is required for discovery + emit.** When a node discovers URLs and emits them, use `order: bfs` so all URLs are collected before any child navigates away.
+
+See `references/field-guide.md § Emit and Consumes` and `references/guide.md § Data Flow` for full details.
+
 ## Agent Contract
 
 1. **Orient first.** Read `references/guide.md § Big Picture` and scan `templates/*.yaml` before touching `agent-browser` or writing code.
@@ -94,7 +108,7 @@ Resources declare `produces` and `consumes` to link into the artifact DAG. The r
 ### Architecture
 
 ```
-YAML profile → Zod validation → Engine → BrowserDriver → JSONL → Assembly
+YAML profile → Zod validation → Engine → BrowserDriver → JSON → Assembly
                                    ↕            ↕
                               AIAdapter    agent-browser
                               (aichat)     (or Playwright)
@@ -127,7 +141,7 @@ Do **not** read all references upfront. Read only what the current step needs:
 - **Header-based table mapping** — not positional
 - **Sort verification required** — verify state changed via child's `state` check
 - **Avoid ambiguous clicks** — scope by CSS/role/context
-- **JSONL is intermediate truth** — assemble final formats later
+- **JSON is intermediate truth** — assemble final formats (markdown/CSV) later
 - **BFS for URL discovery** — use `order: bfs` when you need to collect all URLs before visiting
 
 ## Common Patterns

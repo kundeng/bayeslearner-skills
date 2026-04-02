@@ -7,7 +7,7 @@ Read this after SKILL.md. This is the essential reference — it gives you the b
 You are building a **working scraping project** for a JS-rendered site. Here is what's shipped and how the pieces fit:
 
 ```
-YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDriver  ──→  JSONL  ──→  Assembly
+YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDriver  ──→  JSON  ──→  Assembly
   (what)            (gate)              (walk)       (browser)          (intermediate)  (final)
 ```
 
@@ -25,7 +25,7 @@ YAML profile  ──→  Zod validation  ──→  Engine  ──→  BrowserDr
 
 **Hooks** — 5 extension points (post_discover, pre_extract, post_extract, pre_assemble, post_assemble) for site-specific logic the profile can't express declaratively.
 
-**JSONL** — the intermediate output format. One JSON object per line. Assembly into markdown/CSV/JSON is a separate step.
+**JSON** — the default intermediate output format. A pretty-printed JSON array of records. JSONL (one object per line) is also available via `--output-format jsonl`. Assembly into markdown/CSV is a separate step.
 
 ### Decisions you need to make
 
@@ -105,11 +105,11 @@ quality:
     price: 80
 ```
 
-## Data Flow: Artifacts, Yields, Consumes
+## Data Flow: Artifacts, Emit, Consumes
 
 Artifacts are **named, typed streams of records**. They serve three purposes:
 1. **Validation** — each record checked against declared fields at extraction time
-2. **Chaining** — nodes and resources wire together via `yields`/`consumes`
+2. **Chaining** — nodes and resources wire together via `emit`/`consumes`
 3. **Output** — artifacts marked `output: true` are written as deliverables
 
 ### Declaring artifacts
@@ -135,7 +135,7 @@ artifacts:
 ```yaml
 nodes:
   - name: toc
-    yields: page_urls             # records go into this artifact
+    emit: page_urls               # records go into this artifact
     expand: { over: elements, scope: "nav a", order: bfs }
     extract:
       - link: { name: url, css: "a" }
@@ -146,7 +146,7 @@ nodes:
       - navigate: { to: "{url}" }
     extract:
       - text: { name: title, css: "h1" }
-    yields: page_content
+    emit: page_content
 ```
 
 ### Resource-level data flow (cross-resource)
@@ -163,11 +163,11 @@ resources:
     ...
 ```
 
-### BFS is required for discovery + yields
+### BFS is required for discovery + emit
 
-When a node discovers URLs on a page and yields them into an artifact, it **must use `order: bfs`**. DFS would navigate away after the first URL, destroying the DOM context for further discovery. BFS collects all records into the artifact first, then children (or sibling consumers) process them.
+When a node discovers URLs on a page and emits them into an artifact, it **must use `order: bfs`**. DFS would navigate away after the first URL, destroying the DOM context for further discovery. BFS collects all records into the artifact first, then children (or sibling consumers) process them.
 
-See `references/field-guide.md § BFS × yields` for a detailed example.
+See `references/field-guide.md § BFS × emit` for a detailed example.
 
 ## Extraction Rules
 
@@ -248,23 +248,25 @@ Resolution order (later wins):
 4. Environment variables (`WISE_*`)
 5. CLI `--set key=value`
 
-## JSONL Intermediate Format
+## Intermediate Output Format
 
-Every run produces JSONL — one JSON object per line:
+Every run produces a JSON array of records (the default), or JSONL if configured:
 
 ```json
-{
-  "node": "rows",
-  "url": "https://example.com/products?p=1",
-  "data": {
-    "product": "Widget Pro",
-    "price": "$29.99"
-  },
-  "extracted_at": "2026-03-15T17:00:00.000Z"
-}
+[
+  {
+    "node": "rows",
+    "url": "https://example.com/products?p=1",
+    "data": {
+      "product": "Widget Pro",
+      "price": "$29.99"
+    },
+    "extracted_at": "2026-03-15T17:00:00.000Z"
+  }
+]
 ```
 
-JSONL is streamable, appendable, and allows resume after failure.
+JSON is the default format (pretty-printed array). Use `--output-format jsonl` for streaming/append scenarios. JSONL writes one JSON object per line, which is useful for large-scale runs with resume-on-failure requirements.
 
 ## Runner CLI Reference
 
@@ -273,7 +275,7 @@ node dist/run.js <profile.yaml> [options]
 
 Options:
   --output-dir, -o    Output directory (default: ./output)
-  --output-format     jsonl | csv | json | markdown | md
+  --output-format     json | jsonl | csv | markdown | md  (default: json)
   --hooks             Path to hooks module (.js)
   --set, -s           Override: --set key=value
   --config, -c        Extra config file to merge
@@ -313,9 +315,9 @@ Common pitfalls observed during testing, and how to resolve them.
 
 **Symptom:** Every record appears twice in the output.
 
-**Cause:** A node declares `yields: my_data` AND the resource declares `produces: my_data`. Both write to the same artifact, duplicating records.
+**Cause:** A node declares `emit: "my_data"` AND the resource declares `produces: my_data`. Both write to the same artifact, duplicating records.
 
-**Fix:** Use one or the other. Use `produces` on the resource for the common case (one flat table). Use `yields` on specific nodes when different nodes write to different artifacts. Never both for the same artifact name.
+**Fix:** Use one or the other. Use `produces` on the resource for the common case (one flat table). Use `emit` on specific nodes when different nodes write to different artifacts. Never both for the same artifact name.
 
 ### Expand over leaf elements breaks extraction
 
@@ -346,6 +348,17 @@ Common pitfalls observed during testing, and how to resolve them.
 **Cause:** The trigger selector matches a non-blocking element that appears transiently.
 
 **Fix:** Narrow the interrupt trigger selector to match only truly blocking elements. Add a `skip_when` condition if the overlay auto-dismisses, or use `resolve: click` to dismiss it immediately rather than `resolve: pause`.
+
+### Table extraction returns "[table in multi-scope unsupported]"
+
+**Symptom:** `table` extraction inside `expand: { over: elements }` returns the literal string `[table in multi-scope unsupported]` instead of row data.
+
+**Cause:** The engine compiles extraction rules to inline JS when running inside element expansion scope. `table` extraction is too complex for inline compilation and is not supported in this context.
+
+**Fix:** Use `table` extraction on a node that does NOT have element expansion. Common patterns:
+- Parent node paginates, child node extracts the whole table per page (no element expansion on the child)
+- Extract the table without expansion, then use `emit: [{ to: artifact, flatten: field }]` to unpack rows
+- If you need to expand over multiple tables on one page, use `text`/`attr` extraction with per-cell CSS selectors instead
 
 ### Templates are mental composition, not literal merge
 

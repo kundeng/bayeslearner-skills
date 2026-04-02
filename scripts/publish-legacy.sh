@@ -70,7 +70,7 @@ git branch -D "$TMP_BRANCH" >/dev/null 2>&1 || true
 git subtree split --prefix="$PREFIX" -b "$TMP_BRANCH"
 
 echo "Pushing $TMP_BRANCH to $REMOTE_URL ($TARGET_BRANCH)"
-git push "$REMOTE_URL" "$TMP_BRANCH:$TARGET_BRANCH" --force-with-lease
+git push "$REMOTE_URL" "$TMP_BRANCH:$TARGET_BRANCH" --force
 
 echo "Cleaning up temporary branch $TMP_BRANCH"
 git branch -D "$TMP_BRANCH" >/dev/null
