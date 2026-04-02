@@ -119,7 +119,14 @@ export class AgentBrowserDriver implements BrowserDriver {
     try {
       const first = JSON.parse(raw);
       if (typeof first === "string") {
-        try { return JSON.parse(first); } catch { return first; }
+        // Only second-parse if it looks like serialized JSON (object or array).
+        // Do NOT re-parse numeric strings ("128"), booleans ("true"), etc.
+        // — that silently changes types and breaks schema validation.
+        const trimmed = first.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          try { return JSON.parse(first); } catch { /* fall through */ }
+        }
+        return first;
       }
       return first;
     } catch {

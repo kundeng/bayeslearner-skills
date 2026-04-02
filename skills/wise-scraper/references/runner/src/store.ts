@@ -16,6 +16,13 @@ export function toArray(val: string | string[] | undefined): string[] {
   return Array.isArray(val) ? val : [val];
 }
 
+/** Extract artifact names from an emit declaration. */
+export function emitTargetNames(emit: string | Array<{ to: string }> | undefined): string[] {
+  if (!emit) return [];
+  if (typeof emit === "string") return [emit];
+  return emit.map((e) => e.to);
+}
+
 export interface ValidationError {
   artifact: string;
   record_index: number;
@@ -158,11 +165,12 @@ export class ArtifactStore {
    *
    * Returns node names in execution order.
    */
-  static resolveNodeOrder(nodes: Array<{ name: string; yields?: string | string[]; consumes?: string | string[]; parents: string[] }>): string[] {
-    // Build yields → consumes edges
-    const yielder = new Map<string, string>(); // artifact → node name
+  static resolveNodeOrder(nodes: Array<{ name: string; emit?: string | Array<{ to: string }>; consumes?: string | string[]; parents: string[] }>): string[] {
+    // Build emit target → node name edges
+    const emitter = new Map<string, string>(); // artifact → node name
     for (const n of nodes) {
-      for (const y of toArray(n.yields)) yielder.set(y, n.name);
+      const targets = emitTargetNames(n.emit);
+      for (const t of targets) emitter.set(t, n.name);
     }
 
     const adj = new Map<string, string[]>();
@@ -182,10 +190,10 @@ export class ArtifactStore {
       }
     }
 
-    // artifact edges: yielder must run before consumer
+    // artifact edges: emitter must run before consumer
     for (const n of nodes) {
       for (const consumed of toArray(n.consumes)) {
-        const producer = yielder.get(consumed);
+        const producer = emitter.get(consumed);
         if (producer && producer !== n.name) {
           const existing = adj.get(producer) ?? [];
           if (!existing.includes(n.name)) {

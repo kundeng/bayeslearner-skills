@@ -95,11 +95,10 @@ export const COMMON_RULES: InterruptRule[] = [
   {
     name: "generic-overlay-close",
     trigger: [
-      // Catch-all: any fixed/absolute overlay with a close button
-      ".modal.show .close",
+      // Only match truly blocking modals — require aria-modal or .modal.show
       ".modal.show [data-dismiss='modal']",
-      "[role='dialog'] button[aria-label='Close']",
-      "[role='dialog'] button[class*='close']",
+      "[aria-modal='true'] button[aria-label='Close']",
+      "[aria-modal='true'] button[class*='close']",
     ].join(", "),
     dismiss: { click: "SELF" },
     once: false,
@@ -182,18 +181,28 @@ export class InterruptHandler {
   }
 
   /**
-   * Find the first matching element for a (possibly compound) CSS selector.
-   * Uses a single eval call to check all selectors at once.
+   * Find the first VISIBLE, non-zero-size matching element.
+   * An element that exists in the DOM but is hidden, zero-sized, or
+   * off-screen is not a blocking interrupt — skip it.
    */
   private findTrigger(trigger: string): string | null {
     const selectors = trigger.split(",").map((s) => s.trim());
-    // Batch: one eval call checks all selectors, returns index of first match
     const selsJson = JSON.stringify(selectors);
     const idx = this.driver.evalJson<number>(`
       (() => {
         const sels = ${selsJson};
         for (let i = 0; i < sels.length; i++) {
-          try { if (document.querySelector(sels[i])) return i; } catch {}
+          try {
+            const el = document.querySelector(sels[i]);
+            if (!el) continue;
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            // Must be visible: not hidden, not zero-size, not off-screen
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            if (rect.width === 0 || rect.height === 0) continue;
+            if (style.opacity === '0') continue;
+            return i;
+          } catch {}
         }
         return -1;
       })()

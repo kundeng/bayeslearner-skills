@@ -254,7 +254,7 @@ export class Engine {
         let record = this.makeRecord(node.name, data);
         record = this.hooks.invoke("post_extract", record);
         records.push(record);
-        this.yieldToArtifacts(node, record);
+        this.emitToArtifacts(node, record, context);
       }
 
       if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
@@ -266,12 +266,42 @@ export class Engine {
     }
   }
 
-  /** Yield a record into the node's declared artifact stream(s). */
-  private yieldToArtifacts(node: NER, record: ExtractedRecord): void {
-    if (!node.yields || !this.store) return;
-    const names = this.toArray(node.yields);
-    for (const name of names) {
-      this.store.put(name, [record]);
+  /**
+   * Emit a record into artifact(s) per the node's emit declaration.
+   * Handles flatten: if a field contains an array of objects,
+   * unpack each element into a separate record (merged with context).
+   */
+  private emitToArtifacts(node: NER, record: ExtractedRecord, context: Record<string, unknown>): void {
+    if (!node.emit || !this.store) return;
+    const emit = node.emit;
+
+    // String shorthand: emit: "artifact_name"
+    if (typeof emit === "string") {
+      this.store.put(emit, [record]);
+      return;
+    }
+
+    // Full form: emit: [{ to, flatten? }]
+    for (const target of emit) {
+      if (target.flatten) {
+        // Flatten: unpack an array field into per-row records
+        const arrayVal = record.data[target.flatten];
+        if (Array.isArray(arrayVal)) {
+          const rows = arrayVal.map((row: unknown) => {
+            const rowData = typeof row === "object" && row !== null
+              ? { ...context, ...(row as Record<string, unknown>) }
+              : { ...context, [target.flatten!]: row };
+            return this.makeRecord(node.name, rowData);
+          });
+          this.store.put(target.to, rows);
+          console.log(`    [emit] Flattened ${rows.length} rows → ${target.to}`);
+        } else {
+          // Field isn't an array — emit as-is
+          this.store.put(target.to, [record]);
+        }
+      } else {
+        this.store.put(target.to, [record]);
+      }
     }
   }
 
@@ -648,7 +678,7 @@ export class Engine {
         record = this.hooks.invoke("post_extract", record);
         batch.push({ record, childCtx: data });
         records.push(record);
-        this.yieldToArtifacts(node, record);
+        this.emitToArtifacts(node, record, context);
       }
       for (const { childCtx } of batch) {
         this.walkChildren(node.name, allNodes, records, depth, childCtx);
@@ -660,7 +690,7 @@ export class Engine {
         let record = this.makeRecord(node.name, data);
         record = this.hooks.invoke("post_extract", record);
         records.push(record);
-        this.yieldToArtifacts(node, record);
+        this.emitToArtifacts(node, record, context);
         this.walkChildren(node.name, allNodes, records, depth, data);
       }
     }

@@ -819,7 +819,7 @@
                         }
                       ]
                     },
-                    "yields": {
+                    "emit": {
                       "anyOf": [
                         {
                           "type": "string"
@@ -827,7 +827,19 @@
                         {
                           "type": "array",
                           "items": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "to": {
+                                "type": "string"
+                              },
+                              "flatten": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "to"
+                            ],
+                            "additionalProperties": false
                           }
                         }
                       ]

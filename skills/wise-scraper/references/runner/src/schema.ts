@@ -262,6 +262,22 @@ export const Retry = z.object({
   delay_ms: z.number().int().nonnegative().default(1000),
 });
 
+// ── emit (explicit artifact writing) ────────────────────
+// extract = local observation (node-private)
+// emit = project observation + context into artifact(s)
+// Without emit, extracted data is available to children via context
+// but is NOT written to any artifact.
+
+export const EmitTarget = z.object({
+  to: z.string(),                                  // artifact name
+  flatten: z.string().optional(),                   // field name containing array to unpack into per-row records
+});
+
+export const Emit = z.union([
+  z.string(),                                       // shorthand: emit to this artifact, no flatten
+  z.array(EmitTarget),                              // full form: multiple targets with per-target shaping
+]);
+
 // ── NER node (the core abstraction) ─────────────────────
 
 export const NER = z.object({
@@ -274,18 +290,20 @@ export const NER = z.object({
   // action — deterministic browser actions, executed in order
   action: z.array(Action).optional(),
 
-  // extract — observation ("what do I read from this state?")
+  // extract — node-local observation. Data is available to children
+  // via accumulated context but is NOT automatically written to artifacts.
   extract: z.array(Extraction).optional(),
 
   // expand — how many successor states does this node produce?
   expand: Expand.optional(),
 
-  // yields — write extracted records into artifact stream(s).
-  // String for single artifact, array for multiple concurrent writes.
-  yields: z.union([z.string(), z.array(z.string())]).optional(),
+  // emit — explicitly write observation + context to artifact(s).
+  // String shorthand: emit: "artifact_name" (flat, no transform)
+  // Full form: emit: [{ to: "artifact", flatten: "field" }]
+  //   flatten: unpack an array field into per-row records (for table extraction)
+  emit: Emit.optional(),
 
   // consumes — iterate over records from artifact stream(s).
-  // The node runs once per record. String or array (merged if multiple).
   consumes: z.union([z.string(), z.array(z.string())]).optional(),
 
   // retry — if state check fails, re-execute parent's actions and retry
@@ -396,6 +414,8 @@ export type Expand = z.infer<typeof Expand>;
 export type Axis = z.infer<typeof Axis>;
 export type HookDef = z.infer<typeof HookDef>;
 export type Retry = z.infer<typeof Retry>;
+export type EmitTarget = z.infer<typeof EmitTarget>;
+export type Emit = z.infer<typeof Emit>;
 export type NER = z.infer<typeof NER>;
 export type SetupAction = z.infer<typeof SetupAction>;
 export type StateSetup = z.infer<typeof StateSetup>;

@@ -280,10 +280,15 @@ async function main(): Promise<void> {
 
       // Store records in artifact(s) if resource declares produces.
       // Skip artifacts that nodes already yielded to (prevent double-write).
-      const nodeYields = new Set(resource.nodes.flatMap((n) => toArray(n.yields)));
+      // Collect artifact names that nodes emit to directly
+      const nodeEmits = new Set(resource.nodes.flatMap((n) => {
+        if (!n.emit) return [];
+        if (typeof n.emit === "string") return [n.emit];
+        return n.emit.map((e) => e.to);
+      }));
       for (const name of toArray(resource.produces)) {
-        if (nodeYields.has(name)) {
-          console.log(`[main] Skipping resource-level store for '${name}' (nodes already yielded)`);
+        if (nodeEmits.has(name)) {
+          console.log(`[main] Skipping resource-level store for '${name}' (nodes already emit)`);
         } else {
           store.put(name, records);
         }

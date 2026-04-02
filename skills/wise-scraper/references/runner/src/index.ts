@@ -27,6 +27,8 @@ export {
   StateSetup,
   ArtifactSchema,
   FieldDef,
+  Emit,
+  EmitTarget,
 } from "./schema.js";
 export type {
   Deployment as DeploymentType,
