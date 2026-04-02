@@ -349,17 +349,6 @@ Common pitfalls observed during testing, and how to resolve them.
 
 **Fix:** Narrow the interrupt trigger selector to match only truly blocking elements. Add a `skip_when` condition if the overlay auto-dismisses, or use `resolve: click` to dismiss it immediately rather than `resolve: pause`.
 
-### Table extraction returns "[table in multi-scope unsupported]"
-
-**Symptom:** `table` extraction inside `expand: { over: elements }` returns the literal string `[table in multi-scope unsupported]` instead of row data.
-
-**Cause:** The engine compiles extraction rules to inline JS when running inside element expansion scope. `table` extraction is too complex for inline compilation and is not supported in this context.
-
-**Fix:** Use `table` extraction on a node that does NOT have element expansion. Common patterns:
-- Parent node paginates, child node extracts the whole table per page (no element expansion on the child)
-- Extract the table without expansion, then use `emit: [{ to: artifact, flatten: field }]` to unpack rows
-- If you need to expand over multiple tables on one page, use `text`/`attr` extraction with per-cell CSS selectors instead
-
 ### Templates are mental composition, not literal merge
 
 **Symptom:** Agent tries to concatenate YAML files or copy-paste template blocks verbatim.

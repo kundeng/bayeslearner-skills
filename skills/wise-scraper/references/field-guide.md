@@ -147,7 +147,7 @@ Fields to read from the DOM once actions are complete. Each rule produces a name
 | **grouped** | Multiple elements → array | `name`, `css`, `attr?` |
 | **ai** | AI-generated structured data | `name`, `prompt`, `input?`, `schema?`, `categories?` |
 
-**Tables:** always prefer header-based column mapping over positional index. **Limitation:** `table` extraction does not work inside `expand: { over: elements }` scope — the engine cannot compile table extraction into per-element inline JS. Use `table` extraction on nodes without element expansion (e.g., a node whose parent handles pagination but the node itself extracts the whole table). If you need to expand over multiple tables, use `text` extraction with per-cell CSS selectors instead, or extract the table without expansion and use `emit` with `flatten` to unpack rows.
+**Tables:** always prefer header-based column mapping over positional index. `table` extraction works both standalone and inside `expand: { over: elements }` scope — the engine compiles it to inline JS scoped to the expanded container. When the `css` selector matches within the container, it extracts from that match; otherwise it treats the container itself as the table.
 
 **Attr vs text:** When an element's visible text is truncated (CSS `text-overflow: ellipsis`) or cluttered by child elements, the full value often lives in the `title` or `aria-label` attribute. During exploration, compare `el.textContent` with `el.getAttribute('title')` to decide. Use `attr` extraction when the attribute is more reliable.
 

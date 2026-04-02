@@ -246,15 +246,16 @@ Eight test runs validated the emit/flatten rewrite and end-to-end skill workflow
 | # | Test | Agent A (explore) | Hard gate (dry-run) | Agent B (run) | Notes |
 |---|------|-------------------|--------------------|----|-------|
 | 8 | Books to Scrape (Mystery) | PASS | PASS | PASS (32 records) | Agent correctly chose attr for title (truncation) and rating (CSS class) |
-| 9 | Tables | PASS | PASS | FAIL | Hit table-in-expand limitation; doc gap found and fixed |
+| 9 | Tables | PASS | PASS | PASS (6 records) | Initially hit table-in-expand stub; fixed engine to compile table extraction inline |
 
 **Bugs fixed:**
 1. Quality gate checked raw engine records instead of artifact store for output artifacts — flatten produced 77 flat records in the store but quality saw 3 nested engine records. Fixed in run.ts.
 2. Consumed data context not propagated into resource walk — `runResourceOnce` passed `{}` instead of `consumedData` to `walkNode`. Fixed in engine.ts.
+3. Table extraction inside `expand: elements` returned stub — implemented inline JS compilation for table extraction scoped to container element. Fixed in engine.ts.
+4. HTML-to-markdown detection failed on body with leading whitespace — `.startsWith("<")` → `.trimStart().startsWith("<")`. Fixed in processing.ts.
 
 **Doc gaps found and fixed:**
-1. `table` extraction inside `expand: elements` scope returns stub — documented in field-guide and troubleshooting.
-2. Splunk help site changed DOM — `div.toc` → `.toc-item-wrapper`.
+1. Splunk help site changed DOM — `div.toc` → `.toc-item-wrapper`.
 
 ### Original test runs (v2.0 development — 2026-03)
 

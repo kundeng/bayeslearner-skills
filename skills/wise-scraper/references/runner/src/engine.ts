@@ -1001,8 +1001,36 @@ export class Engine {
       return `result['${escapeJs(name)}'] = [...container.querySelectorAll('${escapeJs(css)}')].map(el => ${read});`;
 
     } else if ("table" in rule) {
-      // Table extraction in multi-element context — simplified
-      return `result['${escapeJs(rule.table.name)}'] = '[table in multi-scope unsupported]';`;
+      const cfg = rule.table;
+      const columns = cfg.columns ?? [];
+      if (columns.length > 0) {
+        return `result['${escapeJs(cfg.name)}'] = (() => {
+          const tbl = container.querySelector('${escapeJs(cfg.css)}') || container;
+          const hdr = tbl.querySelectorAll('tr')[${cfg.header_row ?? 0}];
+          const headers = [...(hdr?.querySelectorAll('th, td') || [])].map(c => c.textContent.trim());
+          const colDefs = ${JSON.stringify(columns)};
+          const colMap = colDefs.map(cd => {
+            if (cd.header) return headers.indexOf(cd.header);
+            if (cd.index !== undefined) return cd.index;
+            return -1;
+          });
+          const dataRows = [...tbl.querySelectorAll('tr')].slice(${(cfg.header_row ?? 0) + 1});
+          return dataRows.map(row => {
+            const cells = [...row.querySelectorAll('td, th')];
+            const obj = {};
+            colDefs.forEach((cd, i) => {
+              const idx = colMap[i];
+              obj[cd.name] = idx >= 0 && cells[idx] ? cells[idx].textContent.trim() : '';
+            });
+            return obj;
+          });
+        })();`;
+      }
+      return `result['${escapeJs(cfg.name)}'] = (() => {
+        const tbl = container.querySelector('${escapeJs(cfg.css)}') || container;
+        const rows = [...tbl.querySelectorAll('tr')].slice(${(cfg.header_row ?? 0) + 1});
+        return rows.map(row => [...row.querySelectorAll('td, th')].map(c => c.textContent.trim()));
+      })();`;
 
     } else if ("ai" in rule) {
       // AI extraction deferred to post-processing
