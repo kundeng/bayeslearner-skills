@@ -316,9 +316,10 @@ export class Engine {
           data: nodeData, children: childrenMap,
           extracted_at: new Date().toISOString(),
         };
-        let record = this.hooks.invoke("post_extract", tree);
-        this.emitTreeToArtifacts(node, record as TreeRecord, context);
-        trees.push(record as TreeRecord);
+        let record: TreeRecord = this.hooks.invoke("post_extract", tree) as TreeRecord;
+        record = this.runNodePostExtract(node, record) as TreeRecord;
+        this.emitTreeToArtifacts(node, record, context);
+        trees.push(record);
       }
     } else {
       // DFS: process each fully
@@ -330,9 +331,10 @@ export class Engine {
           data: row, children: childrenMap,
           extracted_at: new Date().toISOString(),
         };
-        let record = this.hooks.invoke("post_extract", tree);
-        this.emitTreeToArtifacts(node, record as TreeRecord, context);
-        trees.push(record as TreeRecord);
+        let record: TreeRecord = this.hooks.invoke("post_extract", tree) as TreeRecord;
+        record = this.runNodePostExtract(node, record) as TreeRecord;
+        this.emitTreeToArtifacts(node, record, context);
+        trees.push(record);
       }
     }
     return trees;
@@ -1269,7 +1271,7 @@ export class Engine {
 
     if (result && typeof result === "object") {
       if ("data" in result && result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
-        return result.data as Record<string, unknown>;
+        return { ...context, ...(result.data as Record<string, unknown>) };
       }
     }
 
