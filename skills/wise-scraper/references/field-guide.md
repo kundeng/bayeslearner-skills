@@ -55,6 +55,7 @@ Each field has:
 
 Artifact-level settings:
 - **`structure`** — `"nested"` (default) or `"flat"`. Nested writes tree JSON (TreeRecord with children). Flat writes denormalized records (ExtractedRecord). CSV, markdown, and JSONL formats always flatten regardless of this setting.
+- **`query`** — optional JMESPath expression applied to tree records before output. Trees are converted to clean documents (data fields at top-level, children keyed by node name). Enables downward denormalization (`[].pages[].books[].{title: title}`) and upward aggregation (`[].pages[].{titles: books[].title, count: length(books)}`). When set, takes precedence over `structure`.
 - **`format`** — `"json"` (default), `"jsonl"`, `"csv"`, `"markdown"`
 - **`output`** — `true` if this is a final deliverable written to disk
 - **`dedupe`** — field name to deduplicate records by
@@ -90,6 +91,15 @@ resources:
 ```
 
 The runner resolves execution order automatically (topological sort). Records are validated against the artifact schema as they're extracted — required fields that are missing are flagged immediately.
+
+**Entry URL** — `entry.url` accepts two forms:
+- **String template** — `"https://example.com{url}"` with `{field}` placeholders resolved from consumed records
+- **Cross-resource reference** — `{ from: "resource.node.field" }` resolves to multiple visit targets by walking the named resource's tree
+
+**Template references** — three scopes for `{...}` placeholders in URLs and navigate targets:
+- `{field}` — local context (consumed record data, parent extraction)
+- `{artifacts.name.field}` — cross-artifact store reference (latest record)
+- `{config.key}` — input config (CLI `--set` or YAML config)
 
 ### Resource (one scraping unit)
 

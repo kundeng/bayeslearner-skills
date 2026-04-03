@@ -88,7 +88,7 @@ artifacts:
     structure: nested          # nested (tree JSON, default) or flat (denormalized)
 ```
 
-Full artifact fields: `fields`, `consumes`, `output`, `format`, `dedupe`, `structure`, `description`. See schema.ts `ArtifactSchema`.
+Full artifact fields: `fields`, `consumes`, `output`, `format`, `dedupe`, `structure`, `query`, `description`. See schema.ts `ArtifactSchema`.
 
 Resources declare `produces` and `consumes` to link into the artifact DAG. The runner resolves execution order automatically. The runner prevents double-writes automatically — when nodes emit directly, the resource-level store write is skipped.
 
@@ -117,6 +117,15 @@ Children without `emit` nest inside their parent's `children`. Children with `em
 **ArtifactSchema.structure** controls output shape:
 - `"nested"` (default) — tree JSON preserved
 - `"flat"` — denormalized via `flattenTree` (records at leaves only)
+
+**ArtifactSchema.query** — optional JMESPath expression applied to tree records before output. The tree is converted to a clean document (data fields promoted to top-level, children keyed by node name) then queried. Enables both downward denormalization (`[].pages[].books[].{title: title}`) and upward aggregation (`[].pages[].{titles: books[].title}`). When `query` is set, it takes precedence over `structure`.
+
+**Template references** — three scopes for `{...}` placeholders in URLs, navigate targets, and field refs:
+- `{field}` — local context (consumed record data, parent extraction)
+- `{artifacts.name.field}` — cross-artifact reference (latest record from named artifact)
+- `{config.key}` — input config reference (from CLI/YAML config)
+
+**Entry URL cross-resource reference** — `entry.url` can be `{ from: "resource.node.field" }` instead of a string. This resolves to multiple visit targets by walking the named resource's tree records and extracting the field from matching nodes.
 
 **consumes — two levels:**
 - **Resource-level** `consumes` — drives entry URL iteration (the resource runs once per record in the consumed artifact)

@@ -344,6 +344,7 @@ export const ArtifactSchema = z.object({
   structure: z.enum(["nested", "flat"]).default("nested"),  // nested = tree, flat = denormalized
   consumes: z.union([z.string(), z.array(z.string())]).optional(), // upstream artifact(s)
   dedupe: z.string().optional(),           // field name to deduplicate by
+  query: z.string().optional(),            // JMESPath query applied to tree before output
   output: z.boolean().default(false),      // true = final deliverable
   format: z.enum(["jsonl", "csv", "json", "markdown"]).optional(),
   description: z.string().optional(),
@@ -351,10 +352,16 @@ export const ArtifactSchema = z.object({
 
 // ── resource ────────────────────────────────────────────
 
+/** Entry URL: string template ("{field_ref}") or { from: "resource.node.field" } cross-reference */
+export const EntryUrl = z.union([
+  z.string(),                                     // literal or template
+  z.object({ from: z.string() }),                  // cross-resource tree reference
+]);
+
 export const Resource = z.object({
   name: z.string(),
   entry: z.object({
-    url: z.string(),               // literal URL or "{field_ref}" template (resolved from consumes)
+    url: EntryUrl,
     root: z.string(),
   }),
   nodes: z.array(NER).min(1),

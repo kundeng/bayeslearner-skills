@@ -43,14 +43,16 @@ export class Engine {
   private hooks: HookRegistry;
   private interrupts: InterruptHandler;
   private store: ArtifactStore | null;
+  private config: Record<string, unknown>;
   private visited = new Set<string>();   // URL dedup
 
-  constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry, store?: ArtifactStore) {
+  constructor(driver: BrowserDriver, ai: AIAdapter, hooks: HookRegistry, store?: ArtifactStore, config?: Record<string, unknown>) {
     this.driver = driver;
     this.ai = ai;
     this.hooks = hooks;
     this.interrupts = new InterruptHandler(driver);
     this.store = store ?? null;
+    this.config = config ?? {};
   }
 
   // ── public API ────────────────────────────────────────
@@ -77,8 +79,21 @@ export class Engine {
     try {
       const consumeNames = this.toArray(resource.consumes);
       const targets: VisitTarget[] = [];
+      const entryUrl = resource.entry.url;
 
-      if (consumeNames.length > 0 && this.store) {
+      // { from: "resource.node.field" } — cross-resource tree reference
+      if (typeof entryUrl === "object" && "from" in entryUrl && this.store) {
+        const urls = this.store.resolveFrom(entryUrl.from);
+        if (urls.length === 0) {
+          console.warn(`[engine] {from: "${entryUrl.from}"} resolved to 0 URLs`);
+          return [];
+        }
+        console.log(`[engine] {from: "${entryUrl.from}"} → ${urls.length} URLs`);
+        for (const url of urls) {
+          targets.push({ url, consumedData: null });
+        }
+      } else if (consumeNames.length > 0 && this.store) {
+        const urlTemplate = typeof entryUrl === "string" ? entryUrl : String(entryUrl);
         const consumed = this.mergeConsumed(consumeNames);
         if (consumed.length === 0) {
           console.warn(`[engine] Consumed artifacts empty: ${consumeNames.join(", ")}`);
@@ -87,12 +102,13 @@ export class Engine {
         console.log(`[engine] Consuming ${consumed.length} records from [${consumeNames.join(", ")}]`);
         for (const rec of consumed) {
           targets.push({
-            url: this.resolveTemplate(resource.entry.url, rec.data),
+            url: this.resolveTemplate(urlTemplate, rec.data),
             consumedData: rec.data,
           });
         }
       } else {
-        targets.push({ url: resource.entry.url, consumedData: null });
+        const url = typeof entryUrl === "string" ? entryUrl : String(entryUrl);
+        targets.push({ url, consumedData: null });
       }
 
       const discoverCtx = this.hooks.invoke("post_discover", {
@@ -576,7 +592,8 @@ export class Engine {
     }
 
     // Otherwise: single entry URL, run once
-    return this.runResourceOnce(resource, rootNode, nodeMap, resource.entry.url, null);
+    const entryUrl = typeof resource.entry.url === "string" ? resource.entry.url : String(resource.entry.url);
+    return this.runResourceOnce(resource, rootNode, nodeMap, entryUrl, null);
   }
 
   /** Run the resource once per consumed record, resolving {field_ref} in entry URL. */
@@ -588,10 +605,11 @@ export class Engine {
   ): ExtractedRecord[] {
     const globals = resource.globals;
     const allRecords: ExtractedRecord[] = [];
+    const urlTemplate = typeof resource.entry.url === "string" ? resource.entry.url : String(resource.entry.url);
 
     for (let i = 0; i < records.length; i++) {
       const rec = records[i];
-      const url = this.resolveTemplate(resource.entry.url, rec.data);
+      const url = this.resolveTemplate(urlTemplate, rec.data);
       console.log(`[engine] [${i + 1}/${records.length}] ${url}`);
 
       const result = this.runResourceOnce(resource, rootNode, nodeMap, url, rec.data);
@@ -641,11 +659,47 @@ export class Engine {
     return records;
   }
 
-  /** Resolve {field_ref} placeholders in a template string from a data record. */
+  /**
+   * Resolve template placeholders in a string. Three reference types:
+   *   {field}              — from context data (consumed record, parent extraction)
+   *   {artifacts.name.field} — latest record from named artifact in the store
+   *   {config.key}         — from runner input config
+   */
   private resolveTemplate(template: string, data: Record<string, unknown>): string {
-    return template.replace(/\{(\w+)\}/g, (_match, field: string) => {
-      const val = data[field];
-      return (val !== undefined && val !== null) ? String(val) : `{${field}}`;
+    return template.replace(/\{([^}]+)\}/g, (_match, ref: string) => {
+      // {artifacts.name.field} — cross-artifact reference
+      const artMatch = ref.match(/^artifacts\.(\w+)\.(\w+)$/);
+      if (artMatch && this.store) {
+        const [, artName, fieldName] = artMatch;
+        const records = this.store.get(artName);
+        if (records.length > 0) {
+          const val = records[records.length - 1].data[fieldName];
+          if (val !== undefined && val !== null) return String(val);
+        }
+        // Fall back to tree store
+        const trees = this.store.getTree(artName);
+        if (trees.length > 0) {
+          const val = trees[trees.length - 1].data[fieldName];
+          if (val !== undefined && val !== null) return String(val);
+        }
+        return `{${ref}}`;
+      }
+
+      // {config.key} — input config reference
+      const cfgMatch = ref.match(/^config\.(\w+)$/);
+      if (cfgMatch) {
+        const val = this.config[cfgMatch[1]];
+        if (val !== undefined && val !== null) return String(val);
+        return `{${ref}}`;
+      }
+
+      // {field} — context data reference (simple word characters only)
+      if (/^\w+$/.test(ref)) {
+        const val = data[ref];
+        return (val !== undefined && val !== null) ? String(val) : `{${ref}}`;
+      }
+
+      return `{${ref}}`;
     });
   }
 

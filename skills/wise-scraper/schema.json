@@ -1,0 +1,1192 @@
+{
+  "$ref": "#/definitions/WISEDeployment",
+  "definitions": {
+    "WISEDeployment": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "array",
+                        "object",
+                        "url",
+                        "binary"
+                      ],
+                      "default": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "structure": {
+                "type": "string",
+                "enum": [
+                  "nested",
+                  "flat"
+                ],
+                "default": "nested"
+              },
+              "consumes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "dedupe": {
+                "type": "string"
+              },
+              "query": {
+                "type": "string"
+              },
+              "output": {
+                "type": "boolean",
+                "default": false
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "jsonl",
+                  "csv",
+                  "json",
+                  "markdown"
+                ]
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "fields"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "entry": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "from"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "root": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url",
+                  "root"
+                ],
+                "additionalProperties": false
+              },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "parents": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "state": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "url_pattern": {
+                          "type": "string",
+                          "description": "Substring match against current URL (not regex)"
+                        },
+                        "selector_exists": {
+                          "type": "string"
+                        },
+                        "text_in_page": {
+                          "type": "string"
+                        },
+                        "table_headers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "All conditions AND'd. Empty = always true."
+                    },
+                    "action": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "click": {
+                                "type": "object",
+                                "properties": {
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "real",
+                                  "scripted"
+                                ],
+                                "default": "real"
+                              },
+                              "delay_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "click"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "select": {
+                                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                              },
+                              "value": {
+                                "type": "string"
+                              },
+                              "delay_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "select",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "scroll": {
+                                "type": "string",
+                                "enum": [
+                                  "down",
+                                  "up",
+                                  "to"
+                                ]
+                              },
+                              "px": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "default": 500
+                              },
+                              "target": {
+                                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                              },
+                              "ready": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "idle": {
+                                        "type": "boolean",
+                                        "const": true
+                                      }
+                                    },
+                                    "required": [
+                                      "idle"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "selector": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "selector"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "ms": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": 0
+                                      }
+                                    },
+                                    "required": [
+                                      "ms"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "delay_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "scroll"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "wait": {
+                                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/2/properties/ready"
+                              }
+                            },
+                            "required": [
+                              "wait"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "reveal": {
+                                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                              },
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "click",
+                                  "hover"
+                                ],
+                                "default": "click"
+                              },
+                              "delay_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "reveal"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "navigate": {
+                                "type": "object",
+                                "properties": {
+                                  "to": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "to"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "navigate"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "input": {
+                                "type": "object",
+                                "properties": {
+                                  "target": {
+                                    "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                                  },
+                                  "value": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "target",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "delay_ms": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "input"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "extract": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "regex": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "attr": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "attr": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css",
+                                  "attr"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "attr"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "html": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "html"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "link": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "attr": {
+                                    "type": "string",
+                                    "default": "href"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "link"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "table": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "header_row": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "default": 0
+                                  },
+                                  "columns": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "header": {
+                                          "type": "string"
+                                        },
+                                        "index": {
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "table"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "grouped": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "css": {
+                                    "type": "string"
+                                  },
+                                  "attr": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "css"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "grouped"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "ai": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "prompt": {
+                                    "type": "string"
+                                  },
+                                  "input": {
+                                    "type": "string"
+                                  },
+                                  "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  },
+                                  "categories": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "prompt"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "ai"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "expand": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "over": {
+                              "type": "string",
+                              "const": "elements"
+                            },
+                            "scope": {
+                              "type": "string"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0
+                            },
+                            "order": {
+                              "type": "string",
+                              "enum": [
+                                "dfs",
+                                "bfs"
+                              ],
+                              "default": "dfs"
+                            }
+                          },
+                          "required": [
+                            "over",
+                            "scope"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "over": {
+                              "type": "string",
+                              "const": "pages"
+                            },
+                            "strategy": {
+                              "type": "string",
+                              "enum": [
+                                "next",
+                                "numeric",
+                                "infinite"
+                              ]
+                            },
+                            "control": {
+                              "type": "string"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 10
+                            },
+                            "start": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 1
+                            },
+                            "stop": {
+                              "type": "object",
+                              "properties": {
+                                "sentinel": {
+                                  "type": "string"
+                                },
+                                "sentinel_gone": {
+                                  "type": "string"
+                                },
+                                "stable": {
+                                  "type": "object",
+                                  "properties": {
+                                    "css": {
+                                      "type": "string"
+                                    },
+                                    "after": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 2
+                                    }
+                                  },
+                                  "required": [
+                                    "css"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "limit": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "default": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "order": {
+                              "type": "string",
+                              "enum": [
+                                "dfs",
+                                "bfs"
+                              ],
+                              "default": "dfs"
+                            }
+                          },
+                          "required": [
+                            "over",
+                            "strategy",
+                            "control"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "over": {
+                              "type": "string",
+                              "const": "combinations"
+                            },
+                            "axes": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "action": {
+                                    "type": "string",
+                                    "enum": [
+                                      "select",
+                                      "type",
+                                      "checkbox",
+                                      "click"
+                                    ]
+                                  },
+                                  "control": {
+                                    "type": "string"
+                                  },
+                                  "values": {
+                                    "anyOf": [
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "auto"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "action",
+                                  "control",
+                                  "values"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "minItems": 1
+                            },
+                            "order": {
+                              "type": "string",
+                              "enum": [
+                                "dfs",
+                                "bfs"
+                              ],
+                              "default": "dfs"
+                            }
+                          },
+                          "required": [
+                            "over",
+                            "axes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "emit": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "to": {
+                                "type": "string"
+                              },
+                              "flatten": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "to"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      ]
+                    },
+                    "consumes": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    },
+                    "retry": {
+                      "type": "object",
+                      "properties": {
+                        "max": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "default": 3
+                        },
+                        "delay_ms": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "default": 1000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "hooks": {
+                      "type": "object",
+                      "properties": {
+                        "pre_extract": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "post_extract": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "delay_ms": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "produces": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "consumes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "globals": {
+                "type": "object",
+                "properties": {
+                  "timeout_ms": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "default": 60000
+                  },
+                  "retries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 2
+                  },
+                  "user_agent": {
+                    "type": "string"
+                  },
+                  "request_interval_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "page_load_delay_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "setup": {
+                "type": "object",
+                "properties": {
+                  "skip_when": {
+                    "type": "string"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "open": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "open"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "click": {
+                              "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                            }
+                          },
+                          "required": [
+                            "click"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "input": {
+                              "type": "object",
+                              "properties": {
+                                "target": {
+                                  "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "target",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "input"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "password": {
+                              "type": "object",
+                              "properties": {
+                                "target": {
+                                  "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/action/items/anyOf/0/properties/click"
+                                },
+                                "env": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "target",
+                                "env"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "password"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "skip_when",
+                  "actions"
+                ],
+                "additionalProperties": false
+              },
+              "hooks": {
+                "type": "object",
+                "properties": {
+                  "post_discover": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                    }
+                  },
+                  "pre_extract": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                    }
+                  },
+                  "post_extract": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                    }
+                  },
+                  "pre_assemble": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                    }
+                  },
+                  "post_assemble": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "name",
+              "entry",
+              "nodes"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "quality": {
+          "type": "object",
+          "properties": {
+            "min_records": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "max_empty_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "max_failed_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "min_filled_pct": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "hooks": {
+          "type": "object",
+          "properties": {
+            "post_discover": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+              }
+            },
+            "pre_assemble": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+              }
+            },
+            "post_assemble": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WISEDeployment/properties/resources/items/properties/nodes/items/properties/hooks/properties/pre_extract/items"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "name",
+        "resources"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

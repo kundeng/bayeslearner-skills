@@ -50,13 +50,16 @@ The record's `data` contains EVERYTHING from all ancestors plus the current node
 
 ### 1.3 The ArtifactStore
 
-The store is `Map<string, ExtractedRecord[]>` (store.ts:34). Nothing more. It has:
+The store uses two maps: `Map<string, ExtractedRecord[]>` (flat) and `Map<string, TreeRecord[]>` (tree). It provides:
 
-- **`put(name, records[])`** — append + validate against declared schema
-- **`get(name)`** — return all records for an artifact
+- **`put(name, records[])`** — append flat records + validate against declared schema
+- **`putTree(name, trees[])`** — append tree records (nested structure)
+- **`putResourceTree(name, trees[])`** — store resource's raw trees under `__res:{name}` for `{ from: }` resolution
+- **`get(name)`** / **`getTree(name)`** — return records for an artifact
+- **`resolveFrom(ref)`** — resolve `{ from: "resource.node.field" }` by walking stored resource trees
 - **`resolveOrder(profile)`** — Kahn's algorithm over `produces`/`consumes` edges
 
-Validation is **advisory** — it logs warnings but still stores the records (store.ts:56). A validation failure does NOT prevent records from being written.
+Validation is **advisory** — it logs warnings but still stores the records. A validation failure does NOT prevent records from being written.
 
 ### 1.4 What "Declared Artifacts" Actually Are
 
@@ -75,7 +78,9 @@ artifacts:
     format: markdown
 ```
 
-At runtime, they map to named slots in the `ArtifactStore`. Records are plain `ExtractedRecord[]` — the schema fields are only used for validation warnings, not for shaping or filtering the data. A record can have extra fields beyond what the schema declares; those are silently passed through.
+At runtime, they map to named slots in the `ArtifactStore`. Records are plain `ExtractedRecord[]` or `TreeRecord[]` — the schema fields are only used for validation warnings, not for shaping or filtering the data. A record can have extra fields beyond what the schema declares; those are silently passed through.
+
+The `query` field (optional JMESPath expression) transforms tree records at output time — it operates on a cleaned document shape (data promoted to top-level, children keyed by node name) rather than the raw TreeRecord structure. When `query` is set, `structure` is ignored.
 
 ---
 
@@ -1324,14 +1329,37 @@ Consumed record data shadows any existing context.
 
 Two template resolution functions exist:
 
-1. **resolveTemplate** (engine.ts:145-149): Used for resource entry URLs with consumed data. Simple `{field}` replacement from a data record.
+1. **resolveTemplate** (engine.ts): Used for resource entry URLs and navigate targets. Three-tier fallback:
+   - `{field}` — local context data (consumed record, parent extraction)
+   - `{artifacts.name.field}` — cross-artifact reference (latest record from named artifact in the store)
+   - `{config.key}` — input config reference (CLI `--set` or YAML config)
+   - Unreplaced templates remain as `{ref}` literal
+   - Regex: `/\{([^}]+)\}/g` — matches any content inside braces
 
-2. **resolveUrl** (engine.ts:477-495): Used for navigate actions. Two-level fallback:
+2. **resolveUrl** (engine.ts): Used for navigate actions. Two-level fallback:
    - First tries accumulated context
    - Falls back to scanning records array in reverse (most recent first)
    - Unreplaced templates remain as `{field}` literal
 
-Both use the same regex: `/\{(\w+)\}/g` — only matches word characters inside braces.
+### Entry URL: `{ from: }` Cross-Resource Reference
+
+Entry URLs accept `{ from: "resource.node.field" }` as an alternative to string templates. This resolves to multiple visit targets:
+
+1. `store.putResourceTree(name, trees)` stores each resource's raw trees under `__res:{name}` after execution
+2. `store.resolveFrom(ref)` walks the named resource's trees, filters by node name, extracts the field
+3. Each resolved value becomes a separate visit target (like `consumes` but without a declared artifact)
+
+Example: `{ from: "discover_overview.toc.url" }` finds all `toc` nodes in `discover_overview`'s trees and collects their `url` fields.
+
+### JMESPath Tree Queries
+
+The optional `query` field on ArtifactSchema applies a JMESPath expression (`@metrichor/jmespath`) to tree records before output:
+
+1. `treeToDocument(tree)` converts TreeRecord to a clean document: data fields promoted to top-level, children keyed by node name (recursive)
+2. Trees grouped by node name; if all share the same name, presented as a simple array
+3. `jmesSearch(input, query)` applied; result written directly as JSON
+
+When `query` is set, it takes precedence over `structure`. This enables both downward denormalization (flattening) and upward aggregation (grouping) via a single expression.
 
 ### ArtifactStore: put/get and Validation
 

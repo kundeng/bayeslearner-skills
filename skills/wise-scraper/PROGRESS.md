@@ -103,44 +103,14 @@ WISE becomes a Chrome extension by forking Nanobrowser:
 
 ## Next Session — Execution Plan
 
-### Priority 1: Dual output profiles (D1)
+### Priority 1: Run live tests ✅ (P1-P3 done, need re-run)
 
-**What:** Update all 9 test profiles under `references/` (or wherever profiles live) to declare a second output artifact with the opposite structure. Each profile should produce BOTH nested tree JSON and flat JSON.
+Re-run all 11 test profiles against live sites to validate:
+- Dual output (nested + flat) produces correct data
+- JMESPath query artifacts produce expected shapes
+- No regressions from P3 schema changes
 
-**How:** For each profile:
-1. Find the existing output artifact declaration
-2. Add a second artifact with same fields but opposite `structure`
-3. If the node only emits to one artifact, add a second emit target or use `flatten: true`
-4. Run the profile against the live site to validate both outputs
-
-**Doc sync:** Update guide.md test section to document dual-output requirement.
-
-### Priority 2: JMESPath tree queries (D2)
-
-**What:** Add optional `query: string` field to `ArtifactSchema` in schema.ts. When present, apply JMESPath query to TreeRecord before output.
-
-**Steps:**
-1. `npm install @metrichor/jmespath` in runner
-2. Add `query: z.string().optional()` to `ArtifactSchema` in schema.ts
-3. In run.ts `writeOutputArtifact`: if `schema.query`, apply JMESPath to tree records before writing
-4. Update `flattenTree` to be the fallback when no query is specified
-5. Write at least 2 test profiles exercising downward and upward denormalization
-6. **Doc sync:** Update SKILL.md data flow section, field-guide.md emit/flatten section, guide.md assembly section, architecture.md, schema.cue, regenerate schema.json
-
-**Key design question:** The JMESPath query operates on the TreeRecord shape. Need to define what the input document looks like — is it the raw `TreeRecord` (with `node`, `url`, `data`, `children`), or a cleaned shape (just `data` + `children` with children keyed by node name)? The cleaned shape is more user-friendly for queries.
-
-### Priority 3: Context propagation (D4)
-
-**What:** Extend `resolveTemplate()` in engine.ts to resolve `{artifacts.X.field}` and `{config.key}` references, not just fields from consumed artifacts and parent context.
-
-**Steps:**
-1. Define the template reference syntax: `{field}` (context), `{artifacts.name.field}`, `{config.key}`
-2. Update `resolveTemplate()` to accept store + config as additional sources
-3. Wire store and config through to `resolveTemplate` call sites
-4. Test with a profile that uses cross-artifact references in `navigate.to`
-5. **Doc sync:** Update SKILL.md consumes section, field-guide.md template references, guide.md, architecture.md, schema.cue
-
-### Priority 4: Agent skill test harness (D5)
+### Priority 2: Agent skill test harness (D5)
 
 **What:** Build a test that spawns a subagent with SKILL.md and a scraping scenario, then validates the output.
 
@@ -151,14 +121,68 @@ WISE becomes a Chrome extension by forking Nanobrowser:
 4. Validate: produced profile passes Zod, runner executes successfully, output has expected fields/counts
 5. **Doc sync:** Document the test approach in a testing section of guide.md
 
-### After 1-4: Fork Nanobrowser (D6)
+### Priority 3: Fork Nanobrowser (D6)
 
-Gate: profile format is stable (JMESPath query field, context propagation syntax). Then:
+Gate: profile format is stable (JMESPath query field, context propagation syntax — DONE). Then:
 1. Fork Nanobrowser repo
 2. Implement `BrowserDriver` on Nanobrowser's CDP wrapper
 3. Replace agent loop with WISE exploration phase
 4. Add deterministic NER runner
 5. Profile YAML is the shared contract
+
+## What Was Done (session 3 — 2026-04-03)
+
+### P1: Dual output profiles (D1)
+Updated all 10 test profiles to declare both nested and flat output artifacts:
+- **No-artifact profiles** (laptop, laptop-paginated, revspin, splunk): Added `artifacts` block + `produces: [X_nested, X_flat]`
+- **Shorthand emit profiles** (books-mystery, quotes, variants, amazon): Added second artifact, changed `emit: "X"` → `emit: [{to: X}, {to: X_flat}]`
+- **Array emit profiles** (tables, umsalary): Added nested artifact, appended `{to: X_nested}` to emit array
+- Amazon renamed `products` → `products_nested` + `products_flat` (both output)
+- All 11 profiles pass Zod dry-run validation
+
+### P2: JMESPath tree queries (D2)
+- Installed `@metrichor/jmespath` dependency
+- Added `query: z.string().optional()` to `ArtifactSchema` in schema.ts
+- Implemented `treeToDocument()` — converts TreeRecord to clean query-friendly document (data fields promoted, children keyed by node name)
+- Implemented `applyTreeQuery()` — groups trees by node name, applies JMESPath, returns result
+- In `writeOutputArtifact`: when `schema.query` is set, applies JMESPath to trees and writes result directly (overrides `structure`)
+- Added 2 JMESPath query artifacts to books-mystery-test.yaml:
+  - `mystery_books_query_down`: downward denormalization — `[].pages[].books[].{title, price, rating}`
+  - `mystery_books_query_up`: upward aggregation — `[].pages[].{book_titles: books[].title, book_count: length(books)}`
+- Updated schema.cue and regenerated schema.json
+
+### P3: Context propagation (D4)
+- Extended `resolveTemplate()` in engine.ts with three-tier reference resolution:
+  - `{field}` — local context (unchanged)
+  - `{artifacts.name.field}` — cross-artifact store reference
+  - `{config.key}` — input config reference
+- Added `EntryUrl` union type in schema.ts: `string | { from: string }`
+- Implemented `{ from: "resource.node.field" }` entry URL resolution:
+  - `store.putResourceTree(name, trees)` stores resource trees under `__res:{name}`
+  - `store.resolveFrom(ref)` walks stored trees to find matching nodes and extract fields
+  - Engine resolves `{ from: }` to multiple visit targets
+- Fixed splunk-spl2-test.yaml validation (was failing due to `{ from: }` syntax not in Zod schema)
+- Engine constructor now accepts optional `config` parameter, wired from `config.inputs` in run.ts
+- Updated schema.cue and regenerated schema.json
+
+### Doc sync
+Updated all 4 documentation files:
+- **SKILL.md**: Added `query` to field list, new sections for JMESPath queries, template references, `{ from: }` entry URLs
+- **field-guide.md**: Added `query` artifact setting, template references section, entry URL cross-resource reference
+- **guide.md**: Added `{ from: }` example, template references table, JMESPath tree queries section
+- **architecture.md**: Updated ArtifactStore API, template resolution section, added `{ from: }` and JMESPath sections
+
+## Decisions Made (session 3)
+
+### D7: Clean document shape for JMESPath
+JMESPath queries operate on a cleaned tree shape: data fields promoted to top-level, children keyed by node name. NOT the raw TreeRecord with `node`, `url`, `data`, `children` scaffolding. This makes queries natural for profile authors: `[].pages[].books[].{title: title}` instead of `[].children.pages[].children.books[].data.title`.
+
+### D8: Three-tier template resolution
+Template references follow the Terraform module model:
+- `{field}` = local (like Terraform `self.attr`)
+- `{artifacts.name.field}` = cross-module (like `module.vpc.subnet_id`)
+- `{config.key}` = variable (like `var.region`)
+The `{ from: }` entry URL is a separate mechanism for multi-target expansion (not interpolation).
 
 ## Known remaining issues (not addressed yet)
 

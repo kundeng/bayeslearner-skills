@@ -179,6 +179,48 @@ resources:
     ...
 ```
 
+**Alternative: `{ from: }` cross-resource reference** — when the upstream resource stores trees but doesn't declare an artifact, use `{ from: "resource.node.field" }` as the entry URL:
+
+```yaml
+resources:
+  - name: discover_overview
+    nodes:
+      - name: toc
+        expand: { over: elements, scope: "div.toc a" }
+        extract:
+          - link: { name: url, css: "a" }
+  - name: extract_pages
+    entry:
+      url: { from: "discover_overview.toc.url" }   # resolves to multiple URLs
+      root: page
+```
+
+### Template references
+
+Three scopes for `{...}` placeholders in URLs and navigate targets:
+
+| Syntax | Source | Example |
+|--------|--------|---------|
+| `{field}` | Local context (consumed record, parent extraction) | `{url}`, `{title}` |
+| `{artifacts.name.field}` | Latest record from named artifact in the store | `{artifacts.auth.token}` |
+| `{config.key}` | Input config (CLI `--set` or YAML config) | `{config.base_url}` |
+
+### JMESPath tree queries
+
+The optional `query` field on ArtifactSchema applies a JMESPath expression to tree records before output. Trees are converted to clean documents (data fields promoted to top-level, children keyed by node name), then queried.
+
+```yaml
+artifacts:
+  books_flat:
+    query: "[].pages[].books[].{title: title, price: price}"    # downward
+    output: true
+  books_by_page:
+    query: "[].pages[].{titles: books[].title, count: length(books)}"  # upward
+    output: true
+```
+
+When `query` is set, the result is written directly as JSON — `structure` is ignored. This enables both **downward denormalization** (flattening tree to leaf records, like `flattenTree` but with field selection) and **upward aggregation** (summarizing child data into parent objects).
+
 ### BFS is required for discovery + emit
 
 When a node discovers URLs on a page and emits them into an artifact, it **must use `order: bfs`**. DFS would navigate away after the first URL, destroying the DOM context for further discovery. BFS collects all records into the artifact first, then children (or sibling consumers) process them.

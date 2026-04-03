@@ -80,6 +80,37 @@ export class ArtifactStore {
     return this.treeStore.get(artifactName) ?? [];
   }
 
+  /** Store a resource's raw trees (keyed by resource name for {from:} resolution). */
+  putResourceTree(resourceName: string, trees: TreeRecord[]): void {
+    this.treeStore.set(`__res:${resourceName}`, trees);
+  }
+
+  /**
+   * Resolve a {from: "resource.node.field"} reference.
+   * Returns an array of field values extracted from matching tree nodes.
+   */
+  resolveFrom(ref: string): string[] {
+    const parts = ref.split(".");
+    if (parts.length !== 3) {
+      console.warn(`[store] Invalid {from:} reference '${ref}' — expected resource.node.field`);
+      return [];
+    }
+    const [resourceName, nodeName, fieldName] = parts;
+    const trees = this.treeStore.get(`__res:${resourceName}`) ?? [];
+    const values: string[] = [];
+    const collect = (tree: TreeRecord): void => {
+      if (tree.node === nodeName) {
+        const val = tree.data[fieldName];
+        if (val !== undefined && val !== null) values.push(String(val));
+      }
+      for (const children of Object.values(tree.children)) {
+        for (const child of children) collect(child);
+      }
+    };
+    for (const tree of trees) collect(tree);
+    return values;
+  }
+
   /** Store flat records for an artifact. Validates against schema if declared. */
   put(artifactName: string, records: ExtractedRecord[]): ValidationError[] {
     const existing = this.store.get(artifactName) ?? [];

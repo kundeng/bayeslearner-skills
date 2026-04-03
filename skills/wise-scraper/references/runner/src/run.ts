@@ -35,6 +35,7 @@ import { HookRegistry } from "./hooks.js";
 import { ArtifactStore, dedupeByField, toArray } from "./store.js";
 import { loadConfig } from "./config.js";
 import { assembleMarkdown, assembleCsv } from "./processing.js";
+import { search as jmesSearch, type JSONValue } from "@metrichor/jmespath";
 
 // Re-export ExtractedRecord for processing.ts compatibility
 export type { ExtractedRecord } from "./schema.js";
@@ -155,6 +156,44 @@ function getArtifactQualitySummary(
   return { total_records: 0, failed_records: 0 };
 }
 
+// ── JMESPath tree query support ────────────────────────
+
+/**
+ * Convert a TreeRecord into a clean, query-friendly document.
+ * Node data fields are promoted to top-level. Children are keyed by node name,
+ * each value being an array of cleaned child documents (recursive).
+ *
+ * Example output:
+ *   { title: "...", price: "...", variants: [{ hdd_size: "128", price: "$295" }, ...] }
+ */
+function treeToDocument(tree: TreeRecord): Record<string, unknown> {
+  const doc: Record<string, unknown> = { ...tree.data };
+  for (const [childName, childTrees] of Object.entries(tree.children)) {
+    doc[childName] = childTrees.map(treeToDocument);
+  }
+  return doc;
+}
+
+/**
+ * Apply a JMESPath query to tree records. Returns the raw query result.
+ * The input document is an object keyed by root node names.
+ * If there's a single root node name, the document is just the array of its docs.
+ */
+function applyTreeQuery(trees: TreeRecord[], query: string): unknown {
+  // Group trees by node name
+  const byNode: Record<string, Record<string, unknown>[]> = {};
+  for (const tree of trees) {
+    if (!byNode[tree.node]) byNode[tree.node] = [];
+    byNode[tree.node].push(treeToDocument(tree));
+  }
+
+  // If all trees share the same node name, present as a simple array
+  const nodeNames = Object.keys(byNode);
+  const input = nodeNames.length === 1 ? byNode[nodeNames[0]] : byNode;
+
+  return jmesSearch(input as JSONValue, query);
+}
+
 function writeOutputArtifact(
   outDir: string,
   baseName: string,
@@ -167,6 +206,15 @@ function writeOutputArtifact(
   const fmt = schema.format ?? defaultFormat;
   const ext = fmt === "markdown" ? "md" : fmt;
   const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
+
+  // If a JMESPath query is specified, apply it to the tree and write the result directly
+  if (schema.query && trees.length > 0) {
+    const result = applyTreeQuery(trees, schema.query);
+    writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
+    console.log(`[output] query result → ${outPath}`);
+    return;
+  }
+
   const outputAsFlat = schema.structure === "flat" || fmt === "csv" || fmt === "markdown" || fmt === "jsonl";
   const records = getArtifactOutputRecords(name, schema, store);
 
@@ -418,8 +466,11 @@ async function main(): Promise<void> {
       // Resource-level hooks
       if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks, "resource");
 
-      const engine = new Engine(driver, ai, hookRegistry, store);
+      const engine = new Engine(driver, ai, hookRegistry, store, config.inputs as Record<string, unknown>);
       const trees = engine.runResourceTree(resource);
+
+      // Store raw resource trees for {from:} cross-resource references
+      store.putResourceTree(resource.name, trees);
 
       // Store trees in artifact(s) if resource declares produces.
       // Skip artifacts that nodes already emit to (prevent double-write).

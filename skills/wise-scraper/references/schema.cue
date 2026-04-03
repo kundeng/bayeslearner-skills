@@ -39,6 +39,7 @@ ArtifactSchema: {
 	structure?:   "nested" | "flat" | *"nested"  // nested = tree, flat = denormalized
 	consumes?:    string | [...string]     // upstream artifact(s) (DAG edge)
 	dedupe?:      string                   // field name to deduplicate by
+	query?:       string                   // JMESPath query applied to tree before output
 	output?:      bool | *false            // true = final deliverable
 	format?:      "jsonl" | "csv" | "json" | "markdown"  // output format hint
 	description?: string
@@ -47,7 +48,7 @@ ArtifactSchema: {
 Resource: {
 	name:  string
 	entry: {
-		url:  string
+		url:  string | {from: string}       // literal/template URL or cross-resource tree ref
 		root: string
 	}
 	nodes:     [...NER] & [_, ...]
