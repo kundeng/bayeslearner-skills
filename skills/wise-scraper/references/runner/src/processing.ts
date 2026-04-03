@@ -163,7 +163,11 @@ export function assembleMarkdown(
     const title =
       typeof data.title === "string" ? data.title : "";
 
-    if (title) {
+    // Add title heading only if the body doesn't already start with one.
+    // HTML bodies from doc sites often begin with <h1> which turndown
+    // converts to "# Title", making a prefix "## Title" redundant.
+    const bodyStartsWithHeading = /^#{1,3}\s/.test(md.trimStart());
+    if (title && !bodyStartsWithHeading) {
       parts.push(`\n## ${title}\n`);
     }
     if (md) {
