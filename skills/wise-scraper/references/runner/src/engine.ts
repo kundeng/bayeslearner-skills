@@ -90,7 +90,7 @@ export class Engine {
         }
         console.log(`[engine] {from: "${entryUrl.from}"} → ${urls.length} URLs`);
         for (const url of urls) {
-          targets.push({ url, consumedData: null });
+          targets.push({ url: this.resolveRelativeUrl(url), consumedData: null });
         }
       } else if (consumeNames.length > 0 && this.store) {
         const urlTemplate = typeof entryUrl === "string" ? entryUrl : String(entryUrl);
@@ -1640,23 +1640,28 @@ export class Engine {
   private extractionToJs(rule: Extraction): string {
     if ("text" in rule) {
       const { name, css, regex } = rule.text;
-      const base = `container.querySelector('${escapeJs(css)}')?.textContent?.trim() || ''`;
+      const base = `(container.querySelector('${escapeJs(css)}') || (container.matches && container.matches('${escapeJs(css)}') ? container : null))?.textContent?.trim() || ''`;
       if (regex) {
         return `result['${escapeJs(name)}'] = (() => { const v = ${base}; const m = v.match(new RegExp('${escapeJs(regex)}')); return m ? m[0] : v; })();`;
       }
       return `result['${escapeJs(name)}'] = ${base};`;
 
     } else if ("attr" in rule) {
-      return `result['${escapeJs(rule.attr.name)}'] = container.querySelector('${escapeJs(rule.attr.css)}')?.getAttribute('${escapeJs(rule.attr.attr)}') || '';`;
+      const css = escapeJs(rule.attr.css);
+      return `result['${escapeJs(rule.attr.name)}'] = (container.querySelector('${css}') || (container.matches && container.matches('${css}') ? container : null))?.getAttribute('${escapeJs(rule.attr.attr)}') || '';`;
 
     } else if ("html" in rule) {
-      return `result['${escapeJs(rule.html.name)}'] = container.querySelector('${escapeJs(rule.html.css)}')?.innerHTML || '';`;
+      const css = escapeJs(rule.html.css);
+      return `result['${escapeJs(rule.html.name)}'] = (container.querySelector('${css}') || (container.matches && container.matches('${css}') ? container : null))?.innerHTML || '';`;
 
     } else if ("link" in rule) {
-      return `result['${escapeJs(rule.link.name)}'] = container.querySelector('${escapeJs(rule.link.css)}')?.getAttribute('${escapeJs(rule.link.attr ?? "href")}') || '';`;
+      const attr = escapeJs(rule.link.attr ?? "href");
+      const css = escapeJs(rule.link.css);
+      return `result['${escapeJs(rule.link.name)}'] = (container.querySelector('${css}') || (container.matches && container.matches('${css}') ? container : null))?.getAttribute('${attr}') || '';`;
 
     } else if ("image" in rule) {
-      return `result['${escapeJs(rule.image.name)}'] = container.querySelector('${escapeJs(rule.image.css)}')?.getAttribute('src') || '';`;
+      const css = escapeJs(rule.image.css);
+      return `result['${escapeJs(rule.image.name)}'] = (container.querySelector('${css}') || (container.matches && container.matches('${css}') ? container : null))?.getAttribute('src') || '';`;
 
     } else if ("grouped" in rule) {
       const { name, css, attr } = rule.grouped;
