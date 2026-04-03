@@ -32,7 +32,7 @@ import { NullAIAdapter } from "./ai.js";
 import { AIChatAdapter } from "./aichat-adapter.js";
 import { Engine } from "./engine.js";
 import { HookRegistry } from "./hooks.js";
-import { ArtifactStore, toArray } from "./store.js";
+import { ArtifactStore, dedupeByField, toArray } from "./store.js";
 import { loadConfig } from "./config.js";
 import { assembleMarkdown, assembleCsv } from "./processing.js";
 
@@ -115,27 +115,8 @@ function matchesFieldType(value: unknown, type: ArtifactSchema["fields"][string]
 }
 
 function dedupeFlatRecords(records: ExtractedRecord[], schema?: ArtifactSchema): ExtractedRecord[] {
-  if (!schema?.dedupe) {
-    return records;
-  }
-
-  const seen = new Set<string>();
-  const deduped: ExtractedRecord[] = [];
-
-  for (const record of records) {
-    const value = record.data[schema.dedupe];
-    if (value === undefined || value === null || value === "") {
-      deduped.push(record);
-      continue;
-    }
-
-    const key = `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(record);
-  }
-
-  return deduped;
+  if (!schema?.dedupe) return records;
+  return dedupeByField(records, schema.dedupe);
 }
 
 function getArtifactOutputRecords(

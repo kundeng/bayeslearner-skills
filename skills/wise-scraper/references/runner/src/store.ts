@@ -23,6 +23,27 @@ export function emitTargetNames(emit: string | Array<{ to: string }> | undefined
   return emit.map((e) => e.to);
 }
 
+/** Deduplicate records by a named field. Records with missing/empty values are always kept. */
+export function dedupeByField(records: ExtractedRecord[], fieldName: string): ExtractedRecord[] {
+  const seen = new Set<string>();
+  const deduped: ExtractedRecord[] = [];
+
+  for (const record of records) {
+    const value = record.data[fieldName];
+    if (value === undefined || value === null || value === "") {
+      deduped.push(record);
+      continue;
+    }
+
+    const key = `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(record);
+  }
+
+  return deduped;
+}
+
 export interface ValidationError {
   artifact: string;
   record_index: number;
@@ -309,23 +330,7 @@ export class ArtifactStore {
   }
 
   private dedupeRecords(records: ExtractedRecord[], fieldName: string): ExtractedRecord[] {
-    const seen = new Set<string>();
-    const deduped: ExtractedRecord[] = [];
-
-    for (const record of records) {
-      const value = record.data[fieldName];
-      if (value === undefined || value === null || value === "") {
-        deduped.push(record);
-        continue;
-      }
-
-      const key = `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(record);
-    }
-
-    return deduped;
+    return dedupeByField(records, fieldName);
   }
 
   private typeMatches(val: unknown, def: FieldDef): boolean {
@@ -334,7 +339,7 @@ export class ArtifactStore {
       case "number": return typeof val === "number" || (typeof val === "string" && !isNaN(Number(val)));
       case "boolean": return typeof val === "boolean";
       case "array": return Array.isArray(val);
-      case "object": return typeof val === "object" && !Array.isArray(val);
+      case "object": return typeof val === "object" && val !== null && !Array.isArray(val);
       default: return true;
     }
   }
