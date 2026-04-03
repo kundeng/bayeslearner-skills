@@ -377,8 +377,21 @@ export class Engine {
         }
         if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) break;
         if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) break;
-        this.driver.click({ css: expand.control });
-        this.driver.wait({ idle: true });
+
+        // Read the next link's href and navigate directly. Clicking <a> tags
+        // via programmatic dispatch doesn't reliably trigger navigation in
+        // headless browsers — the click event fires but the browser may not
+        // follow the link.
+        const nextHref = this.driver.evalJson<string | null>(`
+          (() => { const el = document.querySelector('${escapeJs(expand.control)}'); return el ? el.href || el.getAttribute('href') : null })()
+        `);
+        if (nextHref) {
+          this.driver.open(nextHref, { wait: { idle: true } });
+        } else {
+          // Fallback: try clicking directly (non-link controls like buttons)
+          this.driver.click({ css: expand.control });
+          this.driver.wait({ idle: true });
+        }
       }
     } else if (expand.strategy === "numeric") {
       const current = this.driver.getUrl() ?? "";
