@@ -1,0 +1,20 @@
+{
+  "name": "wise-scraper-test-harness",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Agent SDK test harness for WISE scraper skill validation",
+  "scripts": {
+    "test": "tsx run-tests.ts",
+    "explore": "tsx run-tests.ts --mode explore",
+    "validate": "tsx run-tests.ts --mode validate",
+    "run": "tsx run-tests.ts --mode run"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

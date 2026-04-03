@@ -80,6 +80,11 @@ export class ArtifactStore {
     return this.treeStore.get(artifactName) ?? [];
   }
 
+  /** Get a resource's raw trees (keyed by resource name for {from:} resolution). */
+  getResourceTree(resourceName: string): TreeRecord[] {
+    return this.treeStore.get(`__res:${resourceName}`) ?? [];
+  }
+
   /** Store a resource's raw trees (keyed by resource name for {from:} resolution). */
   putResourceTree(resourceName: string, trees: TreeRecord[]): void {
     this.treeStore.set(`__res:${resourceName}`, trees);
@@ -97,9 +102,6 @@ export class ArtifactStore {
     }
     const [resourceName, nodeName, fieldName] = parts;
     const trees = this.treeStore.get(`__res:${resourceName}`) ?? [];
-    if (trees.length > 0) {
-      console.log(`[store] resolveFrom debug: ${trees.length} trees for __res:${resourceName}, first tree node='${trees[0].node}', data keys=${Object.keys(trees[0].data).join(",")}, data=${JSON.stringify(trees[0].data).slice(0, 200)}`);
-    }
     const values: string[] = [];
     const collect = (tree: TreeRecord): void => {
       if (tree.node === nodeName) {
