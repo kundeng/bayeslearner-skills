@@ -103,17 +103,21 @@ WISE becomes a Chrome extension by forking Nanobrowser:
 
 ## Next Session — Execution Plan
 
-### Priority 1: Run more agent exploration scenarios (D5 continued)
+### Priority 1: Verify Hamilton + ITSI scrape output quality
 
-Run the harness (`tests/agent-explore-test.sh`) against books and laptops scenarios. Each failure reveals SKILL.md documentation gaps — fix them iteratively.
+Both scrapes were launched in session 4. Check output markdown files for completeness and quality. Fix any issues with selectors or chaining.
 
-### Priority 2: Investigate pagination regression
+### Priority 2: Debug full splunk-spl2-test.yaml {from:} chaining
 
-All live tests show duplicate records across pages (books-mystery: 100 records but only 20 unique; quotes: 100 records but only 10 unique). The `li.next a` click succeeds but doesn't navigate to a new page. This may be an agent-browser session reuse issue or a navigation timing problem.
+The 3-section SPL2 scrape using `{ from: "discover_X.toc.url" }` produced near-empty flat output. The overview-only test works. Debug the cross-resource tree resolution.
 
-### Priority 3: Fork Nanobrowser (D6)
+### Priority 3: Run D5 agent exploration on more scenarios
 
-Gate: profile format is stable (JMESPath query field, context propagation syntax — DONE). Then:
+Run `./tests/agent-explore-test.sh <test.yaml>` against laptops, tables, variants. Each failure reveals SKILL.md documentation gaps — fix iteratively.
+
+### Priority 4: Fork Nanobrowser (D6)
+
+Gate: profile format is stable. Then:
 1. Fork Nanobrowser repo
 2. Implement `BrowserDriver` on Nanobrowser's CDP wrapper
 3. Replace agent loop with WISE exploration phase
@@ -146,14 +150,33 @@ Built `tests/agent-explore-test.sh` — end-to-end validation that a subagent gi
 - Added two Common Failure Modes: "Root node with wrong parents" and "Missing root node"
 - Updated field-guide.md entry section to clarify root node requirements
 
+### Pagination fix
+`agent-browser click` on `<a>` tags fires the DOM event but doesn't trigger navigation (Playwright/CDP limitation). Added `navigateNextPage()` method: reads href and calls `driver.open()` for link controls, falls back to scripted DOM click for buttons. Applied to both tree and flat expansion paths.
+
+### Container self-matching fix
+`extractionToJs` now falls back to `container.matches(css) ? container : null` when `querySelector` returns null — handles the case where `expand.scope` matches the container itself, not a child.
+
+### Test organization: @agent-prompt metadata
+All test YAMLs now have `# @agent-prompt:`, `# @expected-fields:`, `# @min-records:` comment blocks. The test harness (`agent-explore-test.sh`) reads these instead of hardcoding scenarios. Usage: `./agent-explore-test.sh <test.yaml> [--run]`.
+
+### New test profiles (agent-explored)
+- **splunk-itsi-test.yaml** — 18 resources (9 discover + 9 extract) covering all ITSI doc sections. Dual output (nested JSON + flat markdown).
+- **hamilton-doc-test.yaml** — 2-resource chaining: discover ~137 page URLs from Sphinx/Furo sidebar, extract title + body. Dual output.
+
 ### Live test results (session 4)
 
-| Test | Nested | Flat | Query | Status | Notes |
-|------|--------|------|-------|--------|-------|
-| books-mystery | 100 trees | 100 records | 100 down, 5 up | PASS | JMESPath works; pagination duplicates |
-| tables | 2 trees | 6 records | — | PASS* | Quality gate flags nested records |
-| quotes | 30 trees | 30 records | — | PASS | |
-| agent-quotes | 100 trees | 10 records | — | PASS | Agent-produced profile; dedupe reduces flat |
+| Test | Nested | Flat | Status | Notes |
+|------|--------|------|--------|-------|
+| books-mystery | 32 trees | 32 records | PASS | JMESPath: 32 down, 2 up (page grouping correct) |
+| tables | 2 trees | 6 records | PASS* | Quality gate flags nested records |
+| quotes | 30 trees | 30 records | PASS | 30 unique (pagination fixed) |
+| laptop | 1 tree | 117 records | PASS | |
+| laptop-paginated | 1 tree | 117 records | PASS | 20 pages navigated correctly |
+| revspin | 1 tree | 200 records | PASS | 2 pages, click+wait actions |
+| variants | 24 trees | 24 records | PASS | 6 products × 4 HDD sizes |
+| agent-quotes (D5) | 100 trees | 10 flat | PASS | Agent-produced; dedupe reduces flat |
+| splunk-itsi | — | — | validates | 18 resources, live run pending |
+| hamilton | — | — | validates | 2 resources, live run pending |
 
 *Tables quality gate fails because nested records don't have individual row fields — known limitation of quality gate design.
 
@@ -163,7 +186,10 @@ Built `tests/agent-explore-test.sh` — end-to-end validation that a subagent gi
 Emit nodes are no longer pruned from the parent's `children` map. This keeps the full tree hierarchy available for JMESPath queries and `{from:}` cross-resource references. The existing double-write prevention in run.ts handles deduplication at the artifact level.
 
 ### D10: Agent skill test harness approach
-Uses `claude -p` with `--dangerously-skip-permissions` for non-interactive execution. The harness provides the scenario prompt, the agent reads SKILL.md + field-guide from the filesystem, explores with agent-browser, and writes the profile. Validation is Zod dry-run + optional live execution.
+Uses `claude -p` with `--dangerously-skip-permissions` for non-interactive execution. The harness reads `@agent-prompt` from test YAMLs instead of hardcoding scenarios. Validation is Zod dry-run + optional live execution.
+
+### D11: navigateNextPage for reliable pagination
+`agent-browser click` on `<a>` tags doesn't navigate (Playwright limitation). `navigateNextPage()` reads the href and opens directly for links, falls back to scripted click for buttons. Both tree and flat expansion paths use this shared method.
 
 ## What Was Done (session 3 — 2026-04-03)
 
@@ -263,4 +289,8 @@ f682787 wise-scraper: add JMESPath queries, context propagation, dual output pro
 
 # Session 4 (2026-04-03)
 5024dd0 wise-scraper: preserve emit children in parent tree for JMESPath and {from:}
+3324da0 wise-scraper: agent skill test harness, SKILL.md improvements from D5 feedback
+b18d280 wise-scraper: fix pagination — navigate via href instead of clicking links
+4860d20 wise-scraper: consolidate navigateNextPage for both tree and flat paths
+cea24ff wise-scraper: fix container self-matching in extractionToJs, add resolveFrom debug
 ```
