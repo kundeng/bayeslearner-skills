@@ -20,6 +20,30 @@
     "should_trigger": true
   },
   {
+    "query": "Write an SPL2 module with custom functions and types to validate and transform log data.",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me convert this SPL search to SPL2 using the from command with SQL syntax.",
+    "should_trigger": true
+  },
+  {
+    "query": "Create an Edge Processor pipeline in SPL2 that masks PII fields before indexing.",
+    "should_trigger": true
+  },
+  {
+    "query": "Write Python automation to import ITSI services and entities from a saved search and keep the import recurring.",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me define ITSI notable event aggregation policies for Episode Review, including filtering and split-by fields.",
+    "should_trigger": true
+  },
+  {
+    "query": "Show the concrete settings and config files needed for a custom ITSI role to edit deep dives and glass tables.",
+    "should_trigger": true
+  },
+  {
     "query": "Create a Word document memo with a title page and a table of contents.",
     "should_trigger": false
   },

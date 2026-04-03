@@ -1,6 +1,6 @@
 ---
 name: design2spec
-description: Convert UI designs into structured JSONC spec packages before code is written. Valuable for platforms where jumping to code causes damage — Chrome extensions, Splunk dashboards, Tauri/Electron apps, VS Code extensions, React Native. Trigger on "prepare a handoff", "create a spec from this design", "turn this screenshot into something buildable", or design-to-spec for any specialized platform. Emits JSONC specs, not implementation code.
+description: Convert UI designs into structured JSONC spec packages before code is written, especially for constrained platforms like extensions, dashboards, desktop shells, and mobile apps. Use for design handoff and design-to-spec workflows. Outputs specs, not implementation code.
 metadata:
   author: kundeng
   version: "1.0.0"

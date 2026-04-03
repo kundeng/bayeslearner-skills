@@ -1,13 +1,15 @@
 # splunk-platform-skill
 
 `splunk-platform` is a deep, opinionated skill for Splunk development,
-administration, dashboards, SDK/REST integrations, add-on engineering, and
-AI-facing tooling.
+administration, dashboards, SDK/REST integrations, add-on engineering, ITSI
+implementation, and AI-facing tooling.
 
 It includes guidance for:
 
+- SPL2 authoring: modules, searches, custom functions, types, views, and pipelines
 - Python SDK and JavaScript SDK usage
 - raw REST and search job/export patterns
+- ITSI entities, services, KPI base searches, and event aggregation workflows
 - admin and discovery SPL
 - Dashboard Studio, Simple XML, and SplunkJS legacy boundaries
 - UCC-based add-on development

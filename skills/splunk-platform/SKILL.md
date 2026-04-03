@@ -1,6 +1,6 @@
 ---
 name: splunk-platform
-description: "Deep skill for Splunk development, administration, app/add-on engineering, dashboards, SDK/REST integrations, and AI-facing tooling. ALWAYS use this skill when the task involves splunklib, Splunk REST API, search/jobs or jobs/export patterns, Python SDK, JavaScript SDK, SPL discovery/admin searches, knowledge objects, UCC add-on development, Dashboard Studio, Simple XML, Splunk MCP integration, AppInspect/package validation, or platform deployment automation. This also covers Splunk analytics projects, MCP-backed data investigation, and reproducible analysis pipelines when the work is primarily about how to access, query, model, or safely expose Splunk data and capabilities. Trigger on: Splunk SDK, splunklib, SPL, Splunk REST API, jobs/export, add-on, UCC, modular input, alert action, Dashboard Studio, Simple XML, appinspect, saved searches, knowledge objects, MCP, Splunk admin, Splunk Cloud, Splunk Enterprise, Splunk automation, Splunk analytics, Tier 0 exploration, Tier 1 analysis."
+description: "Deep skill for Splunk development, administration, SDK/REST integrations, dashboards, UCC add-ons, ITSI automation, SPL2 authoring, and AI-facing tooling. Use for Splunk SDK, REST, jobs/export, SPL, dashboards, packaging, and MCP-backed analysis workflows."
 metadata:
   author: kundeng
   version: "1.0.0"
@@ -14,9 +14,12 @@ reference files for implementation details.
 
 Read only the references that match the task:
 
+- `references/spl2-authoring.md` for writing SPL2 modules, searches, custom functions, types, views, and pipelines
 - `references/python-sdk.md` for Python automation, `splunklib`, and result parsing
 - `references/javascript-sdk.md` for Node/browser JS SDK work
 - `references/rest-search-patterns.md` for raw REST, search jobs, and export patterns
+- `references/itsi-implementation.md` for concrete ITSI entity integrations, HEC setup, service onboarding, correlation searches, and notable-event aggregation workflows
+- `references/itsi-av-example.md` for a concrete end-to-end ITSI onboarding pattern using entity imports, service templates, and template-linked service imports
 - `references/admin-searches.md` for read-only admin/discovery SPL
 - `references/ucc-framework.md` for add-ons, modular inputs, setup pages, and alert actions
 - `references/dashboard-development.md` for Dashboard Studio and Simple XML
@@ -28,12 +31,14 @@ Read only the references that match the task:
 
 Classify the task before you write code:
 
-1. **External automation**: Python or JS code talks to Splunk over REST/SDK.
-2. **Search/discovery**: SPL inspects indexes, metadata, users, apps, and knowledge objects.
-3. **App/add-on engineering**: packaged Splunk app, technical add-on, modular input, alert action, setup UI.
-4. **Dashboards/UI**: Dashboard Studio JSON, Simple XML, or legacy SplunkJS/Web Framework.
-5. **AI integration**: MCP server or other agent-facing tools over Splunk.
-6. **Platform administration**: host deployment, upgrades, distributed topology, app rollout.
+1. **SPL2 authoring**: writing SPL2 modules, searches, custom functions, custom types, views, or Edge/Ingest pipelines.
+2. **External automation**: Python or JS code talks to Splunk over REST/SDK.
+3. **Search/discovery**: SPL inspects indexes, metadata, users, apps, and knowledge objects.
+4. **App/add-on engineering**: packaged Splunk app, technical add-on, modular input, alert action, setup UI.
+5. **Dashboards/UI**: Dashboard Studio JSON, Simple XML, or legacy SplunkJS/Web Framework.
+6. **AI integration**: MCP server or other agent-facing tools over Splunk.
+7. **Platform administration**: host deployment, upgrades, distributed topology, app rollout.
+8. **ITSI implementation**: entities, services, KPI base searches, service templates, maintenance windows, or notable event aggregation policies.
 
 If the task spans multiple areas, pick the primary deliverable first. A script
 that queries Splunk is external automation, not an add-on.
@@ -52,6 +57,7 @@ workflow, not just Splunk infrastructure.
 - Prefer **Dashboard Studio** for new dashboards.
 - Prefer **Simple XML** only for legacy maintenance or when existing app behavior is tightly coupled to XML/tokens.
 - Prefer **read-only SPL** for discovery and audits.
+- Prefer **ITSI import/search workflows** for bulk entity or service creation before inventing unsupported direct KV-store writes.
 - Prefer **narrow MCP tools** over one generic "run any SPL" endpoint.
 - Prefer **official automation repos** for platform deployment before inventing custom shell glue.
 - Run **AppInspect/package validation** before claiming an app or add-on is shippable.
@@ -65,8 +71,18 @@ workflow, not just Splunk infrastructure.
 - Do not create new HTML dashboards or lean on deprecated web framework patterns for greenfield work.
 - Do not use write-side SPL commands in automation unless the user explicitly wants state changes.
 - Do not assume Splunk Cloud lets you use every REST/admin path that Splunk Enterprise does.
+- Do not write directly to ITSI KV store collections; use ITSI REST endpoints or supported import workflows.
 
 ## Decision Table
+
+### Need to write SPL2 searches, modules, custom functions, types, or pipelines?
+
+Use `spl2-authoring.md`.
+
+Default: SPL2 for new search work on Splunk 10.2+. Use `from` command with SQL-style
+clauses for new searches. Use the module editor for multi-statement work. Use custom
+functions and types when building reusable SPL2 resources. Use pipeline patterns for
+Edge/Ingest Processor work.
 
 ### Need data out of Splunk for analysis, ETL, or a CLI?
 
@@ -79,6 +95,12 @@ Default: Python SDK for auth/job lifecycle, raw REST export for large streaming 
 Use `admin-searches.md`.
 
 Default: `rest`, `metadata`, and `tstats`. Avoid raw event scans unless you need event content.
+
+### Need to create or update ITSI objects like entities, services, KPI base searches, or event aggregation policies?
+
+Use `itsi-implementation.md` with either `python-sdk.md` or `rest-search-patterns.md`.
+
+Default: prefer supported ITSI import or REST object workflows, not direct KV-store writes. For recurring service/entity onboarding, bias toward saved searches plus `itsiimportobjects`. For event aggregation, define filtering and split-by rules deliberately and keep episode logic explicit.
 
 ### Need a Splunk add-on with config UI, modular inputs, or alert actions?
 
@@ -118,6 +140,7 @@ Default: official Splunk automation repos and admin manual concepts, not bespoke
 - Splunk Enterprise gives broader host/admin access.
 - Splunk Cloud often constrains platform-level operations and may require Support enablement for specific REST/API capabilities.
 - For app/add-on guidance, always check whether the task is Cloud-safe before recommending local filesystem or admin-server assumptions.
+- For ITSI specifically, Enterprise-only filesystem steps like editing `authorize.conf` or `metadata/local.meta` do not translate directly to Splunk Cloud; prefer Splunk Web and documented Cloud-safe admin flows there.
 
 ## Knowledge Object Defaults
 
