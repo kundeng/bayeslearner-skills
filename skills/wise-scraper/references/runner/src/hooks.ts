@@ -68,7 +68,7 @@ export class HookRegistry {
     if (!VALID_POINTS.includes(point)) {
       throw new Error(`Invalid hook point '${point}'. Valid: ${VALID_POINTS.join(", ")}`);
     }
-    const entry: HookEntry = { fn, name: name ?? fn.name ?? "anonymous" };
+    const entry: HookEntry = { fn, name: name || fn.name || "anonymous" };
     this.namedHooks[point].set(entry.name, entry);
   }
 

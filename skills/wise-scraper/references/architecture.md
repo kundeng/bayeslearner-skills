@@ -467,7 +467,7 @@ Session persistence is handled by `agent-browser` itself — the `--session` fla
 | `Locator` | 15-22 | CSS/text/role selector with refinement requiring at least one |
 | `WaitCondition` | 24-28 | Union: `{idle}`, `{selector}`, `{ms}` |
 | `StopCondition` | 39-49 | Sentinel/stable/limit for expansion halting |
-| `ClickAction` | 53-59 | Includes `uniqueness` and `discard` fields for dedup |
+| `ClickAction` | 53-57 | Click with type (real/scripted) and optional delay |
 | `ScrollAction` | 67-73 | `scroll: "to"` variant has `target` + `ready` sub-fields |
 | `Extraction` | 190-199 | Union of 8 extraction types: text, attr, html, link, image, table, grouped, ai |
 | `ElementExpand` | 203-208 | `over: "elements"`, CSS scope, optional limit |
@@ -476,7 +476,7 @@ Session persistence is handled by `agent-browser` itself — the `--session` fla
 | `Emit` | 276-279 | Union of string shorthand or `EmitTarget[]` |
 | `NER` | 283-317 | The core node: state, action[], extract[], expand, emit, consumes, retry, hooks |
 | `Resource` | 352-372 | Groups nodes with entry URL, globals, setup, hooks |
-| `Deployment` | 385-403 | Top-level: artifacts, resources[], quality gate, schedule |
+| `Deployment` | 385-399 | Top-level: artifacts, resources[], quality gate, hooks |
 | `ExtractedRecord` | 429-434 | Interface (not Zod): `{node, url, data, extracted_at}` |
 
 **Data structure shapes worth memorizing:**
@@ -507,8 +507,6 @@ emit: [{ to: "artifact", flatten: "field" }] // full form
 
 **Tricky parts:**
 - `Locator` has a `.refine()` (line 22) that requires at least one of `css`, `text`, or `role`. This means empty locators fail Zod validation, not TypeScript type-checking.
-- `ClickAction.discard` (line 57) has three modes but the engine never references it. It appears to be a future/unused schema field.
-- `ClickAction.uniqueness` (line 56) is similarly declared but not consumed by engine code.
 - `TableColumn` (lines 157-161) allows either `header` or `index` — the engine handles both in the generated JS, but the Zod schema does not enforce that at least one is present.
 
 ---
@@ -628,22 +626,27 @@ emit: [{ to: "artifact", flatten: "field" }] // full form
 
 **Hook points** (lines 19-24): `post_discover`, `pre_extract`, `post_extract`, `pre_assemble`, `post_assemble`.
 
-**HookRegistry class** (lines 39-95):
+**HookRegistry class** (lines 53-171):
 
 | Method | Lines | Purpose |
 |--------|-------|---------|
-| `register()` | 47-52 | Add a hook function to a point |
-| `invoke()` | 54-65 | Run all hooks at a point, threading context through |
-| `loadFromConfig()` | 67-74 | Register placeholder no-ops from YAML config |
-| `loadFromModule()` | 76-86 | Dynamic import a JS module, call `registerHooks(registry)` |
+| `register()` | 67-73 | Add a named hook function to the named registry |
+| `invoke()` | 86-91 | Run global + active resource hooks at a point, threading context |
+| `invokeDefs()` | 94-96 | Run specific hook defs (e.g., node-level hooks) by name lookup |
+| `loadFromConfig()` | 98-110 | Store hook defs for global or resource scope |
+| `loadFromModule()` | 112-123 | Dynamic import a JS module, call `registerHooks(registry)` |
+| `beginResource()` | 76-79 | Promote pending resource hooks to active, reset pending |
+| `endResource()` | 82-84 | Clear active resource hooks |
 
-**invoke semantics** (lines 54-65):
-- Hooks are called in registration order
+**Hook resolution**: Config-declared hooks (via `loadFromConfig`) store `HookDef[]` (name + optional config). At invocation time, `runDefs` looks up each def's `name` in the `namedHooks` registry. If no implementation is registered for that name, a warning is logged once and the hook is skipped. Implementations are registered via `loadFromModule` (which calls the module's `registerHooks(registry)` export).
+
+**Resource scoping**: `loadFromConfig("resource")` appends to `pendingResourceHooks`. `beginResource()` (called by engine at resource start) promotes pending to active and resets pending. `endResource()` clears active. This prevents hooks from one resource leaking into another.
+
+**invoke semantics** (lines 125-147):
+- Hooks are called in registration order (global first, then resource-scoped)
 - If a hook returns a non-null value, it replaces the context for the next hook
-- If a hook throws, the error is caught and logged, execution continues (line 59-61)
-- This means **one broken hook does not stop execution**
-
-**loadFromConfig** (lines 67-74) only registers **placeholder no-ops** (line 91: `fn: (ctx) => ctx`). Config-declared hooks appear in logs but do nothing unless overridden by a module.
+- If a hook throws, the error is caught and logged, execution continues
+- Hook config from the def is injected into the context via `makeHookContext`
 
 **Connections:** Imported by `run.ts` and `engine.ts`.
 
@@ -1089,7 +1092,7 @@ Each extraction rule compiles to a JS statement that writes to a `result` object
 | `image` | `container.querySelector(css)?.getAttribute('src')` |
 | `grouped` | `[...container.querySelectorAll(css)].map(el => ...)` |
 | `table` | Full table extraction with header mapping or raw cells |
-| `ai` | `'[ai:deferred]'` placeholder |
+| `ai` | Filtered out of DOM eval; applied post-extraction via `applyAiRules` |
 
 ### Step 9: emitToArtifacts (engine.ts:274-306)
 
@@ -1113,20 +1116,23 @@ const rowData = typeof row === "object" && row !== null
 ```
 If the array element is an object, spread it over context. If it's a primitive, wrap it with the flatten field name as key.
 
-### Step 10: Quality Gate (run.ts:169-205, 343-348)
+### Step 10: Quality Gate (run.ts:299-370, 495-500)
 
 ```ts
 let qualityRecords = finalRecords;
 if (outputArtifacts.length > 0) {
-  qualityRecords = outputArtifacts.flatMap(([name]) => store.get(name));
+  qualityRecords = outputArtifacts.flatMap(([name, schema]) =>
+    getArtifactOutputRecords(name, schema, store));
 }
-const qualityOk = checkQuality(qualityRecords, profile);
+const qualityOk = checkQuality(qualityRecords, profile, store, outputArtifacts);
 ```
 
 **Why check store records, not engine records:** When `emit` + `flatten` is used, 3 nested engine records might become 77 flat artifact records. The quality gate needs to check the final shape, not the intermediate one.
 
-Quality checks (run.ts:169-205):
-- `min_records`: simple count (line 177)
+`getArtifactOutputRecords` retrieves flat records from the store, falling back to `flattenTree` on tree records, and applies `dedupe` if the artifact schema declares it.
+
+Quality checks (run.ts:299-370):
+- `min_records`: simple count
 - `max_empty_pct`: records with empty `data` object (lines 181-186)
 - `min_filled_pct`: per-column fill rate (lines 190-203)
 
@@ -1365,29 +1371,15 @@ for (const name of toArray(resource.produces)) {
 
 ## 6. Known Gotchas and Sharp Edges
 
-### 1. escapeJs Only Handles Single Quotes (driver.ts:72-74)
+### 1. escapeJs Scope (driver.ts:72-80)
 
-```ts
-export function escapeJs(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
-}
-```
+`escapeJs` now escapes backslashes, backticks, `${` template markers, single quotes, CR/LF, and Unicode line separators. This covers single-quoted JS strings inside template literals. However, **double quotes** are not escaped — safe in single-quoted context, but the agent-browser CLI wraps args in double quotes (agent-browser-driver.ts:81, 144), creating a potential mismatch if values contain unescaped `"`.
 
-This escapes for single-quoted JS strings **only**. It does NOT escape:
-- **Backticks** — if the value contains `` ` ``, it will break any template literal context
-- **Template literal expressions** `${...}` — could cause code injection
-- **Double quotes** — safe in single-quoted context, but the agent-browser CLI wraps args in double quotes (agent-browser-driver.ts:81, 144), creating a mismatch
+### 2. Hook Name Collisions
 
-The engine uses single-quoted strings in generated JS (e.g., `'${escapeJs(css)}'`), so backtick and `${}` injection are real risks if user-controlled CSS selectors contain these characters.
+The hook system resolves config-declared hooks by name from a flat `namedHooks` registry. If two hook modules register implementations with the same name at the same hook point, the second silently overwrites the first. Currently `loadFromModule` is called once globally (run.ts), so this doesn't trigger in production — but the API creates a trap for users who register multiple modules with overlapping hook names.
 
-### 2. Hooks Accumulate Across Resources (run.ts:276-277)
-
-```ts
-// Inside the resource loop:
-if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
-```
-
-The `hookRegistry` is created once (run.ts:237), and `loadFromConfig` **appends** hooks. So if resource A registers `post_extract: [dedupe]` and resource B registers `post_extract: [normalize]`, resource B's engine will fire **both** dedupe and normalize hooks. This is almost certainly a bug for resource-scoped hooks.
+Resource-scoped hooks are now properly isolated via `beginResource()`/`endResource()` lifecycle, but the named implementation registry remains global.
 
 ### 3. url_pattern Is Substring Match, Not Regex (engine.ts:365)
 
@@ -1397,15 +1389,9 @@ if (state.url_pattern && !url.includes(state.url_pattern)) return false;
 
 Despite the name `url_pattern`, this is a plain substring match via `String.includes()`, identical to `state.url` (line 364). There is no regex support. A profile author seeing `url_pattern` would reasonably expect regex behavior.
 
-### 4. The AI Placeholder '[ai:deferred]' Is Never Resolved (engine.ts:1036-1037)
+### 4. AI Rules in Element Expansion
 
-```ts
-} else if ("ai" in rule) {
-  return `result['${escapeJs(rule.ai.name)}'] = '[ai:deferred]';`;
-}
-```
-
-When `ai` extraction rules appear inside an `expand.over: "elements"` node, `extractionToJs` compiles them to a placeholder string `'[ai:deferred]'`. This placeholder is **never post-processed** — it ends up as a literal string in the final output. The `extract()` method (engine.ts:499-549) handles AI rules properly, but `extractMultiple` (used by element expansion) does not.
+AI extraction rules are now filtered out of the DOM eval in `extractMultiple` and applied post-extraction via `applyAiRules`. This calls `this.ai.classify()` or `this.ai.extract()` for each row. Note that when the `NullAIAdapter` is active (no `--ai-model` flag), AI fields will receive placeholder error values (`{_ai_error: "no AI adapter configured"}`) rather than real results.
 
 ### 5. domTable Return Type Mismatch (engine.ts:624-634)
 
@@ -1437,7 +1423,7 @@ Each iteration calls `walkChildren`, which walks the child nodes. If a child has
 - On iteration 2 (after scroll loads more): extracts elements 1-20 (including 1-10 again)
 - Records accumulate duplicates
 
-There is no deduplication mechanism in the engine. The `ArtifactSchema.dedupe` field exists in the schema but is never enforced at the engine level.
+The engine tracks an offset to avoid re-extracting already-seen elements. Additionally, `ArtifactSchema.dedupe` is now enforced at the store level — when records are stored via `store.put()`, duplicates on the declared field are removed.
 
 ### 7. click "SELF" in Interrupts Uses Trigger Selector (interrupts.ts:159)
 
@@ -1489,27 +1475,13 @@ const children = Object.values(allNodes).filter(
 
 This scans all nodes in the resource every time `walkChildren` is called. For a resource with many nodes and deep expansion, this is O(n) per call. Not a correctness issue, but a performance consideration for large profiles.
 
-### 13. Hooks loadFromConfig Registers No-Ops (hooks.ts:88-94)
+### 13. Config-Declared Hooks Require Module Implementation
 
-```ts
-private _registerPlaceholder(point: HookPoint, hookDef: HookDef): void {
-  console.log(`[hook] Registered '${hookDef.name}' at ${point} (from config)`);
-  this._hooks[point].push({
-    fn: (ctx: unknown) => ctx,    // <-- does nothing
-    name: hookDef.name ?? "config-hook",
-  });
-}
-```
+Config-declared hooks (via YAML) store only `{name, config}` defs. At invocation time, `runDefs` looks up each name in the `namedHooks` registry. If no module has registered an implementation for that name, a warning is logged once and the hook is silently skipped. Declaring hooks in YAML without providing a module with matching `register()` calls produces no runtime effect.
 
-Config-declared hooks are **placeholders only**. They log registration but pass through unchanged. The actual implementation must come from `loadFromModule`. This means declaring hooks in YAML without providing a module creates a false sense of security.
+### 14. Combination Expand Click Action Uses escapeJs (engine.ts)
 
-### 14. Combination Expand Click Action Uses escapeJs (engine.ts:907)
-
-```ts
-const target = btns.find(b => b.textContent.trim() === '${escapeJs(val)}' || b.value === '${escapeJs(val)}');
-```
-
-If a button's text content or value contains characters not handled by `escapeJs` (backticks, `${}`), this match will break or create injection. Since axis values can come from `auto` discovery (which reads from the DOM), this is a realistic risk if a page has unusual button labels.
+Axis values in combination expansion are embedded in generated JS via `escapeJs`. Since `escapeJs` now handles backticks and template expressions, the injection risk from unusual button labels is mitigated. However, axis values from `auto` discovery still pass through DOM-to-JS round-trips, so extremely unusual characters (e.g., null bytes) could still cause issues.
 
 ### 15. The visited Set Is Engine-Scoped (engine.ts:41)
 

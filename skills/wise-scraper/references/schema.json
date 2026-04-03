@@ -41,6 +41,14 @@
                   "additionalProperties": false
                 }
               },
+              "structure": {
+                "type": "string",
+                "enum": [
+                  "nested",
+                  "flat"
+                ],
+                "default": "nested"
+              },
               "consumes": {
                 "anyOf": [
                   {
@@ -126,7 +134,8 @@
                           "type": "string"
                         },
                         "url_pattern": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Substring match against current URL (not regex)"
                         },
                         "selector_exists": {
                           "type": "string"
@@ -176,24 +185,6 @@
                                   "scripted"
                                 ],
                                 "default": "real"
-                              },
-                              "uniqueness": {
-                                "type": "string",
-                                "enum": [
-                                  "text",
-                                  "html",
-                                  "css",
-                                  "dom"
-                                ]
-                              },
-                              "discard": {
-                                "type": "string",
-                                "enum": [
-                                  "never",
-                                  "when-control-exists",
-                                  "always"
-                                ],
-                                "default": "never"
                               },
                               "delay_ms": {
                                 "type": "integer",
@@ -833,7 +824,15 @@
                                 "type": "string"
                               },
                               "flatten": {
-                                "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               }
                             },
                             "required": [
@@ -1134,19 +1133,6 @@
                 "minimum": 0,
                 "maximum": 100
               }
-            }
-          },
-          "additionalProperties": false
-        },
-        "schedule": {
-          "type": "object",
-          "properties": {
-            "cron": {
-              "type": "string"
-            },
-            "interval_s": {
-              "type": "integer",
-              "exclusiveMinimum": 0
             }
           },
           "additionalProperties": false
