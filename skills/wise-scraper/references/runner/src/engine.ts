@@ -277,14 +277,14 @@ export class Engine {
       const childNode = allNodes[name];
       const childTrees = this.walkNodeTree(childNode, allNodes, depth + 1, context);
 
-      if (childNode.emit) {
-        // Child has its own emit — it handles its own storage.
-        // Don't nest into parent. (emitTreeToArtifacts already called in walkNodeTreeOnce)
-      } else {
-        // Nest into parent under child's node name
-        if (childTrees.length > 0) {
-          result[name] = childTrees;
-        }
+      // Always nest children into the parent tree, even if they have their own
+      // emit. Emit already copies subtrees to the artifact store independently
+      // (via emitTreeToArtifacts in walkNodeTreeOnce). Keeping emit children in
+      // the parent preserves the full tree hierarchy for JMESPath queries and
+      // {from:} cross-resource references. The double-write prevention in run.ts
+      // ensures resource-level produces skips artifacts that nodes already emit to.
+      if (childTrees.length > 0) {
+        result[name] = childTrees;
       }
     }
     return result;

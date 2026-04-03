@@ -1395,6 +1395,16 @@ for (const name of toArray(resource.produces)) {
 
 **Edge case:** This check uses node declarations, not runtime state. If a node has `emit: "X"` but never actually runs (e.g., its state check fails), the artifact won't get the resource-level write either.
 
+### Tree Completeness (emit children preserved)
+
+`collectChildrenTree` always includes child nodes in the parent's `children` map, even if the child has its own `emit`. Previously, emit children were pruned from the parent tree to avoid double-counting. This was changed because:
+
+1. **JMESPath queries** need the full tree hierarchy — queries like `[].pages[].books[]` only work if `books` children are present in the page tree
+2. **`{ from: }` references** need to walk the complete tree to find nodes at any depth
+3. **Double-write prevention** in run.ts already prevents artifacts from receiving data twice — the emit mechanism copies to the artifact store independently, and `produces` skips artifacts that nodes emit to
+
+The resource tree returned by `runResourceTree` is now the **complete** tree (no pruning). The `allFlat` global output includes all records from all nodes.
+
 ---
 
 ## 6. Known Gotchas and Sharp Edges
