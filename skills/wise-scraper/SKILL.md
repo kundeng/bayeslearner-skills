@@ -38,7 +38,7 @@ WISE profiles define a **graph of NER nodes**. Each node is a deterministic **(s
 | **Successors** | `expand` | "How many successor states?" — elements, pages, or combinations |
 | **Retry** | `retry` | "Re-execute parent actions if state check fails" — `{ max, delay_ms }` |
 
-Nodes form a DAG via `parents[]`. The engine walks top-down: check state, execute actions, extract, expand, recurse into children.
+Nodes form a DAG via `parents[]`. The engine walks top-down: check state, execute actions, extract, expand, recurse into children. The root node (named in `entry.root`) **must have `parents: []`** — it is the entry point and has no parent. All other nodes must reference at least one parent that exists in the same resource's `nodes` list.
 
 ### Extraction types
 
@@ -274,3 +274,5 @@ extract:
 - Using HTML parsing on the live page instead of DOM eval
 - Reaching for AI when selectors and plumbing are sufficient
 - Ignoring user runtime preference (Crawlee/Scrapy) and defaulting to shipped runner
+- **Root node with wrong parents**: The root node (named in `entry.root`) must have `parents: []`. A common mistake is setting `parents: [root]` on the entry root node itself, or on a pagination node that IS the root — this causes "unknown node" validation errors.
+- **Missing root node**: If `entry.root: root` but no node named `root` exists in `nodes[]`, validation fails. Either add a `root` node or set `entry.root` to the actual first node name.

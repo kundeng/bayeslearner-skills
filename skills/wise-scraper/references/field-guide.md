@@ -107,7 +107,7 @@ The runner resolves execution order automatically (topological sort). Records ar
 entry → nodes[] → globals? → setup?
 ```
 
-- **`entry`** — where to start: a URL + the name of the root node
+- **`entry`** — where to start: a URL + the name of the root node. The root node must have `parents: []`.
 - **`nodes`** — the NER graph (see below)
 - **`globals`** — shared settings: timeout, retries, user agent, request interval, page load delay
 - **`setup`** — pre-scrape state setup (auth, locale, currency)
