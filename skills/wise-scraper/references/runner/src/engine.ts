@@ -378,20 +378,7 @@ export class Engine {
         if (expand.stop?.sentinel && this.driver.exists(expand.stop.sentinel)) break;
         if (expand.stop?.sentinel_gone && !this.driver.exists(expand.stop.sentinel_gone)) break;
 
-        // Read the next link's href and navigate directly. Clicking <a> tags
-        // via programmatic dispatch doesn't reliably trigger navigation in
-        // headless browsers — the click event fires but the browser may not
-        // follow the link.
-        const nextHref = this.driver.evalJson<string | null>(`
-          (() => { const el = document.querySelector('${escapeJs(expand.control)}'); return el ? el.href || el.getAttribute('href') : null })()
-        `);
-        if (nextHref) {
-          this.driver.open(nextHref, { wait: { idle: true } });
-        } else {
-          // Fallback: try clicking directly (non-link controls like buttons)
-          this.driver.click({ css: expand.control });
-          this.driver.wait({ idle: true });
-        }
+        this.navigateNextPage(expand.control);
       }
     } else if (expand.strategy === "numeric") {
       const current = this.driver.getUrl() ?? "";
@@ -1097,7 +1084,7 @@ export class Engine {
         result[rule.html.name] = this.domHtml(rule.html.css) ?? "";
 
       } else if ("link" in rule) {
-        result[rule.link.name] = this.domAttr(rule.link.css, rule.link.attr) ?? "";
+        result[rule.link.name] = this.domAttr(rule.link.css, rule.link.attr ?? "href") ?? "";
 
       } else if ("image" in rule) {
         result[rule.image.name] = this.domAttr(rule.image.css, "src") ?? "";
@@ -1462,7 +1449,26 @@ export class Engine {
         break;
       }
 
-      this.driver.click({ css: expand.control });
+      this.navigateNextPage(expand.control);
+    }
+  }
+
+  /**
+   * Navigate to the next page by resolving the control element's href.
+   * agent-browser's Playwright "real click" on <a> tags doesn't reliably
+   * trigger navigation. We read the href and open() directly, falling back
+   * to a scripted DOM click for non-link controls (buttons, AJAX).
+   */
+  private navigateNextPage(control: string): void {
+    const nextHref = this.driver.evalJson<string | null>(`
+      (() => { const el = document.querySelector('${escapeJs(control)}'); return el ? el.href || el.getAttribute('href') : null })()
+    `);
+    if (nextHref) {
+      this.driver.open(nextHref, { wait: { idle: true } });
+    } else {
+      // Non-link control (button, etc.) — use scripted click which triggers
+      // the DOM click event and any attached JS handlers
+      this.driver.click({ css: control }, { type: "scripted" });
       this.driver.wait({ idle: true });
     }
   }
@@ -1647,7 +1653,7 @@ export class Engine {
       return `result['${escapeJs(rule.html.name)}'] = container.querySelector('${escapeJs(rule.html.css)}')?.innerHTML || '';`;
 
     } else if ("link" in rule) {
-      return `result['${escapeJs(rule.link.name)}'] = container.querySelector('${escapeJs(rule.link.css)}')?.getAttribute('${escapeJs(rule.link.attr)}') || '';`;
+      return `result['${escapeJs(rule.link.name)}'] = container.querySelector('${escapeJs(rule.link.css)}')?.getAttribute('${escapeJs(rule.link.attr ?? "href")}') || '';`;
 
     } else if ("image" in rule) {
       return `result['${escapeJs(rule.image.name)}'] = container.querySelector('${escapeJs(rule.image.css)}')?.getAttribute('src') || '';`;
