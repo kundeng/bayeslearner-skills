@@ -2,8 +2,9 @@
 
 Hydra is the **config layer** of the analytic workbench at `experiment`+. It owns
 config composition, CLI overrides, and experiment sweeps. It produces a frozen
-`DictConfig` that the handwired driver (or Kedro) consumes as a
-plain dict. Hydra never touches DataFrames, figures, or business logic.
+`DictConfig` that the Hamilton Driver consumes via
+`driver.Builder().with_config(params)`. Hydra never touches DataFrames,
+figures, or business logic.
 
 Most important rule: `experiment` is an additive wiring upgrade over `explore`.
 Hydra should improve config injection and run management without changing the
@@ -16,8 +17,7 @@ underlying computation contract.
 4. [Command-Line Overrides](#overrides)
 5. [Multirun Sweeps](#multirun)
 6. [Output Directory Conventions](#output-dirs)
-7. [Integration with Analysis Modules](#integration)
-8. [Integration with Kedro](#kedro-integration)
+7. [Integration with Hamilton](#hamilton-integration)
 
 ---
 
@@ -249,25 +249,23 @@ Important runtime detail:
 
 ---
 
-## 7. Integration with Analysis Modules {#integration}
+## 7. Integration with Hamilton {#hamilton-integration}
 
-Hydra is the config layer. Analysis modules are the computation layer. The
-runner script bridges them:
+Hydra is the config layer. Hamilton is the execution layer. The runner
+script bridges them:
 
 ```python
 # src/my_project/scripts/run.py
-"""Hydra-powered runner — composes config, calls analysis functions."""
+"""Hydra config → Hamilton Driver execution."""
 import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 import json
-from my_project.analysis.baseline import (
-    raw_data,
-    timeseries_hourly,
-    summary_stats,
-    timeseries_figure,
-)
+
+from hamilton import driver
+from hamilton.io.materialization import to
+from my_project.analysis import baseline
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="config")
@@ -276,29 +274,32 @@ def main(cfg: DictConfig) -> float:
     (out / "figures").mkdir(parents=True, exist_ok=True)
     (out / "data").mkdir(parents=True, exist_ok=True)
 
-    # Hydra config → plain dict
     params = OmegaConf.to_container(cfg, resolve=True)
 
-    # Call analysis functions in DAG order (handwired driver pattern)
-    df = raw_data(raw_data_path=params["source"]["raw_data_path"])
-    ts = timeseries_hourly(
-        raw_data=df,
-        date_column=params["baseline"]["date_column"],
-        resample_freq=params["baseline"]["resample_freq"],
+    # Hamilton handles DAG resolution, caching, and selective execution
+    dr = (
+        driver.Builder()
+        .with_modules(baseline)
+        .with_config(params)
+        .with_cache()
+        .build()
     )
-    stats = summary_stats(timeseries_hourly=ts)
-    fig = timeseries_figure(
-        timeseries_hourly=ts,
-        resample_freq=params["baseline"]["resample_freq"],
+
+    results = dr.execute(
+        ["summary_stats", "timeseries_hourly", "timeseries_figure"],
+        inputs=params,
     )
 
     # Save artifacts to Hydra output directory
-    ts.to_csv(out / "data" / "timeseries.csv")
-    fig.savefig(out / "figures" / "fig-timeseries.png", dpi=150)
-    json.dump(stats, open(out / "metrics.json", "w"), indent=2)
-    OmegaConf.save(cfg, out / "config.yaml")
+    results["timeseries_hourly"].to_csv(out / "data" / "timeseries.csv")
+    results["timeseries_figure"].savefig(out / "figures" / "fig-timeseries.png", dpi=150)
+    json.dump(results["summary_stats"], open(out / "metrics.json", "w"), indent=2)
+    dr.visualize_execution(
+        ["summary_stats", "timeseries_figure"],
+        out / "figures" / "dag-execution.png",
+    )
 
-    return stats.get("total_count", 0)
+    return results["summary_stats"].get("total_count", 0)
 
 
 if __name__ == "__main__":
@@ -308,54 +309,20 @@ if __name__ == "__main__":
 The key pattern:
 
 1. Hydra composes config from YAML + CLI overrides
-2. `OmegaConf.to_container(cfg, resolve=True)` flattens it to a plain dict
-3. The handwired driver calls analysis functions in DAG order
-4. Artifacts are saved to the Hydra output directory
+2. `OmegaConf.to_container(cfg, resolve=True)` flattens to a plain dict
+3. Hamilton Driver resolves the DAG automatically — no manual call ordering
+4. `.with_cache()` skips unchanged upstream nodes across sweep runs
+5. Artifacts and DAG visualization saved to Hydra output directory
+
+This combination replaces Kedro for most workbench use cases:
+- Hamilton provides DAG resolution, visualization, and caching
+- Hydra provides config composition and sweeps
+- Together they cover pipeline execution, I/O (via materializers), config
+  management, and experiment comparison — without Kedro's ceremony
 
 Enforcement points:
 
-- keep the `explore` runner boundary or an equivalent stable entrypoint
 - convert config to plain Python objects near the boundary
-- do not pass `DictConfig` or Hydra runtime objects deep into analysis modules
-- keep notebooks, plain runners, and Hydra runners able to call the same core functions
-
----
-
-## 8. Integration with Kedro {#kedro-integration}
-
-When adding Kedro for pipeline DAG execution and data catalog, Hydra
-still owns config composition and sweeps. Pass Hydra's composed config to Kedro
-via `extra_params`:
-
-```python
-# src/my_project/scripts/run_kedro.py
-"""Hydra config → Kedro pipeline execution."""
-import hydra
-from omegaconf import DictConfig, OmegaConf
-from kedro.framework.session import KedroSession
-
-
-@hydra.main(version_base=None, config_path="../../conf", config_name="config")
-def main(cfg: DictConfig) -> None:
-    params = OmegaConf.to_container(cfg, resolve=True)
-
-    with KedroSession.create(extra_params=params) as session:
-        session.run(pipeline_name="baseline")
-
-
-if __name__ == "__main__":
-    main()
-```
-
-This lets you keep Hydra's `--multirun` sweeps, config groups, and experiment
-configs while using Kedro for pipeline execution, data catalog, and `kedro viz`.
-
-```bash
-# Single run with Kedro pipeline
-python -m my_project.scripts.run_kedro
-
-# Sweep with Kedro pipeline
-python -m my_project.scripts.run_kedro -m \
-  baseline.resample_freq=30min,1h \
-  analysis.window_size=24,72,168
-```
+- do not pass `DictConfig` or Hydra runtime objects into analysis modules
+- keep notebooks, plain runners, and Hydra runners able to call the same
+  core functions via the same Hamilton modules

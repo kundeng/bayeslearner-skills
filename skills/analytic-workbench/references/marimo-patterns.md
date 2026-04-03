@@ -15,7 +15,7 @@ Notebooks live in `notebooks/` at the project root — outside `src/`.
 6. [State and Stateful Interactions](#state)
 7. [Script Mode and CLI Arguments](#script-mode)
 8. [App Deployment](#app-deployment)
-9. [Integration with Analysis Modules](#integration)
+9. [Integration with Hamilton and Analysis Modules](#integration)
 10. [Displaying Artifacts](#displaying-artifacts)
 11. [Anti-Patterns](#anti-patterns)
 
@@ -436,57 +436,119 @@ figures. The human reviews here; the AI reviews programmatically.
 
 ---
 
-## 9. Integration with Analysis Modules {#integration}
+## 9. Integration with Hamilton and Analysis Modules {#integration}
 
-marimo works best when notebooks import reusable functions from modules. The
-notebook becomes the interactive harness; the module holds the business logic
-you want to test, script, and reuse in sweeps.
+marimo serves as both **authoring surface** and **review surface** for
+Hamilton-based analysis. The integration works across all modes.
+
+### Probe: authoring Hamilton functions in marimo cells
+
+At `probe`, define functions with Hamilton naming discipline directly in
+marimo cells. Use `ad_hoc_utils.create_temporary_module()` to wrap them into
+a Hamilton DAG on the fly — no files, no project structure, instant
+visualization.
 
 ```python
 @app.cell
 def _():
-    from my_project.analysis.baseline import (
-        incidents_hourly,
-        incidents_by_priority,
-        rolling_anomaly_score,
-    )
-    return incidents_hourly, incidents_by_priority, rolling_anomaly_score
+    import pandas as pd
+
+    def raw_data(raw_data_path: str) -> pd.DataFrame:
+        return pd.read_csv(raw_data_path, parse_dates=True)
+
+    def timeseries_hourly(raw_data: pd.DataFrame, resample_freq: str) -> pd.Series:
+        return raw_data.resample(resample_freq).size()
+
+    def summary_stats(timeseries_hourly: pd.Series) -> dict:
+        return {"mean": timeseries_hourly.mean(), "total": timeseries_hourly.sum()}
+
+    return raw_data, timeseries_hourly, summary_stats
 
 
 @app.cell
-def _(df, freq, incidents_hourly, incidents_by_priority):
-    ts = incidents_hourly(df, resample_freq=freq.value)
-    split = incidents_by_priority(df, resample_freq=freq.value)
-    return ts, split
+def _(raw_data, timeseries_hourly, summary_stats):
+    from hamilton import ad_hoc_utils, driver
+
+    temp_module = ad_hoc_utils.create_temporary_module(
+        raw_data, timeseries_hourly, summary_stats,
+        module_name="probe_baseline",
+    )
+    dr = driver.Builder().with_modules(temp_module).build()
+    dr.display_all_functions()  # human sees the DAG immediately
+    return dr,
 
 
 @app.cell
-def _(ts, window, threshold, rolling_anomaly_score):
-    scored = rolling_anomaly_score(
-        ts,
-        window_hours=window.value,
-        threshold=threshold.value,
+def _(dr):
+    results = dr.execute(
+        ["summary_stats", "timeseries_hourly"],
+        inputs={"raw_data_path": "rawdata/events.csv", "resample_freq": "1h"},
     )
-    scored
-    return scored,
+    results["summary_stats"]
+    return results,
 ```
+
+The notebook is the authoring tool — functions are written in cells. It is
+simultaneously the review surface — the human sees the DAG and results inline.
+When the human approves and promotes to `explore`, the functions move to
+`src/<project>/analysis/baseline.py` **unchanged**.
+
+### Explore+: importing Hamilton modules
+
+At `explore` and beyond, functions live in modules. The notebook imports and
+runs them via the Hamilton Driver.
+
+```python
+@app.cell
+def _():
+    import importlib
+    from hamilton import driver
+    import my_project.analysis.baseline as baseline
+
+    importlib.reload(baseline)
+    dr = driver.Builder().with_modules(baseline).build()
+    dr.display_all_functions()
+    return dr, baseline
+
+
+@app.cell
+def _(dr, freq, priority):
+    results = dr.execute(
+        ["summary_stats", "timeseries_hourly"],
+        inputs={"raw_data_path": "rawdata/events.csv",
+                "resample_freq": freq.value},
+    )
+    return results,
+
+
+@app.cell
+def _(results, mo):
+    mo.tree(results["summary_stats"])
+    return
+```
+
+The transition from probe to explore is a one-line change: replace
+`ad_hoc_utils.create_temporary_module(...)` with `import baseline`.
+
+### Presentation patterns
 
 Two good patterns for workbenches:
 
 ```python
 # Keep notebook-only presentation logic local
 @app.cell
-def _(scored, mo):
-    mo.md(f"Flagged **{int(scored['is_anomaly'].sum())}** candidate periods.")
+def _(results, mo):
+    stats = results["summary_stats"]
+    mo.md(f"**Total count:** {stats['total']:,.0f} | **Mean:** {stats['mean']:.1f}")
     return
 
-# Put reusable data logic in modules
-def rolling_anomaly_score(ts, window_hours, threshold):
-    ...
+# Put reusable data logic in modules — never in cells
+# The module functions are the same whether called from
+# marimo, a Hydra runner, or an orchestrator task.
 ```
 
-When the module changes, rerun the notebook and re-evaluate the outputs. This
-is the bridge from exploratory notebook work to reusable pipeline code.
+When the module changes, rerun the notebook and re-evaluate the outputs. The
+notebook renders Hamilton's outputs; the module holds the computation.
 
 ---
 

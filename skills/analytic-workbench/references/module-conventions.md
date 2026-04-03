@@ -77,24 +77,24 @@ Key consequences:
 
 ---
 
-## 3. The Handwired Driver (`explore`) {#handwired-driver}
+## 3. The Driver (`explore`) {#handwired-driver}
 
-At `explore`, a simple `run()` function calls the module functions in DAG order.
-Every step is visible, every dependency explicit.
+At `explore`, the **Hamilton Driver** is the recommended way to execute your
+analysis modules. Because the naming discipline above is Hamilton's programming
+model, switching from a handwired driver to Hamilton is a wiring change — the
+analysis functions stay identical. See `references/hamilton-guide.md` for full
+details.
+
+### Hamilton Driver (recommended)
 
 ```python
 # src/my_project/scripts/run.py
-"""Handwired driver — calls analysis functions in DAG order."""
+"""Hamilton driver — automatic DAG resolution from module functions."""
 from pathlib import Path
 import json
 import yaml
-from my_project.analysis.baseline import (
-    raw_data,
-    timeseries_hourly,
-    summary_stats,
-    timeseries_figure,
-)
-
+from hamilton import driver
+from my_project.analysis import baseline
 
 def run(params: dict, output_dir: str) -> dict:
     """Execute analysis pipeline and save artifacts."""
@@ -103,24 +103,28 @@ def run(params: dict, output_dir: str) -> dict:
     (out / "figures").mkdir(exist_ok=True)
     (out / "data").mkdir(exist_ok=True)
 
-    # Call functions in dependency order
-    df = raw_data(raw_data_path=params["raw_data_path"])
-    ts = timeseries_hourly(
-        raw_data=df,
-        date_column=params["date_column"],
-        resample_freq=params["resample_freq"],
+    dr = driver.Builder().with_modules(baseline).build()
+
+    # Hamilton resolves the DAG and executes only what's needed
+    results = dr.execute(
+        ["summary_stats", "timeseries_hourly", "timeseries_figure"],
+        inputs=params,
     )
-    stats = summary_stats(timeseries_hourly=ts)
-    fig = timeseries_figure(timeseries_hourly=ts, resample_freq=params["resample_freq"])
 
     # Save artifacts
-    ts.to_csv(out / "data" / "timeseries.csv")
-    fig.savefig(out / "figures" / "fig-timeseries.png", dpi=150)
-    json.dump(stats, open(out / "metrics.json", "w"), indent=2)
+    results["timeseries_hourly"].to_csv(out / "data" / "timeseries.csv")
+    results["timeseries_figure"].savefig(out / "figures" / "fig-timeseries.png", dpi=150)
+    json.dump(results["summary_stats"], open(out / "metrics.json", "w"), indent=2)
     with open(out / "config.yaml", "w") as f:
         yaml.dump(params, f)
 
-    return stats
+    # Visualize the execution graph for review
+    dr.visualize_execution(
+        ["summary_stats", "timeseries_figure"],
+        out / "figures" / "dag-execution.png",
+    )
+
+    return results["summary_stats"]
 
 
 if __name__ == "__main__":
@@ -132,14 +136,30 @@ if __name__ == "__main__":
     run(params, "runs/manual_001")
 ```
 
-The handwired driver is intentionally simple:
+Why Hamilton over handwired:
 
-- No framework dependency. Just Python function calls.
-- The call order mirrors the DAG: `raw_data` → `timeseries_hourly` → `summary_stats`.
-- All I/O happens in the driver, not in the analysis functions.
-- This driver defines a stable boundary that later stages should preserve.
-- When this grows unwieldy, add Hydra at `experiment` for better config wiring, then
-  Kedro or DVC.
+- **Automatic DAG resolution** — no manual call ordering to maintain
+- **Selective execution** — request only the nodes you need
+- **Visualization** — DAG images are the cheapest review artifact
+- **Caching** — add `.with_cache()` to skip redundant computation across reruns
+- All I/O still happens in the driver, not in analysis functions
+- This driver defines a stable boundary that later stages preserve
+
+### Handwired fallback
+
+If Hamilton is unavailable or the project is too small to justify a dependency,
+a plain Python driver is acceptable:
+
+```python
+# Handwired driver — calls analysis functions in DAG order manually.
+df = raw_data(raw_data_path=params["raw_data_path"])
+ts = timeseries_hourly(raw_data=df, date_column=params["date_column"], resample_freq=params["resample_freq"])
+stats = summary_stats(timeseries_hourly=ts)
+```
+
+The handwired driver works because the naming discipline makes the call order
+obvious. But as the DAG grows, manual ordering becomes error-prone and you
+lose visualization and caching. Prefer Hamilton.
 
 ---
 
