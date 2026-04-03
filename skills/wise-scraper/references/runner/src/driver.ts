@@ -68,9 +68,17 @@ export function locatorToSelector(loc: Locator): string {
   throw new Error(`Cannot resolve locator: ${JSON.stringify(loc)}`);
 }
 
-/** Escape a string for safe embedding in single-quoted JS strings. */
+/** Escape a string for safe embedding in single-quoted JS strings inside template literals. */
 export function escapeJs(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${")
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 /** Escape a string for safe embedding in shell commands (wraps in single quotes). */

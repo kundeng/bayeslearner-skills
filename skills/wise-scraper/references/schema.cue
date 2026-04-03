@@ -17,10 +17,6 @@ Deployment: {
 	artifacts?: [string]: ArtifactSchema    // declared output schemas
 	resources:  [...Resource]
 	quality?:   QualityGate
-	schedule?: {
-		cron?:       string
-		interval_s?: int & >0
-	}
 	hooks?: {
 		post_discover?: [...Hook]
 		pre_assemble?:  [...Hook]
@@ -121,8 +117,6 @@ Locator: {
 ClickAction: {
 	click:       Locator
 	type?:       "real" | "scripted" | *"real"
-	uniqueness?: "text" | "html" | "css" | "dom"
-	discard?:    "never" | "when-control-exists" | "always" | *"never"
 	delay_ms?:   int & >=0
 }
 

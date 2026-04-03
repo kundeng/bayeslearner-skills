@@ -106,6 +106,78 @@ export const COMMON_RULES: InterruptRule[] = [
   },
 ];
 
+function splitSelectorList(trigger: string): string[] {
+  const selectors: string[] = [];
+  let current = "";
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (const ch of trigger) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth++;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "]" && bracketDepth > 0) {
+      bracketDepth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "(") {
+      parenDepth++;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ")" && parenDepth > 0) {
+      parenDepth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "," && parenDepth === 0 && bracketDepth === 0) {
+      const trimmed = current.trim();
+      if (trimmed) selectors.push(trimmed);
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed) selectors.push(trimmed);
+  return selectors;
+}
+
 // ── handler ─────────────────────────────────────────────
 
 export class InterruptHandler {
@@ -161,14 +233,38 @@ export class InterruptHandler {
       } else if ("script" in rule.dismiss) {
         this.driver.eval(rule.dismiss.script);
       } else if ("close_overlay" in rule.dismiss) {
-        // Press Escape, then forcibly remove fixed-position overlays
+        // Press Escape, then remove only obviously blocking overlays using computed styles.
         this.driver.eval(`
           document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
         `);
         this.driver.wait({ ms: 300 });
         this.driver.eval(`
-          document.querySelectorAll('[style*="position: fixed"], [style*="position:fixed"]')
-            .forEach(el => { if (el.offsetHeight > 200) el.remove(); });
+          (() => {
+            const selectors = [
+              '[aria-modal="true"]',
+              '[role="dialog"]',
+              '[class*="modal"]',
+              '[class*="overlay"]',
+              '[class*="popup"]',
+              '[class*="dialog"]',
+              '[class*="backdrop"]',
+            ].join(', ');
+            const viewportArea = window.innerWidth * window.innerHeight;
+            for (const el of document.querySelectorAll(selectors)) {
+              const style = window.getComputedStyle(el);
+              if (!style || style.display === 'none' || style.visibility === 'hidden') continue;
+              if (style.pointerEvents === 'none') continue;
+              const position = style.position;
+              if (position !== 'fixed' && position !== 'sticky') continue;
+              const rect = el.getBoundingClientRect();
+              if (rect.width < 180 || rect.height < 120) continue;
+              const area = rect.width * rect.height;
+              const zIndex = Number.parseInt(style.zIndex || '', 10);
+              const looksBlocking = area >= viewportArea * 0.08 || (!Number.isNaN(zIndex) && zIndex >= 1000);
+              if (!looksBlocking) continue;
+              el.remove();
+            }
+          })();
         `);
       }
 
@@ -186,7 +282,7 @@ export class InterruptHandler {
    * off-screen is not a blocking interrupt — skip it.
    */
   private findTrigger(trigger: string): string | null {
-    const selectors = trigger.split(",").map((s) => s.trim());
+    const selectors = splitSelectorList(trigger);
     const selsJson = JSON.stringify(selectors);
     const idx = this.driver.evalJson<number>(`
       (() => {

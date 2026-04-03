@@ -524,7 +524,7 @@ emit: [{ to: "artifact", flatten: "field" }] // full form
 | `DriverWait` type | 18-20 | Union: `{idle}`, `{selector}`, `{ms}` |
 | `BrowserDriver` interface | 25-55 | 13 methods: lifecycle, DOM eval, interaction, observation |
 | `locatorToSelector()` | 60-68 | Converts `Locator` → string. CSS passes through, text/role get prefixed |
-| `escapeJs()` | 72-74 | Escapes `\`, `'`, and `\n` for single-quoted JS strings |
+| `escapeJs()` | 72-80 | Escapes `\`, `'`, backticks, `${`, CR/LF, and unicode line separators for single-quoted JS strings inside template literals |
 
 **Connections:** Imported by `engine.ts`, `agent-browser-driver.ts`, `interrupts.ts`.
 
@@ -532,7 +532,7 @@ emit: [{ to: "artifact", flatten: "field" }] // full form
 
 **Tricky parts:**
 - `locatorToSelector` produces `text=...` and `role=...` prefixed strings (lines 63-66). These are Playwright-style selectors, but `agent-browser-driver.ts` passes them directly to the CLI — compatibility depends on the CLI understanding this format.
-- `escapeJs` (line 72-74) only handles single quotes, backslashes, and newlines. See [Gotchas](#6-known-gotchas-and-sharp-edges).
+- `escapeJs` (line 72-80) now also escapes backticks, template interpolation markers, and line separators. See [Gotchas](#6-known-gotchas-and-sharp-edges).
 
 ---
 

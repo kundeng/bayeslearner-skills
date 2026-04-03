@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
 import yaml from "js-yaml";
 
-import { Deployment as DeploymentSchema, type Deployment, type ExtractedRecord, type TreeRecord } from "./schema.js";
+import { Deployment as DeploymentSchema, type ArtifactSchema, type Deployment, type ExtractedRecord, type TreeRecord } from "./schema.js";
 import { AgentBrowserDriver } from "./agent-browser-driver.js";
 import { NullAIAdapter } from "./ai.js";
 import { AIChatAdapter } from "./aichat-adapter.js";
@@ -72,6 +72,139 @@ const WRITERS: Record<string, Writer> = {
   markdown: writeMarkdown,
   md: writeMarkdown,
 };
+
+function countValidationFailures(records: ExtractedRecord[], schema?: ArtifactSchema): { total_records: number; failed_records: number } {
+  if (!schema) {
+    return { total_records: records.length, failed_records: 0 };
+  }
+
+  let failedRecords = 0;
+  for (const record of records) {
+    let recordFailed = false;
+    for (const [fieldName, fieldDef] of Object.entries(schema.fields)) {
+      const value = record.data[fieldName];
+      if (fieldDef.required && (value === undefined || value === null || value === "")) {
+        recordFailed = true;
+        continue;
+      }
+      if (value !== undefined && value !== null && value !== "" && !matchesFieldType(value, fieldDef.type)) {
+        recordFailed = true;
+      }
+    }
+    if (recordFailed) failedRecords += 1;
+  }
+
+  return { total_records: records.length, failed_records: failedRecords };
+}
+
+function matchesFieldType(value: unknown, type: ArtifactSchema["fields"][string]["type"]): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" || (typeof value === "string" && !isNaN(Number(value)));
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    default:
+      return true;
+  }
+}
+
+function dedupeFlatRecords(records: ExtractedRecord[], schema?: ArtifactSchema): ExtractedRecord[] {
+  if (!schema?.dedupe) {
+    return records;
+  }
+
+  const seen = new Set<string>();
+  const deduped: ExtractedRecord[] = [];
+
+  for (const record of records) {
+    const value = record.data[schema.dedupe];
+    if (value === undefined || value === null || value === "") {
+      deduped.push(record);
+      continue;
+    }
+
+    const key = `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(record);
+  }
+
+  return deduped;
+}
+
+function getArtifactOutputRecords(
+  artifactName: string,
+  schema: ArtifactSchema | undefined,
+  store: ArtifactStore,
+): ExtractedRecord[] {
+  const flatRecords = store.get(artifactName);
+  if (flatRecords.length > 0) {
+    return dedupeFlatRecords(flatRecords, schema);
+  }
+
+  const treeRecords = store.getTree(artifactName);
+  if (treeRecords.length > 0) {
+    return dedupeFlatRecords(Engine.flattenTree(treeRecords), schema);
+  }
+
+  return [];
+}
+
+function getArtifactQualitySummary(
+  artifactName: string,
+  schema: ArtifactSchema | undefined,
+  store: ArtifactStore,
+): { total_records: number; failed_records: number } {
+  const storedSummary = store.getValidationSummary(artifactName);
+  if (storedSummary.total_records > 0) {
+    return storedSummary;
+  }
+
+  const outputRecords = getArtifactOutputRecords(artifactName, schema, store);
+  if (outputRecords.length > 0) {
+    return countValidationFailures(outputRecords, schema);
+  }
+
+  return { total_records: 0, failed_records: 0 };
+}
+
+function writeOutputArtifact(
+  outDir: string,
+  baseName: string,
+  name: string,
+  schema: ArtifactSchema,
+  store: ArtifactStore,
+  defaultFormat: string,
+): void {
+  const trees = store.getTree(name);
+  const fmt = schema.format ?? defaultFormat;
+  const ext = fmt === "markdown" ? "md" : fmt;
+  const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
+  const outputAsFlat = schema.structure === "flat" || fmt === "csv" || fmt === "markdown" || fmt === "jsonl";
+  const records = getArtifactOutputRecords(name, schema, store);
+
+  if (outputAsFlat) {
+    if (WRITERS[fmt]) {
+      WRITERS[fmt](records, outPath);
+    } else {
+      writeJson(records, outPath);
+    }
+    return;
+  }
+
+  if (trees.length > 0) {
+    writeFileSync(outPath, JSON.stringify(trees, null, 2), "utf-8");
+    console.log(`[output] ${trees.length} tree records → ${outPath}`);
+  } else if (records.length > 0) {
+    writeJson(records, outPath);
+  }
+}
 
 // ── profile loading + validation ────────────────────────
 
@@ -166,7 +299,12 @@ function validateSemantics(profile: Deployment): void {
 // ── quality gate ────────────────────────────────────────
 
 /** Returns true if all quality checks pass, false if any fail. */
-function checkQuality(records: ExtractedRecord[], profile: Deployment): boolean {
+function checkQuality(
+  records: ExtractedRecord[],
+  profile: Deployment,
+  store: ArtifactStore,
+  outputArtifacts: Array<[string, ArtifactSchema]>,
+): boolean {
   const q = profile.quality;
   if (!q) return true;
 
@@ -198,6 +336,30 @@ function checkQuality(records: ExtractedRecord[], profile: Deployment): boolean 
         console.warn(`[quality] FAIL: column '${col}' ${pct.toFixed(1)}% filled < ${threshold}%`);
         passed = false;
       }
+    }
+  }
+
+  if (q.max_failed_pct !== undefined) {
+    // Use stored validation telemetry when available; otherwise validate the
+    // flattened output on the fly. This keeps nested tree outputs and flat
+    // outputs comparable without forcing extra profile wiring.
+    let failedRecords = 0;
+    let validatedRecords = 0;
+
+    if (outputArtifacts.length > 0) {
+      for (const [name, schema] of outputArtifacts) {
+        const summary = getArtifactQualitySummary(name, schema, store);
+        failedRecords += summary.failed_records;
+        validatedRecords += summary.total_records;
+      }
+    } else {
+      validatedRecords = total;
+    }
+
+    const pct = validatedRecords > 0 ? (failedRecords / validatedRecords) * 100 : 0;
+    if (pct > q.max_failed_pct) {
+      console.warn(`[quality] FAIL: ${pct.toFixed(1)}% failed > max_failed_pct ${q.max_failed_pct}%`);
+      passed = false;
     }
   }
 
@@ -235,7 +397,7 @@ async function main(): Promise<void> {
 
   // Wire up hooks
   const hookRegistry = new HookRegistry();
-  if (profile.hooks) hookRegistry.loadFromConfig(profile.hooks);
+  if (profile.hooks) hookRegistry.loadFromConfig(profile.hooks, "global");
   if (runner.hooks) await hookRegistry.loadFromModule(resolve(runner.hooks));
 
   // Wire up AI adapter
@@ -273,7 +435,7 @@ async function main(): Promise<void> {
       drivers.push(driver);
 
       // Resource-level hooks
-      if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks);
+      if (resource.hooks) hookRegistry.loadFromConfig(resource.hooks, "resource");
 
       const engine = new Engine(driver, ai, hookRegistry, store);
       const trees = engine.runResourceTree(resource);
@@ -305,31 +467,7 @@ async function main(): Promise<void> {
 
     if (outputArtifacts.length > 0) {
       for (const [name, schema] of outputArtifacts) {
-        const trees = store.getTree(name);
-        const flatRecords = store.get(name);
-
-        // Choose nested or flat based on artifact structure setting
-        const structure = schema.structure ?? "nested";
-        const fmt = schema.format ?? runner.outputFormat ?? "json";
-        const ext = fmt === "markdown" ? "md" : fmt;
-        const outPath = resolve(outDir, `${baseName}_${name}.${ext}`);
-
-        if (structure === "flat" || fmt === "csv" || fmt === "markdown" || fmt === "jsonl") {
-          // Flat formats: use flat records from store, or flatten trees
-          const records = flatRecords.length > 0 ? flatRecords : Engine.flattenTree(trees);
-          if (WRITERS[fmt]) {
-            WRITERS[fmt](records, outPath);
-          } else {
-            writeJson(records, outPath);
-          }
-        } else if (trees.length > 0) {
-          // Nested: write tree records directly
-          writeFileSync(outPath, JSON.stringify(trees, null, 2), "utf-8");
-          console.log(`[output] ${trees.length} tree records → ${outPath}`);
-        } else if (flatRecords.length > 0) {
-          // No trees but have flat records (e.g., field flatten) — write as flat JSON
-          writeJson(flatRecords, outPath);
-        }
+        writeOutputArtifact(outDir, baseName, name, schema, store, runner.outputFormat ?? "json");
       }
     }
 
@@ -357,12 +495,9 @@ async function main(): Promise<void> {
     // Quality gate — check flat records from output artifacts
     let qualityRecords = finalRecords;
     if (outputArtifacts.length > 0) {
-      qualityRecords = outputArtifacts.flatMap(([name]) => {
-        const flat = store.get(name);
-        return flat.length > 0 ? flat : Engine.flattenTree(store.getTree(name));
-      });
+      qualityRecords = outputArtifacts.flatMap(([name, schema]) => getArtifactOutputRecords(name, schema, store));
     }
-    const qualityOk = checkQuality(qualityRecords, profile);
+    const qualityOk = checkQuality(qualityRecords, profile, store, outputArtifacts);
 
     console.log(`\n=== Done: ${allTrees.length} tree records (${qualityRecords.length} flat in output artifacts) ===`);
     if (!qualityOk) {

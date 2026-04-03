@@ -32,8 +32,7 @@ name → artifacts? → resources[] → quality?
 - **`artifacts`** — declared output schemas (exploration agent's contract)
 - **`resources`** — list of scraping units, wired via `produces` / `consumes`
 - **`quality`** — post-run data validation (min records, max empty %, min filled % per column)
-- **`schedule`** — cron or interval-based execution
-- **`hooks`** — global lifecycle hooks
+- **`hooks`** — deployment/resource lifecycle hooks
 
 ### Artifact Schema (exploration agent's output contract)
 
@@ -131,7 +130,7 @@ An ordered list of browser actions executed **before** extraction. Each step is 
 
 | Action | What it does | Key fields |
 |---|---|---|
-| **click** | Click a button, link, or header | `click` (Locator), `type` (real/scripted), `uniqueness`, `discard` |
+| **click** | Click a button, link, or header | `click` (Locator), `type` (real/scripted) |
 | **select** | Pick a dropdown value | `select` (Locator), `value` |
 | **scroll** | Scroll the page | `scroll` (down/up), `px` |
 | **wait** | Pause for a condition | `wait` ({ idle: true } or { selector } or { ms }) |
@@ -371,6 +370,7 @@ Nodes can declare their own hooks:
 - **`hooks.post_extract`** — runs after this node extracts
 
 Per-node hooks fire only when that specific node produces output.
+Deployment/resource hooks use the same hook point names and run around URL discovery and page opening.
 
 ## The NER Graph
 

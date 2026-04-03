@@ -198,7 +198,12 @@ export function assembleCsv(records: ExtractedRecord[]): string {
   }
 
   const escapeCsv = (val: unknown): string => {
-    const s = String(val ?? "").replace(/"/g, '""');
+    let s = String(val ?? "");
+    // Prefix spreadsheet-formula strings before quoting so CSV imports stay inert.
+    if (/^[\t\r\n ]*[=+\-@]/.test(s)) {
+      s = `'${s}`;
+    }
+    s = s.replace(/"/g, '""');
     return s.includes(",") || s.includes('"') || s.includes("\n")
       ? `"${s}"`
       : s;

@@ -211,19 +211,19 @@ agent-browser close
 
 Hooks allow site-specific customization. They run at two levels:
 
-### Global hooks (per-resource)
+### Deployment / resource hooks
 
 | Hook Point | When | Use For |
 |---|---|---|
-| `post_discover` | After URL list is built | Filtering, reordering, manual URL injection |
-| `pre_extract` | Before opening a page | Authentication, cookie injection, rate limiting |
-| `post_extract` | After raw data captured | AI enrichment, content classification, quality checks |
+| `post_discover` | After a URL list is built | Filtering, reordering, manual URL injection |
+| `pre_extract` | Before opening each target URL | Authentication, cookie injection, rate limiting |
+| `post_extract` | After raw data is captured | AI enrichment, content classification, quality checks |
 | `pre_assemble` | Before final assembly | Cross-page link resolution, TOC generation |
 | `post_assemble` | After output is built | Format conversion, publishing, validation |
 
 ### Per-node hooks
 
-Declared on a specific node. Fire only when that node produces output.
+Declared on a specific node. Fire only when that node produces output, and are selected by name from the module registry.
 
 ```yaml
 nodes:
@@ -251,6 +251,8 @@ export function registerHooks(registry: HookRegistry) {
   }, "my-enrichment");
 }
 ```
+
+Resource-scoped `pre_extract` hooks can run before a URL is opened, while node-scoped `pre_extract` hooks can run immediately before that node reads from the DOM.
 
 ## Config Composition
 

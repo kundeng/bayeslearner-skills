@@ -282,8 +282,10 @@ function parseValue(raw: string): unknown {
   if (raw === "true") return true;
   if (raw === "false") return false;
   // Number
-  const num = Number(raw);
-  if (!isNaN(num) && raw !== "") return num;
+  // Keep zip-code-like values and other leading-zero strings as text.
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) {
+    return Number(raw);
+  }
   // String
   return raw;
 }

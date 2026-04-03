@@ -30,9 +30,15 @@ export interface ValidationError {
   message: string;
 }
 
+export interface ValidationSummary {
+  total_records: number;
+  failed_records: number;
+}
+
 export class ArtifactStore {
   private store = new Map<string, ExtractedRecord[]>();
   private treeStore = new Map<string, TreeRecord[]>();
+  private validationSummary = new Map<string, ValidationSummary>();
   private schemas: Record<string, ArtifactSchema>;
 
   constructor(schemas?: Record<string, ArtifactSchema>) {
@@ -56,26 +62,39 @@ export class ArtifactStore {
   /** Store flat records for an artifact. Validates against schema if declared. */
   put(artifactName: string, records: ExtractedRecord[]): ValidationError[] {
     const existing = this.store.get(artifactName) ?? [];
-    const errors: ValidationError[] = [];
-
     const schema = this.schemas[artifactName];
+    const merged = schema?.dedupe
+      ? this.dedupeRecords([...existing, ...records], schema.dedupe)
+      : [...existing, ...records];
+    const appended = merged.slice(existing.length);
+    const errors: ValidationError[] = [];
+    const failedRecords = new Set<number>();
+
     if (schema) {
-      for (let i = 0; i < records.length; i++) {
-        const errs = this.validateRecord(artifactName, records[i], schema, existing.length + i);
-        errors.push(...errs);
+      for (let i = 0; i < appended.length; i++) {
+        const errs = this.validateRecord(artifactName, appended[i], schema, existing.length + i);
+        if (errs.length > 0) {
+          failedRecords.add(existing.length + i);
+          errors.push(...errs);
+        }
       }
     }
 
-    this.store.set(artifactName, [...existing, ...records]);
+    this.store.set(artifactName, merged);
+    const previousSummary = this.validationSummary.get(artifactName) ?? { total_records: 0, failed_records: 0 };
+    this.validationSummary.set(artifactName, {
+      total_records: previousSummary.total_records + appended.length,
+      failed_records: previousSummary.failed_records + failedRecords.size,
+    });
 
     if (errors.length > 0) {
-      console.warn(`[store] ${artifactName}: ${errors.length} validation errors in ${records.length} records`);
+      console.warn(`[store] ${artifactName}: ${errors.length} validation errors in ${appended.length} records`);
       for (const e of errors.slice(0, 5)) {
         console.warn(`  [${e.record_index}] ${e.field}: ${e.message}`);
       }
       if (errors.length > 5) console.warn(`  ... and ${errors.length - 5} more`);
-    } else if (records.length > 0) {
-      console.log(`[store] ${artifactName}: ${records.length} records stored (${existing.length + records.length} total)`);
+    } else if (appended.length > 0) {
+      console.log(`[store] ${artifactName}: ${appended.length} records stored (${merged.length} total)`);
     }
 
     return errors;
@@ -91,6 +110,11 @@ export class ArtifactStore {
   /** Check if an artifact has any records. */
   has(artifactName: string): boolean {
     return (this.store.get(artifactName)?.length ?? 0) > 0;
+  }
+
+  /** Summarize validation results for an artifact. */
+  getValidationSummary(artifactName: string): ValidationSummary {
+    return this.validationSummary.get(artifactName) ?? { total_records: 0, failed_records: 0 };
   }
 
   // ── dependency resolution ─────────────────────────────
@@ -282,6 +306,26 @@ export class ArtifactStore {
     }
 
     return errors;
+  }
+
+  private dedupeRecords(records: ExtractedRecord[], fieldName: string): ExtractedRecord[] {
+    const seen = new Set<string>();
+    const deduped: ExtractedRecord[] = [];
+
+    for (const record of records) {
+      const value = record.data[fieldName];
+      if (value === undefined || value === null || value === "") {
+        deduped.push(record);
+        continue;
+      }
+
+      const key = `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(record);
+    }
+
+    return deduped;
   }
 
   private typeMatches(val: unknown, def: FieldDef): boolean {

@@ -32,6 +32,11 @@ import type {
   StopCondition,
 } from "./schema.js";
 
+interface VisitTarget {
+  url: string;
+  consumedData: Record<string, unknown> | null;
+}
+
 export class Engine {
   private driver: BrowserDriver;
   private ai: AIAdapter;
@@ -68,32 +73,53 @@ export class Engine {
     const rootNode = nodeMap[resource.entry.root];
     if (!rootNode) throw new Error(`Root node '${resource.entry.root}' not found`);
 
-    const consumeNames = this.toArray(resource.consumes);
-    if (consumeNames.length > 0 && this.store) {
-      const consumed = this.mergeConsumed(consumeNames);
-      if (consumed.length === 0) {
-        console.warn(`[engine] Consumed artifacts empty: ${consumeNames.join(", ")}`);
-        return [];
-      }
-      console.log(`[engine] Consuming ${consumed.length} records from [${consumeNames.join(", ")}]`);
-      return this.runResourceTreeOverRecords(resource, rootNode, nodeMap, consumed);
-    }
+    this.hooks.beginResource(resource.name);
+    try {
+      const consumeNames = this.toArray(resource.consumes);
+      const targets: VisitTarget[] = [];
 
-    return this.runResourceTreeOnce(resource, rootNode, nodeMap, resource.entry.url, null);
+      if (consumeNames.length > 0 && this.store) {
+        const consumed = this.mergeConsumed(consumeNames);
+        if (consumed.length === 0) {
+          console.warn(`[engine] Consumed artifacts empty: ${consumeNames.join(", ")}`);
+          return [];
+        }
+        console.log(`[engine] Consuming ${consumed.length} records from [${consumeNames.join(", ")}]`);
+        for (const rec of consumed) {
+          targets.push({
+            url: this.resolveTemplate(resource.entry.url, rec.data),
+            consumedData: rec.data,
+          });
+        }
+      } else {
+        targets.push({ url: resource.entry.url, consumedData: null });
+      }
+
+      const discoverCtx = this.hooks.invoke("post_discover", {
+        driver: this.driver,
+        resource: resource.name,
+        targets,
+      }) as { targets?: VisitTarget[] };
+      const finalTargets = Array.isArray(discoverCtx?.targets) ? discoverCtx.targets : targets;
+      return this.runResourceTreeOverTargets(resource, rootNode, nodeMap, finalTargets);
+    } finally {
+      this.hooks.endResource();
+    }
   }
 
-  private runResourceTreeOverRecords(
-    resource: Resource, rootNode: NER, nodeMap: Record<string, NER>,
-    records: ExtractedRecord[],
+  private runResourceTreeOverTargets(
+    resource: Resource,
+    rootNode: NER,
+    nodeMap: Record<string, NER>,
+    targets: VisitTarget[],
   ): TreeRecord[] {
     const globals = resource.globals;
     const all: TreeRecord[] = [];
-    for (let i = 0; i < records.length; i++) {
-      const rec = records[i];
-      const url = this.resolveTemplate(resource.entry.url, rec.data);
-      console.log(`[engine] [${i + 1}/${records.length}] ${url}`);
-      all.push(...this.runResourceTreeOnce(resource, rootNode, nodeMap, url, rec.data));
-      if (globals?.request_interval_ms && i < records.length - 1) {
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      console.log(`[engine] [${i + 1}/${targets.length}] ${target.url}`);
+      all.push(...this.runResourceTreeOnce(resource, rootNode, nodeMap, target.url, target.consumedData));
+      if (globals?.request_interval_ms && i < targets.length - 1) {
         this.driver.wait({ ms: globals.request_interval_ms });
       }
     }
@@ -101,17 +127,31 @@ export class Engine {
   }
 
   private runResourceTreeOnce(
-    resource: Resource, rootNode: NER, nodeMap: Record<string, NER>,
-    url: string, consumedData: Record<string, unknown> | null,
+    resource: Resource,
+    rootNode: NER,
+    nodeMap: Record<string, NER>,
+    url: string,
+    consumedData: Record<string, unknown> | null,
   ): TreeRecord[] {
     const globals = resource.globals;
-    if (!url.startsWith("http")) { console.error(`[engine] Invalid URL: ${url}`); return []; }
-    if (this.visited.has(url)) { console.log(`[engine] Skipping visited: ${url}`); return []; }
-    this.visited.add(url);
-    if (!this.driver.open(url, { wait: { idle: true } })) { console.error(`[engine] Failed to open: ${url}`); return []; }
+    const preExtractCtx = this.hooks.invoke("pre_extract", {
+      driver: this.driver,
+      resource: resource.name,
+      url,
+      data: consumedData ?? {},
+    }) as { url?: string; data?: Record<string, unknown> };
+    const nextUrl = typeof preExtractCtx?.url === "string" && preExtractCtx.url.length > 0 ? preExtractCtx.url : url;
+    const nextData = preExtractCtx?.data && typeof preExtractCtx.data === "object" && !Array.isArray(preExtractCtx.data)
+      ? preExtractCtx.data
+      : (consumedData ?? {});
+
+    if (!nextUrl.startsWith("http")) { console.error(`[engine] Invalid URL: ${nextUrl}`); return []; }
+    if (this.visited.has(nextUrl)) { console.log(`[engine] Skipping visited: ${nextUrl}`); return []; }
+    this.visited.add(nextUrl);
+    if (!this.driver.open(nextUrl, { wait: { idle: true } })) { console.error(`[engine] Failed to open: ${nextUrl}`); return []; }
     if (globals?.page_load_delay_ms) this.driver.wait({ ms: globals.page_load_delay_ms });
     this.interrupts.check();
-    return this.walkNodeTree(rootNode, nodeMap, 0, consumedData ?? {});
+    return this.walkNodeTree(rootNode, nodeMap, 0, nextData);
   }
 
   // ── tree walker ──────────────────────────────────────
@@ -166,6 +206,8 @@ export class Engine {
     }
     this.interrupts.check();
 
+    const preExtractContext = this.runNodePreExtract(node, context);
+
     // 3 & 4. Extract + Expand → build tree records
     if (!node.expand) {
       // No expansion: extract once, collect children
@@ -173,8 +215,7 @@ export class Engine {
       if (!extracted && !this.hasChildren(node.name, allNodes)) return [];
 
       const nodeData = extracted ?? {};
-      const childContext = { ...context, ...nodeData };
-      const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, childContext);
+      const childrenMap = this.collectChildrenTree(node.name, allNodes, depth, { ...preExtractContext, ...nodeData });
 
       const tree: TreeRecord = {
         node: node.name,
@@ -184,15 +225,16 @@ export class Engine {
         extracted_at: new Date().toISOString(),
       };
 
-      let record = this.hooks.invoke("post_extract", tree);
-      this.emitTreeToArtifacts(node, record as TreeRecord, context);
+      let record: TreeRecord = this.hooks.invoke("post_extract", tree) as TreeRecord;
+      record = this.runNodePostExtract(node, record) as TreeRecord;
+      this.emitTreeToArtifacts(node, record as TreeRecord, preExtractContext);
 
       if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
       return [record as TreeRecord];
     } else {
       // Expansion: per-element/page/combo tree records
       if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
-      return this.expandTree(node, allNodes, depth, indent, context);
+      return this.expandTree(node, allNodes, depth, indent, preExtractContext);
     }
   }
 
@@ -698,27 +740,29 @@ export class Engine {
     // Check for interrupts after actions
     this.interrupts.check();
 
+    const preExtractContext = this.runNodePreExtract(node, context);
+
     // 3. Observe (extract data) — merge with ancestor context
     // Skip node-level extraction if this node has expand — expansion handles
     // per-element extraction. Node-level extract + expand would double-count.
     if (!node.expand) {
       const extracted = this.extract(node, indent);
-      const childContext = extracted ? { ...context, ...extracted } : context;
 
       if (extracted) {
-        const data = { ...context, ...extracted };
-        let record = this.makeRecord(node.name, data);
-        record = this.hooks.invoke("post_extract", record);
+        const data = { ...preExtractContext, ...extracted };
+        let record: ExtractedRecord = this.makeRecord(node.name, data);
+        record = this.hooks.invoke("post_extract", record) as ExtractedRecord;
+        record = this.runNodePostExtract(node, record) as ExtractedRecord;
         records.push(record);
-        this.emitToArtifacts(node, record, context);
+        this.emitToArtifacts(node, record, preExtractContext);
       }
 
       if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
-      this.walkChildren(node.name, allNodes, records, depth, childContext);
+      this.walkChildren(node.name, allNodes, records, depth, { ...preExtractContext, ...(extracted ?? {}) });
     } else {
       // 4. Expand handles extraction per-element, passing context down
       if (node.delay_ms) this.driver.wait({ ms: node.delay_ms });
-      this.expandAndDescend(node, allNodes, records, depth, context);
+      this.expandAndDescend(node, allNodes, records, depth, preExtractContext);
     }
   }
 
@@ -1154,8 +1198,9 @@ export class Engine {
       const batch: Array<{ record: ExtractedRecord; childCtx: Record<string, unknown> }> = [];
       for (const row of rows) {
         const data = { ...context, ...row };
-        let record = this.makeRecord(node.name, data);
-        record = this.hooks.invoke("post_extract", record);
+        let record: ExtractedRecord = this.makeRecord(node.name, data);
+        record = this.hooks.invoke("post_extract", record) as ExtractedRecord;
+        record = this.runNodePostExtract(node, record) as ExtractedRecord;
         batch.push({ record, childCtx: data });
         records.push(record);
         this.emitToArtifacts(node, record, context);
@@ -1169,6 +1214,7 @@ export class Engine {
         const data = { ...context, ...row };
         let record = this.makeRecord(node.name, data);
         record = this.hooks.invoke("post_extract", record);
+        record = this.runNodePostExtract(node, record);
         records.push(record);
         this.emitToArtifacts(node, record, context);
         this.walkChildren(node.name, allNodes, records, depth, data);
@@ -1192,13 +1238,14 @@ export class Engine {
     }
 
     const fieldJs = rules
+      .filter((rule) => !("ai" in rule))
       .map((rule) => this.extractionToJs(rule))
       .join("\n");
 
     const sliceStart = offset > 0 ? `.slice(${offset})` : "";
     const sliceLimit = limit ? `.slice(0, ${limit})` : "";
 
-    return this.driver.evalJson<Record<string, unknown>[]>(`
+    const rows = this.driver.evalJson<Record<string, unknown>[]>(`
       (() => {
         const rows = [...document.querySelectorAll('${escapeJs(scope)}')]${sliceStart}${sliceLimit};
         return rows.map(container => {
@@ -1208,6 +1255,58 @@ export class Engine {
         });
       })()
     `) ?? [];
+
+    return rows.map((row) => this.applyAiRules(row, rules));
+  }
+
+  private runNodePreExtract(node: NER, context: Record<string, unknown>): Record<string, unknown> {
+    const result = this.hooks.invokeDefs("pre_extract", node.hooks?.pre_extract, {
+      driver: this.driver,
+      node: node.name,
+      url: this.driver.getUrl() ?? "",
+      data: context,
+    }) as { data?: Record<string, unknown> } | Record<string, unknown>;
+
+    if (result && typeof result === "object") {
+      if ("data" in result && result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+        return result.data as Record<string, unknown>;
+      }
+    }
+
+    return context;
+  }
+
+  private runNodePostExtract(node: NER, record: TreeRecord | ExtractedRecord): TreeRecord | ExtractedRecord {
+    const result = this.hooks.invokeDefs("post_extract", node.hooks?.post_extract, {
+      driver: this.driver,
+      node: node.name,
+      url: record.url,
+      record,
+      data: record.data,
+    }) as { record?: TreeRecord | ExtractedRecord } | TreeRecord | ExtractedRecord;
+
+    if (result && typeof result === "object" && "record" in result && result.record) {
+      return result.record as TreeRecord | ExtractedRecord;
+    }
+
+    return record;
+  }
+
+  private applyAiRules(
+    result: Record<string, unknown>,
+    rules: Extraction[],
+  ): Record<string, unknown> {
+    for (const rule of rules) {
+      if (!("ai" in rule)) continue;
+      const { name, prompt, input, schema, categories } = rule.ai;
+      const context = input ? String(result[input] ?? "") : "";
+      if (categories && categories.length > 0) {
+        result[name] = this.ai.classify(prompt, context, categories);
+      } else {
+        result[name] = this.ai.extract(prompt, context, schema);
+      }
+    }
+    return result;
   }
 
   // ── expand: pages ─────────────────────────────────────

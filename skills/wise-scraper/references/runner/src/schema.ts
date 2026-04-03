@@ -53,8 +53,6 @@ export const StopCondition = z.object({
 export const ClickAction = z.object({
   click: Locator,
   type: z.enum(["real", "scripted"]).default("real"),
-  uniqueness: z.enum(["text", "html", "css", "dom"]).optional(),
-  discard: z.enum(["never", "when-control-exists", "always"]).default("never"),
   delay_ms: z.number().int().nonnegative().optional(),
 });
 
@@ -391,12 +389,6 @@ export const Deployment = z.object({
   artifacts: z.record(ArtifactSchema).optional(),  // declared output schemas
   resources: z.array(Resource).min(1),
   quality: QualityGate.optional(),
-  schedule: z
-    .object({
-      cron: z.string().optional(),
-      interval_s: z.number().int().positive().optional(),
-    })
-    .optional(),
   hooks: z
     .object({
       post_discover: z.array(HookDef).optional(),

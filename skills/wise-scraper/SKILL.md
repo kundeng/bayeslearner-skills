@@ -157,7 +157,7 @@ YAML profile → Zod validation → Engine → BrowserDriver → TreeRecord → 
 - **BrowserDriver** — abstract interface; `AgentBrowserDriver` (CLI) is shipped. The interface is abstract and additional drivers can be implemented.
 - **AIAdapter** — abstract interface for exploitation-phase NLP. Default is `NullAIAdapter` (no-op); `AIChatAdapter` wraps `aichat` CLI and is opt-in via `--ai-model` flag
 - **Engine** — walks the NER graph with unified `expand` (elements/pages/combinations)
-- **Hooks** — 3 lifecycle hooks invoked at runtime: `post_extract` (engine, per-node), `pre_assemble` and `post_assemble` (run.ts). Additional hooks are declared in the schema (`post_discover`, node-level `pre_extract`) but not yet called.
+- **Hooks** — 5 lifecycle hooks are invoked at runtime: `post_discover`, `pre_extract`, `post_extract`, `pre_assemble`, and `post_assemble`. `pre_extract` and `post_extract` can run at both resource and node scope; node hooks are selected by name from the module registry.
 - **StateSetup** — auth/login flow executed before resource walk. Declares `skip_when` (CSS check if already logged in) and a sequence of setup actions (`open`, `click`, `input`, `password`). See schema.ts `StateSetup`.
 - **InterruptHandler** — auto-dismisses cookie banners, modals, and other overlays during navigation
 - **URL dedup** — visited Set per resource prevents re-visiting the same URL
