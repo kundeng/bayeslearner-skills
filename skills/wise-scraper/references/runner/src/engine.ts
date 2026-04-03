@@ -89,8 +89,15 @@ export class Engine {
           return [];
         }
         console.log(`[engine] {from: "${entryUrl.from}"} → ${urls.length} URLs`);
+        // Infer base origin from the from-referenced resource's entry URL for relative URL resolution
+        const fromResourceName = entryUrl.from.split(".")[0];
+        const fromTrees = this.store.getResourceTree(fromResourceName);
+        let baseOrigin: string | undefined;
+        if (fromTrees.length > 0 && fromTrees[0].url?.startsWith("http")) {
+          try { baseOrigin = new URL(fromTrees[0].url).origin; } catch { /* ignore */ }
+        }
         for (const url of urls) {
-          targets.push({ url: this.resolveRelativeUrl(url), consumedData: null });
+          targets.push({ url: this.resolveRelativeUrl(url, baseOrigin), consumedData: null });
         }
       } else if (consumeNames.length > 0 && this.store) {
         const urlTemplate = typeof entryUrl === "string" ? entryUrl : String(entryUrl);
@@ -111,12 +118,17 @@ export class Engine {
         targets.push({ url, consumedData: null });
       }
 
+      // Default same-origin filter: drop targets whose origin differs from
+      // the first target's origin. Prevents discovery from following links
+      // to other locales, domains, or unrelated sections.
+      const filtered = this.filterSameOrigin(targets);
+
       const discoverCtx = this.hooks.invoke("post_discover", {
         driver: this.driver,
         resource: resource.name,
-        targets,
+        targets: filtered,
       }) as { targets?: VisitTarget[] };
-      const finalTargets = Array.isArray(discoverCtx?.targets) ? discoverCtx.targets : targets;
+      const finalTargets = Array.isArray(discoverCtx?.targets) ? discoverCtx.targets : filtered;
       return this.runResourceTreeOverTargets(resource, rootNode, nodeMap, finalTargets);
     } finally {
       this.hooks.endResource();
@@ -701,6 +713,61 @@ export class Engine {
 
       return `{${ref}}`;
     });
+  }
+
+  /**
+   * Resolve a relative URL (starting with /) to an absolute URL.
+   * Uses the provided base origin, or falls back to the driver's current page origin.
+   */
+  /**
+   * Filter visit targets to the same origin + locale prefix as the first target.
+   * Prevents discovery from following links to other locales (/ja-jp/ vs /en/),
+   * other domains, or unrelated path prefixes.
+   *
+   * The prefix is the first two path segments of the reference URL (e.g.,
+   * "https://help.splunk.com/en/splunk-it-service-intelligence" → origin + "/en/splunk-it-service-intelligence").
+   * This catches locale switches while allowing deep paths within the same section.
+   */
+  private filterSameOrigin(targets: VisitTarget[]): VisitTarget[] {
+    if (targets.length <= 1) return targets;
+    const ref = targets[0].url;
+    let prefix: string;
+    try {
+      const u = new URL(ref);
+      // Use origin + first two non-empty path segments as the scope prefix
+      const segments = u.pathname.split("/").filter(Boolean);
+      const depth = Math.min(segments.length, 2);
+      prefix = u.origin + "/" + segments.slice(0, depth).join("/");
+    } catch { return targets; }
+
+    const kept: VisitTarget[] = [];
+    let dropped = 0;
+    for (const t of targets) {
+      if (t.url.startsWith(prefix)) {
+        kept.push(t);
+      } else {
+        dropped++;
+      }
+    }
+    if (dropped > 0) {
+      console.log(`[engine] Same-origin filter (prefix=${prefix}): kept ${kept.length}, dropped ${dropped}`);
+    }
+    return kept;
+  }
+
+  private resolveRelativeUrl(url: string, baseOrigin?: string): string {
+    if (url.startsWith("http")) return url;
+    if (url.startsWith("/")) {
+      if (baseOrigin) return `${baseOrigin}${url}`;
+      const currentUrl = this.driver.getUrl();
+      if (currentUrl) {
+        try {
+          const origin = new URL(currentUrl).origin;
+          return `${origin}${url}`;
+        } catch { /* fall through */ }
+      }
+    }
+    return url;
   }
 
   // ── state setup ───────────────────────────────────────
