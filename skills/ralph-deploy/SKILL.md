@@ -214,9 +214,13 @@ For a human who wants to run a project autonomously from a plan:
 
 1. **Write the plan** — put the full project plan in `specs/plan.md` or `PROJECT_PLAN.md`. Include phase goals, done-when criteria, and task dependencies. The more detail, the better — ralph's planner will break it down further.
 
-2. **Write the prompt** — create `PROMPT.md` with what to build. You can either:
-   - Supply the whole plan and let ralph's planner break it down (simpler, works for most projects)
-   - Break it into phases yourself and supply one phase at a time (more control, better for large projects)
+2. **Write the prompt** — create `PROMPT.md` as a comprehensive spec. This is NOT just "build phase 3." It must include:
+   - **Code deliverables**: what to implement, which files, what behavior
+   - **Infrastructure tasks**: what the builder needs to start/configure (Docker, dev servers, databases) to verify its own work
+   - **Handoff artifacts**: README, getting started guide, deployment docs, changelog, demo — anything a human needs to use the project
+   - **Verification requirements**: what "done" means for each deliverable in concrete, runnable terms
+
+   You can supply the whole plan and let the planner break it down, or break it into specs yourself and run one loop per spec.
 
 3. **Configure** — create `ralph.yml` (core config) and `hats/greenfield.yml` (hat roles). See Stage Configs below.
 
@@ -232,29 +236,48 @@ For a human who wants to run a project autonomously from a plan:
    git log --oneline -10           # review commits
    git push                        # push to remote
    ```
-   Update PROJECT_PLAN.md checkboxes, write a new PROMPT.md for the next phase, `ralph clean`, and launch again.
+   Update PROJECT_PLAN.md checkboxes, write a new PROMPT.md for the next spec, `ralph clean`, and launch again.
 
-For agent-orchestrated oneshots (Topology B), the agent does steps 6-7 automatically and chains phases without human intervention.
+For agent-orchestrated oneshots (Topology B), the agent does steps 6-7 automatically and chains specs without human intervention.
 
-### Testing Strategy Across Phases
+### What the Planner Must Do
 
-The builder writes tests alongside implementation — but the *type* of test changes as the project matures. The planner should schedule the right test tasks at the right time:
+The planner's job is not just "break work into tasks." It must:
 
-**Early phases (core engine, libraries, APIs):** Unit tests and integration tests. The builder writes these for every task. No special setup needed.
+1. **Research first**: read existing code, understand what's built, identify gaps
+2. **Write an artifact registry** in the scratchpad — a table of every deliverable, its current status (missing / exists / unit tested / runtime verified), and what verification means
+3. **Write acceptance criteria per task** — concrete, runnable commands and expected outputs
+4. **Include infrastructure setup tasks** — if verifying the REST API requires a running server, the builder must start one. If verifying Splunk integration requires Docker, the builder must `docker compose up`. These are tasks, not assumptions.
+5. **Include handoff artifacts** — README, getting started guide, deployment docs. These are deliverables with acceptance criteria too (e.g. "follow the README from scratch, every command works")
+6. **Sequence by dependency** — don't schedule E2E tests before the features they test are verified working
 
-**After UI or external integrations are built:** End-to-end acceptance tests. The planner should include tasks like:
-- "Write Gherkin user journey scenarios in `tests/e2e/features/`"
-- "Implement step definitions with browser automation"
-- "Run E2E suite and fix failures"
+### Artifact Registry Pattern
 
-These are builder tasks, not a separate hat. The planner decides *when* E2E tests make sense based on what's been built — typically after a UI, REST API, or external system integration (e.g. Splunk HEC) is functional.
+The planner should create this in the scratchpad. The reviewer updates it as tasks are verified:
 
-**What the planner should include in E2E test tasks:**
-- Which user journeys to cover (login flow, data pipeline, admin config)
-- What assertions matter (data arrives in Splunk, UI reflects state changes, error handling)
-- What infrastructure the tests need (running app server, database, external service)
+```markdown
+## Artifact Verification Status
+| Artifact | Exists | Tests | Runtime Verified | Acceptance Criteria |
+|----------|--------|-------|-----------------|---------------------|
+| CLI: simdata <sim> <scene> | yes | unit | NO | run hello, see KV output |
+| REST: GET /tree | yes | mocked | NO | start server, curl, get JSON |
+| README | yes | n/a | NO | follow from scratch, all commands work |
+| Docker compose | yes | n/a | NO | docker compose up, Splunk accessible |
+```
 
-The reviewer verifies E2E tests pass as part of its normal test/lint/typecheck cycle.
+This gives humans (and the orchestrating agent) a confidence dashboard. "Runtime Verified = NO" means the artifact is scaffolded but unproven.
+
+### Testing Strategy Across Specs
+
+The builder writes tests alongside implementation — but the *type* of test depends on what's being built. The planner schedules the right tests:
+
+**Code specs (core engine, libraries, APIs):** Unit tests and integration tests. The builder writes these for every task. The builder also runs the actual system to verify — not just pytest.
+
+**Integration specs (UI + backend, Splunk + HEC):** The planner must include infrastructure setup tasks. The builder starts services, connects components, writes integration tests that exercise real connections. Mocked tests are insufficient at this stage.
+
+**Verification specs (fix-and-verify, pre-release):** Focus on runtime verification of existing artifacts. The planner writes acceptance criteria that require actually using the system. The builder fixes what's broken. The reviewer verifies every artifact end-to-end.
+
+**Handoff specs (docs, demo, release):** The planner lists every handoff artifact. The builder creates them. The reviewer follows the docs from scratch to verify they work.
 
 ---
 
@@ -266,9 +289,9 @@ Each hat can use a different agent backend via the `backend` and `backend_args` 
 
 | Hat | Backend | Why |
 |-----|---------|-----|
-| Planner | `claude` + `["--model", "opus"]` | Architecture decisions, dependency ordering, and scoping need deep reasoning |
-| Builder | `codex` | Heavy code generation is Codex's strength; burns Codex quota |
-| Reviewer | `claude` + `["--model", "sonnet"]` | Quick test/lint verification; cheap and fast |
+| Planner | `claude` + `["--model", "opus"]` | Architecture decisions, acceptance criteria, and dependency ordering need deep reasoning |
+| Builder | `claude` + `["--model", "sonnet"]` | Fast code generation, follows instructions reliably, commits consistently |
+| Reviewer | `claude` + `["--model", "sonnet"]` | Verification, diagnosis, scratchpad updates |
 
 ```yaml
 hats:
@@ -277,7 +300,8 @@ hats:
     backend_args: ["--model", "opus"]
     ...
   builder:
-    backend: codex
+    backend: claude
+    backend_args: ["--model", "sonnet"]
     ...
   reviewer:
     backend: claude
@@ -285,11 +309,11 @@ hats:
     ...
 ```
 
-This means the orchestrating agent (you, running Opus) only pays for the meta-layer — monitoring, phase transitions, steering. The loop itself runs on Sonnet + Codex.
+The orchestrating agent (Opus) pays for the meta-layer — monitoring, spec transitions, steering. The loop runs on Opus (planner, once) + Sonnet (builder + reviewer, many times).
 
-Ask the user which backends and quotas they have available before configuring. Other combinations:
-- **All Sonnet**: `backend: claude` + `backend_args: ["--model", "sonnet"]` on every hat — cheap default when Codex isn't installed
-- **Codex everywhere**: `backend: codex` on every hat — maximizes Codex quota usage
+Ask the user which backends and quotas they have available. Other combinations:
+- **Codex builder**: `backend: codex` on builder — faster iteration but may not commit reliably or follow guardrails as well as Sonnet
+- **All Sonnet**: cheap default, works well for most projects
 - **All Opus**: when quality matters more than cost (small critical projects)
 
 ---
@@ -399,11 +423,15 @@ hats:
 
 - `ralph run` uses fresh context per iteration — no context overflow risk on long loops.
 - `ralph run` requires either a `PROMPT.md` file or `-p "inline text"`. Create `PROMPT.md` as part of setup.
-- Memories persist in `.ralph/agent/memories.jsonl`. Keep them between phases.
+- Memories persist in `.ralph/agent/memories.jsonl`. Keep them between specs.
 - Validate with `ralph preflight` before launching.
 - **Reserved triggers**: `task.start`, `task.resume`, `task.complete` and other `task.*` names are reserved. Use `work.start`, `work.resume`, `build.done`, etc.
-- **Avoid self-triggering hats**: A hat must not emit an event that matches its own trigger (e.g. reviewer emitting `build.done`). Set `default_publishes` to a forward event, add `max_activations: 2`, and explicitly instruct the hat not to self-trigger.
+- **Avoid self-triggering hats**: A hat must not emit an event that matches its own trigger (e.g. reviewer emitting `build.done`). Set `default_publishes` to a forward event, add `max_activations: 1`, and explicitly instruct the hat not to self-trigger.
 - **Minimize loop restarts**: Each restart costs a planner re-analysis. Supply all tasks in PROMPT.md up front. Prefer one loop with 20+ tasks over four loops with 5 tasks.
 - **Don't ask human questions unless blocked**: Resolve ambiguity from specs, reference code, and patterns. Only escalate for genuine blockers (missing credentials, architectural deadlocks).
-- **Update PROJECT_PLAN.md**: After each phase, check off completed items so the next planner has accurate state.
+- **Update PROJECT_PLAN.md**: After each spec completes, check off completed items so the next planner has accurate state.
 - **TUI needs a real TTY**: Use `-q` mode when launching via `tmux send-keys`. For human monitoring, use the dashboard script above.
+- **PROMPT.md is a comprehensive spec, not a vague goal**: Include code deliverables, infrastructure tasks, handoff artifacts (README, docs, demo), and verification requirements. "Build phase 3" is not a spec. "Implement REST API, start the server, verify /tree returns JSON, write a getting started guide that works when followed" is a spec.
+- **The planner must research before planning**: Read existing code, understand what's built, identify what's broken or missing. Don't plan from PROMPT.md alone.
+- **Infrastructure is a task, not an assumption**: If verifying work requires Docker, a running server, or a database, the planner must include setup tasks. The builder sets up infrastructure as part of the build, not as a precondition.
+- **Handoff artifacts are deliverables**: README, getting started guide, deployment docs, changelog, project website, demo — these are tasks with acceptance criteria, not afterthoughts.
