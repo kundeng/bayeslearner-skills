@@ -86,16 +86,12 @@ tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter  # dashboard pane
 tmux split-window -v -t "$NAME:0.0" -c "$PROJECT_PATH"        # steering pane
 ```
 
-**Monitor dashboard** (`.ralph/monitor.sh`): Copy from `scripts/monitor.sh` in this skill directory during setup. It should show:
-- Loop status and current iteration/hat
-- **Active task** — extract from scratchpad (current task heading + acceptance criteria)
-- Recent events (last 3, compact)
-- Last event payload (truncated — shows what reviewer found or builder reported)
-- Uncommitted changes (what the builder is writing right now)
-- Recent commits
-- Memory count
+**Monitoring options** (prefer ralph's built-in tools):
+- **`ralph web`** — web dashboard at http://localhost:3000. Best for humans — shows iterations, events, hat state in a browser. Start in the steering pane: `tmux send-keys -t "$NAME:0.2" "ralph web" Enter`
+- **`ralph tui`** — terminal UI. Only works with a real TTY (attach to tmux session directly: `tmux attach -t $NAME`). Does NOT work when launched via `tmux send-keys`.
+- **`.ralph/monitor.sh`** — fallback shell script (copy from `scripts/monitor.sh` in this skill). Shows active task from scratchpad, uncommitted changes, events, commits. Use when `ralph web` isn't practical.
 
-Refresh every 15s. The active task and uncommitted changes are the most useful for humans watching — they answer "what is it doing right now?"
+The active task (from scratchpad) and uncommitted changes are the most useful signals for humans — they answer "what is it doing right now?"
 
 **MCP server** (optional, for Topology B): `claude mcp add -s user "ralph-$NAME" -- ralph mcp serve --workspace-root "$PROJECT_PATH"`. Note: schemas are large (~2.4MB), may not load in Claude Code. CLI commands are functionally equivalent.
 
