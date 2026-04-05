@@ -117,7 +117,7 @@ PROMPT.md is a comprehensive spec, not a vague goal. Include:
 3. **Handoff artifacts** — README, getting started guide, deployment docs, changelog, demo. These are deliverables with acceptance criteria.
 4. **Verification requirements** — what "done" means in runnable terms
 
-### What the Planner Must Do
+### What the Planner Does
 
 1. **Research first** — read existing code, understand what's built/broken. Don't plan from PROMPT.md alone.
 2. **Write artifact registry** in scratchpad — every deliverable with verification status
@@ -126,14 +126,39 @@ PROMPT.md is a comprehensive spec, not a vague goal. Include:
 5. **Include handoff artifacts** as tasks with acceptance criteria
 6. **Sequence by dependency** — don't schedule E2E tests before features work
 
-### Testing Strategy
+### What the Builder Does
 
-The builder writes tests alongside code. The *type* depends on what's being built:
+The builder's job is broader than writing code. It executes whatever the planner's task requires:
 
-- **Code specs**: unit + integration tests. Builder also runs the system to verify.
-- **Integration specs**: planner includes infra setup tasks. Builder starts services, tests real connections. Mocks insufficient.
-- **Verification specs**: runtime verification of existing artifacts. Builder fixes broken things. Reviewer verifies end-to-end.
-- **Handoff specs**: planner lists every doc. Builder creates them. Reviewer follows from scratch.
+- **Write code** — implement features, fix bugs, refactor
+- **Write tests** — unit, integration, or E2E depending on the task. Use mocks for unit tests but real connections for integration.
+- **Set up infrastructure** — `docker compose up`, start dev servers, install dependencies, configure services. If verification requires a running system, the builder starts it.
+- **Create documentation** — README, getting started guide, API reference, architecture docs. These are build tasks, not afterthoughts.
+- **Create project artifacts** — project website, demo scripts, sample configs, changelog
+- **Verify own work** — run the acceptance criteria before committing. If the criterion says "curl this endpoint", actually curl it.
+- **Write to memories** — when discovering non-obvious constraints (version gotchas, dependency issues), persist them for future iterations.
+
+### What the Reviewer Does
+
+The reviewer's job is broader than running pytest. It verifies against the planner's acceptance criteria:
+
+- **Run the acceptance criteria** — if it says "run this command", run it. If it says "curl this endpoint", start the server and curl it. If it says "follow this doc", follow it from scratch.
+- **Run the test suite** — as a baseline, but not the only check.
+- **Check code quality** — lint, type checks, style consistency, security concerns.
+- **Diagnose failures** — capture actual errors, read the code, identify root causes. Write findings to scratchpad and memories.
+- **Verify handoff artifacts** — follow the README as a new user. Do the commands work? Is anything missing?
+- **Decide the right escalation** — code bug → `work.resume` to builder. Plan wrong → `replan` to planner. All done → `LOOP_COMPLETE`.
+
+### Adapting for Complex Projects
+
+The greenfield config below works for most projects. For more complex projects, adapt it:
+
+- **Add hats** — a `researcher` hat that investigates before the planner plans, a `devops` hat that handles infrastructure, a `writer` hat for docs.
+- **Add events** — `research.done`, `infra.ready`, `docs.done` to create more specific handoffs.
+- **Split the builder** — one builder for backend, another for frontend, with different backends or instructions.
+- **Adjust max_activations** — higher for the planner if replans are expected, keep reviewer at 1.
+
+Use `ralph hats validate` and `ralph hats graph` to verify event topology before launching.
 
 ## Per-Hat Backend Routing
 
