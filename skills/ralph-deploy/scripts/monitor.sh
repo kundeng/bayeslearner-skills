@@ -96,8 +96,8 @@ while true; do
 
   # Memories
   if [ -f .ralph/agent/memories.md ]; then
-    MEM=$(grep -c "^### mem-" .ralph/agent/memories.md 2>/dev/null)
-    printf "\n\033[2mMemories: %s\033[0m\n" "$MEM"
+    MEM=$(grep -c "^## " .ralph/agent/memories.md 2>/dev/null)
+    printf "\n\033[2mMemories: %s sections\033[0m\n" "$MEM"
   fi
 
   printf "\n%s\n\033[2m%s  refreshing in 15s\033[0m\n" "$LINE" "$(date +%H:%M:%S)"
