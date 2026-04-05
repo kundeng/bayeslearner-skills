@@ -42,7 +42,7 @@ Hat instructions and PROMPT.md are static per loop. Hats communicate dynamically
 
 1. **Scratchpad** (`.ralph/agent/scratchpad.md`) — planner writes task breakdown + acceptance criteria, builder/reviewer read and update it. This is the key handoff channel.
 2. **Task list** — ralph injects task status (ready/open/closed) each iteration.
-3. **Memories** (`.ralph/agent/memories.md`) — persistent notes across iterations. Keep budget low (2000 tokens). Use for cross-spec knowledge and discovered constraints, not task details.
+3. **Memories** (`.ralph/agent/memories.md`) — persistent notes across iterations. Keep budget low (2000 tokens). All hats should read memories at the start of each iteration and write to them when they discover non-obvious constraints (version gotchas, dependency issues, config traps). This prevents future iterations from hitting the same problems.
 4. **Event payloads** — text in `build.done`, `work.resume` etc.
 
 ### Acceptance Criteria Pattern
