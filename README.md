@@ -13,13 +13,19 @@ List available skills:
 npx skills add kundeng/bayeslearner-skills --list
 ```
 
-Install one skill from the umbrella repo:
+Preferred: install one skill from the umbrella repo:
 
 ```bash
 npx skills add kundeng/bayeslearner-skills --skill spec-driven-dev
 ```
 
-Preferred for installing or upgrading one specific skill from upstream:
+Install one skill globally for all supported agents on this machine:
+
+```bash
+npx skills add kundeng/bayeslearner-skills --skill analytic-workbench -g --agent '*' -y
+```
+
+Fallback: install or upgrade one specific skill from a direct upstream subdirectory:
 
 ```bash
 npx skills add https://github.com/kundeng/bayeslearner-skills/tree/main/skills/analytic-workbench -g --agent '*' -y
@@ -29,6 +35,12 @@ Install all skills:
 
 ```bash
 npx skills add kundeng/bayeslearner-skills --all
+```
+
+Install all skills globally for all supported agents on this machine:
+
+```bash
+npx skills add kundeng/bayeslearner-skills --all -g --agent '*' -y
 ```
 
 Install from a direct upstream subdirectory path:
@@ -45,7 +57,8 @@ npx skills add ./skills/analytic-workbench -g --agent '*' -y
 
 ## Which Command To Use
 
-- To install or upgrade one published skill in your agent environment, use the upstream subdirectory URL under `skills/<skill-name>`.
+- Prefer `kundeng/bayeslearner-skills --skill <name>` for published installs so the umbrella repo remains discoverable in `skills.sh`-backed search.
+- Use the upstream subdirectory URL under `skills/<skill-name>` as a fallback when you need to target one path explicitly.
 - To test local edits before pushing, use `./skills/<skill-name>`.
 - To install several skills from this repo, use the umbrella repo with `--skill` or `--all`.
 - To update a legacy standalone mirror repo, use `scripts/publish-legacy.sh`. That is a publishing step, not a local install step.
