@@ -361,7 +361,7 @@ hats:
 
   reviewer:
     name: "Reviewer"
-    description: "Verifies against acceptance criteria from the scratchpad"
+    description: "Verifies implementation and diagnoses failures"
     backend: claude
     backend_args: ["--model", "sonnet"]
     triggers: ["build.done"]
@@ -370,12 +370,10 @@ hats:
     max_activations: 1
     instructions: |
       Read the scratchpad for acceptance criteria. Verify by actually
-      running what they specify — commands, curl, file checks.
-      Do NOT rely only on pytest. Emit exactly ONE event:
-      - work.resume: criteria not met (say which failed)
-      - LOOP_COMPLETE: all tasks verified
-      - plan.ready: this task passes, more remain
-      NEVER emit build.done.
+      running what they specify. On failure: capture error, diagnose
+      root cause, write findings in scratchpad, emit work.resume with
+      specifics. On pass: mark task verified in scratchpad, emit
+      plan.ready or LOOP_COMPLETE. NEVER emit build.done.
 ```
 
 ### Other Stages
