@@ -5,7 +5,7 @@ description: Plan and configure ralph-orchestrator deployments for projects at a
 
 # Ralph Deploy
 
-Configure and launch ralph-orchestrator for a project. Covers topology selection, config generation, and tmux session automation.
+Configure and launch ralph-orchestrator for a project. Covers topology selection, config generation, and tmux session management.
 
 Ralph supports multiple agent backends (`claude`, `codex`, `kiro`, `gemini`, `amp`, `copilot`, `opencode`, `pi`, `custom`). Ask which backend the user runs and set `cli.backend` accordingly.
 
@@ -19,64 +19,244 @@ Verify: `ralph --version`.
 
 ---
 
+## Before You Start: Check for Existing Loops
+
+Always check before creating a new loop:
+
+```bash
+ralph loops list                    # any running loops?
+tmux has-session -t ralph-$NAME 2>/dev/null && echo "running"
+ls .ralph/loop.lock 2>/dev/null     # stale lock?
+```
+
+If a loop exists:
+- **Still running**: Monitor it — don't start another. Use `ralph events --last 5` and read `.ralph/agent/scratchpad.md`.
+- **Finished**: Review results, update PROJECT_PLAN.md, then start next phase.
+- **Stale lock, no tmux session**: `rm .ralph/loop.lock` then proceed.
+
+---
+
+## What Are Hats?
+
+Hats are **roles that ralph rotates through** during a loop. Each iteration, ralph picks one hat based on which event was last emitted, runs the agent with that hat's instructions, and expects the agent to emit a new event that triggers the next hat.
+
+Think of it as a state machine: `planner → builder → reviewer → planner → ...`
+
+Each hat has:
+- **triggers**: which events activate this hat (e.g. `["work.start", "phase.next"]`)
+- **publishes**: which events this hat is allowed to emit (e.g. `["plan.ready", "scaffold.done"]`)
+- **default_publishes**: what event to emit if the agent doesn't explicitly emit one
+- **instructions**: the role's prompt — what this hat should do
+- **max_activations**: safety cap on consecutive activations (prevents infinite loops)
+
+The event flow for a typical greenfield build:
+
+```
+work.start → [planner] → plan.ready → [builder] → build.done → [reviewer]
+                ↑                                                    │
+                └──── work.resume (issues found) ────────────────────┘
+                                                                     │
+                                                        LOOP_COMPLETE (all done)
+```
+
+---
+
 ## Topology Selection
 
-**A — Direct**: Ralph runs in a tmux session. You script and steer from a shell. Best for single-project focused work.
+**A — Direct**: Ralph runs in a tmux session. Best for single-project focused work. You monitor and steer from the shell.
 
-**B — Agent+MCP**: The user's CLI agent (Claude Code, Codex, etc.) manages ralph via MCP while ralph executes in a separate tmux session. The MCP server (`ralph mcp serve`) is a standalone control plane — it runs independently, reads/writes `.ralph/` state, and can queue tasks, update config, and monitor events. However, it cannot start loop execution. `ralph run` must be launched separately (via `tmux send-keys`) to actually execute queued tasks. Best for oneshotting from a phase plan.
+**B — Agent+MCP**: An agent (Claude Code, Codex, etc.) orchestrates ralph via MCP or CLI while ralph executes in a separate tmux session. Best for autonomous oneshot builds from a plan.
 
-**C — Multi-Project Supervisor**: One agent session manages multiple ralph instances, each in its own tmux session with its own MCP server entry. Best for 3+ concurrent projects.
+**C — Multi-Project Supervisor**: One agent manages multiple ralph instances across tmux sessions. Best for 3+ concurrent projects.
 
 ```
 Single project, user watching         → A
-Single project, oneshot from plan     → B
+Single project, autonomous oneshot    → B
 Multiple projects, coordinated        → C
 ```
 
 ---
 
-## Topology A Setup
+## Topology A Setup (Human-Operated)
 
-Create a tmux session with ralph run, TUI monitor, and steering shell:
+Three-pane tmux layout: run | monitor | steering.
+
+**Important**: The TUI (`ralph tui`) requires a real TTY. When scripting tmux, use `-q` mode.
 
 ```bash
 tmux new-session -d -s "$NAME" -c "$PROJECT_PATH"
-tmux send-keys -t "$NAME:0" "ralph run -c ralph.yml -H hats/workflow.yml" Enter
+tmux send-keys -t "$NAME:0" "ralph run -q -c ralph.yml -H hats/workflow.yml 2>&1 | tee .ralph/run.log" Enter
 tmux split-window -h -t "$NAME:0" -c "$PROJECT_PATH"
-tmux send-keys -t "$NAME:0.1" "sleep 3 && ralph tui" Enter
 tmux split-window -v -t "$NAME:0.0" -c "$PROJECT_PATH"
 ```
 
-Steering from pane 2: `ralph wave emit human.guidance --payloads "message"`, `touch .ralph/stop-requested`, `ralph run --continue`.
+**Pane 1 — Monitor dashboard**: Create `.ralph/monitor.sh`:
 
-## Topology B Setup
+```bash
+#!/bin/bash
+while true; do
+  clear
+  printf "═══ RALPH MONITOR ═══\n\n"
+  ralph loops list 2>/dev/null | grep -E "primary|running|done"
+  printf "\n── Recent Events ──\n"
+  ralph events --last 5 2>/dev/null | tail -8
+  printf "\n── Iterations ──\n"
+  grep "ITERATION" .ralph/run.log 2>/dev/null | tail -3
+  printf "\n── Files Built ──\n"
+  grep '"name":"Write"' .ralph/run.log 2>/dev/null | grep -oE '"file_path":"[^"]*"' | grep -v tmp | grep -v scratchpad | sed 's/"file_path":"//;s/"//' | xargs -I{} basename {} 2>/dev/null | sort -u | tail -10
+  printf "\n── Git ──\n"
+  git log --oneline -3 2>/dev/null
+  printf "\n[%s] refreshing in 15s\n" "$(date +%H:%M:%S)"
+  sleep 15
+done
+```
 
-1. Start MCP server (can run before any loop exists):
+Launch: `tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter`
+
+**Pane 2 — Steering console**: Print a command reference:
+
+```
+╔═══════════════════════════════════════════╗
+║         RALPH STEERING CONSOLE            ║
+╠═══════════════════════════════════════════╣
+║                                           ║
+║  Steer:                                   ║
+║    ralph wave emit human.guidance \        ║
+║      --payloads "focus on X first"        ║
+║                                           ║
+║  Stop gracefully:                         ║
+║    touch .ralph/stop-requested            ║
+║                                           ║
+║  Resume after stop:                       ║
+║    ralph run --continue                   ║
+║                                           ║
+║  Inspect:                                 ║
+║    ralph events --last 10                 ║
+║    ralph loops list                       ║
+║    cat .ralph/agent/scratchpad.md         ║
+║                                           ║
+║  Diagnostics:                             ║
+║    ralph loops logs <id> -f               ║
+║    ralph loops history <id>               ║
+║    ralph loops diff <id> --stat           ║
+║                                           ║
+╚═══════════════════════════════════════════╝
+```
+
+## Topology B Setup (Agent-Orchestrated)
+
+1. Register MCP server with Claude Code (do NOT edit config files directly):
    ```bash
-   # Add to ~/.claude/mcp.json (or codex equivalent)
-   {"mcpServers": {"ralph": {"command": "ralph", "args": ["mcp", "serve", "--workspace-root", "/path/to/project"]}}}
+   claude mcp add -s user "ralph-$NAME" -- ralph mcp serve --workspace-root "$PROJECT_PATH"
    ```
+   **Note**: The MCP server's tool schemas are large (~2.4MB). If tools don't load in Claude Code, use the CLI commands below instead — they are functionally equivalent.
 
-2. From the agent session, set up work via MCP: `task.create` to queue tasks, `config.update` to adjust ralph.yml.
+2. Start the loop in tmux with the same 3-pane layout as Topology A.
 
-3. Start the loop in a separate tmux session:
-   ```bash
-   tmux new-session -d -s "ralph-$NAME" -c "$PROJECT_PATH"
-   tmux send-keys -t "ralph-$NAME:0" "ralph run -c ralph.yml -H hats/workflow.yml" Enter
-   ```
+3. Monitor and steer via CLI (preferred) or MCP tools:
 
-4. Monitor via MCP: `loop.status`, `stream.subscribe` (topics: `task.status.changed`, `loop.status.changed`). Steer via `task.create` with corrective tasks.
+   | Action | CLI command | MCP tool |
+   |--------|-------------|----------|
+   | Loop status | `ralph loops list` | `loop.status` |
+   | Event history | `ralph events --last 10` | `stream.subscribe` |
+   | View plan | `cat .ralph/agent/scratchpad.md` | `planning.get` |
+   | Stop loop | `touch .ralph/stop-requested` | `loop.stop` |
+   | Create task | write to PROMPT.md | `task.create` |
+   | View config | `ralph run --dry-run -c ralph.yml -H hats/...` | `config.get` |
+   | View diff | `ralph loops diff <id> --stat` | — |
+   | View logs | `ralph loops logs <id> -f` | — |
 
-5. Between phases: set up new tasks via `task.create`, update config via `config.update`, then:
-   ```bash
-   tmux send-keys -t "ralph-$NAME:0" "ralph run --continue" Enter
-   ```
-
-Key MCP tools: `loop.status`, `loop.stop`, `loop.list`, `task.create/list/run_all`, `config.get/update`, `stream.subscribe`, `planning.start/respond`.
+4. Between phases: update PROMPT.md, `ralph clean`, then start a new `ralph run`.
 
 ## Topology C Setup
 
-Same as B, but with one MCP server per project in the config and one tmux session per project. The supervisor agent polls all via `loop.status` on each MCP server.
+Same as B, but with one tmux session + MCP server per project. The supervisor agent polls all via `ralph loops list` or `loop.status` on each MCP server.
+
+---
+
+## Oneshot Pattern (autonomous build from plan)
+
+For a human who wants to run a project autonomously from a plan:
+
+1. **Write the plan** — put the full project plan in `specs/plan.md` or `PROJECT_PLAN.md`. Include phase goals, done-when criteria, and task dependencies. The more detail, the better — ralph's planner will break it down further.
+
+2. **Write the prompt** — create `PROMPT.md` with what to build. You can either:
+   - Supply the whole plan and let ralph's planner break it down (simpler, works for most projects)
+   - Break it into phases yourself and supply one phase at a time (more control, better for large projects)
+
+3. **Configure** — create `ralph.yml` (core config) and `hats/greenfield.yml` (hat roles). See Stage Configs below.
+
+4. **Validate** — `ralph preflight` (use `--strict` for CI, plain for dev).
+
+5. **Launch** — start the 3-pane tmux session as described in Topology A.
+
+6. **Wait** — the loop runs autonomously. Monitor via the dashboard pane. The loop terminates when it emits `LOOP_COMPLETE` or gets stale-detected (both mean the work is done).
+
+7. **Review and continue** — when the loop stops:
+   ```bash
+   uv run pytest tests/           # verify tests
+   git log --oneline -10           # review commits
+   git push                        # push to remote
+   ```
+   Update PROJECT_PLAN.md checkboxes, write a new PROMPT.md for the next phase, `ralph clean`, and launch again.
+
+For agent-orchestrated oneshots (Topology B), the agent does steps 6-7 automatically and chains phases without human intervention.
+
+### Testing Strategy Across Phases
+
+The builder writes tests alongside implementation — but the *type* of test changes as the project matures. The planner should schedule the right test tasks at the right time:
+
+**Early phases (core engine, libraries, APIs):** Unit tests and integration tests. The builder writes these for every task. No special setup needed.
+
+**After UI or external integrations are built:** End-to-end acceptance tests. The planner should include tasks like:
+- "Write Gherkin user journey scenarios in `tests/e2e/features/`"
+- "Implement step definitions with browser automation"
+- "Run E2E suite and fix failures"
+
+These are builder tasks, not a separate hat. The planner decides *when* E2E tests make sense based on what's been built — typically after a UI, REST API, or external system integration (e.g. Splunk HEC) is functional.
+
+**What the planner should include in E2E test tasks:**
+- Which user journeys to cover (login flow, data pipeline, admin config)
+- What assertions matter (data arrives in Splunk, UI reflects state changes, error handling)
+- What infrastructure the tests need (running app server, database, external service)
+
+The reviewer verifies E2E tests pass as part of its normal test/lint/typecheck cycle.
+
+---
+
+## Per-Hat Backend Routing
+
+Each hat can use a different agent backend via the `backend` and `backend_args` fields. This lets you burn cheaper/faster quotas on high-volume roles while reserving expensive models for orchestration.
+
+**Recommended split:**
+
+| Hat | Backend | Why |
+|-----|---------|-----|
+| Planner | `claude` + `["--model", "opus"]` | Architecture decisions, dependency ordering, and scoping need deep reasoning |
+| Builder | `codex` | Heavy code generation is Codex's strength; burns Codex quota |
+| Reviewer | `claude` + `["--model", "sonnet"]` | Quick test/lint verification; cheap and fast |
+
+```yaml
+hats:
+  planner:
+    backend: claude
+    backend_args: ["--model", "opus"]
+    ...
+  builder:
+    backend: codex
+    ...
+  reviewer:
+    backend: claude
+    backend_args: ["--model", "sonnet"]
+    ...
+```
+
+This means the orchestrating agent (you, running Opus) only pays for the meta-layer — monitoring, phase transitions, steering. The loop itself runs on Sonnet + Codex.
+
+Ask the user which backends and quotas they have available before configuring. Other combinations:
+- **All Sonnet**: `backend: claude` + `backend_args: ["--model", "sonnet"]` on every hat — cheap default when Codex isn't installed
+- **Codex everywhere**: `backend: codex` on every hat — maximizes Codex quota usage
+- **All Opus**: when quality matters more than cost (small critical projects)
 
 ---
 
@@ -84,11 +264,11 @@ Same as B, but with one MCP server per project in the config and one tmux sessio
 
 ### Greenfield (phase plan, no code)
 
-This is the full reference config. Other stages follow the same structure with adjustments noted below.
+Core config (`ralph.yml`):
 
 ```yaml
 cli:
-  backend: claude   # or codex, kiro, gemini, etc.
+  backend: claude
 
 core:
   specs_dir: ./specs
@@ -116,7 +296,7 @@ tasks:
   enabled: true
 ```
 
-Hat collection for greenfield (`hats/greenfield.yml`):
+Hat collection (`hats/greenfield.yml`):
 
 ```yaml
 event_loop:
@@ -127,6 +307,8 @@ hats:
   planner:
     name: "Architect"
     description: "Reads specs and breaks work into tasks"
+    backend: claude
+    backend_args: ["--model", "opus"]
     triggers: ["work.start", "phase.next"]
     publishes: ["plan.ready", "scaffold.done"]
     default_publishes: "plan.ready"
@@ -138,7 +320,8 @@ hats:
   builder:
     name: "Builder"
     description: "Implements tasks from the plan"
-    triggers: ["plan.ready", "task.resume"]
+    backend: codex
+    triggers: ["plan.ready", "work.resume"]
     publishes: ["build.done", "tests.passing"]
     default_publishes: "build.done"
     instructions: |
@@ -147,44 +330,39 @@ hats:
   reviewer:
     name: "Reviewer"
     description: "Verifies implementation against spec"
+    backend: claude
+    backend_args: ["--model", "sonnet"]
     triggers: ["build.done"]
-    publishes: ["LOOP_COMPLETE", "task.resume"]
+    publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready"]
+    default_publishes: "plan.ready"
+    max_activations: 2
     instructions: |
-      Review against spec. Run full test suite.
-      Issues → emit task.resume. Clean → emit LOOP_COMPLETE.
+      Review the latest build. Run tests, lint, type checks.
+      If issues found: emit work.resume with details.
+      If all plan tasks done: emit LOOP_COMPLETE.
+      If current task passes but more remain: emit plan.ready.
+      IMPORTANT: Never emit build.done — it triggers you again.
 ```
 
-### Other Stages (adjustments from greenfield)
+### Other Stages
 
-**Feature** (existing codebase, defined work): `max_iterations: 20`. Guardrails: don't modify out-of-scope files, follow existing conventions. Use `builtin:code-assist` instead of custom hats — it's sufficient for well-scoped work: `ralph run -c ralph.yml -H builtin:code-assist -p "description"`.
+**Feature** (existing codebase, scoped work): `max_iterations: 20`. Use `builtin:code-assist` instead of custom hats: `ralph run -c ralph.yml -H builtin:code-assist -p "description"`.
 
-**Refactor** (existing codebase, large changes): `max_iterations: 30`, `max_consecutive_failures: 2` (fail fast — this is the critical setting), `features.parallel: false`. Guardrails emphasize reverting on test failure. Always run on a branch. Required events: `tests.passing`, `migration.verified`.
+**Refactor** (large changes): `max_iterations: 30`, `max_consecutive_failures: 2`. Always run on a branch.
 
-**Explore** (vague goals, prototyping): `max_iterations: 15`, `persistent: true` (loop idles after completion for interactive follow-up), `tasks.enabled: false`. Guardrails: maintain FINDINGS.md, prototype in scratch/, work on a branch.
-
----
-
-## Oneshot Pattern (Topology B)
-
-For running a project from phase plan to completion:
-
-1. Place phase plan in `specs/plan.md` with per-phase goals, done-when criteria, and dependencies
-2. Configure ralph with greenfield config
-3. From the agent session (MCP connected): create Phase 1 tasks via `task.create`
-4. Start loop: `tmux send-keys -t "ralph-project:0" "ralph run -c ralph.yml -H hats/greenfield.yml" Enter`
-5. Monitor via `loop.status` and `stream.subscribe`
-6. When loop terminates: check reason, review via `task.list`
-7. Set up Phase 2: `task.create` new tasks, `config.update` if needed
-8. Continue: `tmux send-keys -t "ralph-project:0" "ralph run --continue" Enter`
-9. Repeat for each phase
-
-Corrections happen at two levels: within a phase (ralph handles via hat rotation, guardrails, circuit breaker) and between phases (agent reviews results, creates corrective tasks, adjusts config).
+**Explore** (vague goals): `max_iterations: 15`, `persistent: true`, `tasks.enabled: false`.
 
 ---
 
 ## Notes
 
-- `ralph run` uses fresh context per iteration by design — no context overflow risk on long loops.
-- Memories persist across stages in `.ralph/agent/memories.jsonl`. Keep them when transitioning between stages.
-- Validate config with `ralph preflight --strict` before launching.
-- Hat trigger names `task.start` and `task.resume` are reserved by ralph for coordination. Use semantic names like `work.start`, `review.start`.
+- `ralph run` uses fresh context per iteration — no context overflow risk on long loops.
+- `ralph run` requires either a `PROMPT.md` file or `-p "inline text"`. Create `PROMPT.md` as part of setup.
+- Memories persist in `.ralph/agent/memories.jsonl`. Keep them between phases.
+- Validate with `ralph preflight` before launching.
+- **Reserved triggers**: `task.start`, `task.resume`, `task.complete` and other `task.*` names are reserved. Use `work.start`, `work.resume`, `build.done`, etc.
+- **Avoid self-triggering hats**: A hat must not emit an event that matches its own trigger (e.g. reviewer emitting `build.done`). Set `default_publishes` to a forward event, add `max_activations: 2`, and explicitly instruct the hat not to self-trigger.
+- **Minimize loop restarts**: Each restart costs a planner re-analysis. Supply all tasks in PROMPT.md up front. Prefer one loop with 20+ tasks over four loops with 5 tasks.
+- **Don't ask human questions unless blocked**: Resolve ambiguity from specs, reference code, and patterns. Only escalate for genuine blockers (missing credentials, architectural deadlocks).
+- **Update PROJECT_PLAN.md**: After each phase, check off completed items so the next planner has accurate state.
+- **TUI needs a real TTY**: Use `-q` mode when launching via `tmux send-keys`. For human monitoring, use the dashboard script above.
