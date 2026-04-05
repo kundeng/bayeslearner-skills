@@ -173,9 +173,9 @@ Use `ralph hats validate` and `ralph hats graph` to verify event topology before
 |-----|-------------|-----|
 | Planner | `claude --model opus` | Deep reasoning for architecture, acceptance criteria |
 | Builder | `claude --model sonnet` | Fast, reliable commits, follows instructions |
-| Reviewer | `claude --model sonnet` | Verification, diagnosis |
+| Reviewer | `claude --model opus` | Must reliably emit correct events (plan.ready/work.resume/replan/LOOP_COMPLETE). Sonnet ignores "NEVER emit build.done" and causes stale termination loops. Opus follows event constraints reliably. |
 
-Codex can be used for builder but may not commit reliably.
+Codex can be used for builder but may not commit reliably. Sonnet MUST NOT be used for reviewer — it causes stale loop termination by emitting build.done (self-trigger) despite explicit instructions not to.
 
 ## Greenfield Hat Config
 
@@ -216,7 +216,7 @@ hats:
     name: "Reviewer"
     description: "Verifies implementation and diagnoses failures"
     backend: claude
-    backend_args: ["--model", "sonnet"]
+    backend_args: ["--model", "opus"]
     triggers: ["build.done"]
     publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready", "replan"]
     default_publishes: "plan.ready"
