@@ -86,10 +86,10 @@ tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter  # dashboard pane
 tmux split-window -v -t "$NAME:0.0" -c "$PROJECT_PATH"        # steering pane
 ```
 
-**Monitoring options** (prefer ralph's built-in tools):
-- **`ralph web`** — web dashboard at http://localhost:3000. Best for humans — shows iterations, events, hat state in a browser. Start in the steering pane: `tmux send-keys -t "$NAME:0.2" "ralph web" Enter`
-- **`ralph tui`** — terminal UI. Only works with a real TTY (attach to tmux session directly: `tmux attach -t $NAME`). Does NOT work when launched via `tmux send-keys`.
-- **`.ralph/monitor.sh`** — fallback shell script (copy from `scripts/monitor.sh` in this skill). Shows active task from scratchpad, uncommitted changes, events, commits. Use when `ralph web` isn't practical.
+**Monitoring options**:
+- **`.ralph/monitor.sh`** — copy from `scripts/monitor.sh` in this skill. Dashboard showing active task (from scratchpad), events, uncommitted changes, commits, memory count. Detects claude/codex/aichat for AI-summarized status. Best for VS Code terminal panes.
+- **`ralph tui`** — built-in terminal UI. Only works with a real TTY (attach directly: `tmux attach -t $NAME`). Does NOT work when launched via `tmux send-keys`.
+- **`ralph web`** — exists but is internal/incomplete. Only works from the ralph source tree, not from user projects. Do not rely on it.
 
 The active task (from scratchpad) and uncommitted changes are the most useful signals for humans — they answer "what is it doing right now?"
 
