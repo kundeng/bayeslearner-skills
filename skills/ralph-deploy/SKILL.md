@@ -59,6 +59,33 @@ work.start → [planner] → plan.ready → [builder] → build.done → [review
                                                         LOOP_COMPLETE (all done)
 ```
 
+### How Information Flows Between Hats
+
+Hat instructions and PROMPT.md are **static** — they don't change during a loop run. But hats communicate dynamically through:
+
+1. **Scratchpad** (`.ralph/agent/scratchpad.md`) — the planner writes the task breakdown and acceptance criteria here. The builder and reviewer read it each iteration. Any hat can update it.
+2. **Task list** — ralph injects the current task status (ready/open/closed) into each iteration's prompt automatically.
+3. **Memories** (`.ralph/agent/memories.md`) — persistent notes that survive across iterations.
+4. **Event payloads** — the text in `build.done`, `work.resume`, etc. carries context to the next hat.
+
+The **scratchpad is the key handoff channel**. The planner must write concrete acceptance criteria there so the reviewer knows how to verify — not just "run pytest" but "run this command, curl this endpoint, check this file."
+
+### Acceptance Criteria Pattern
+
+The planner should write acceptance criteria per task in the scratchpad:
+
+```markdown
+## Task: REST API endpoint
+**Accept when:**
+- `uv run simdata hello.simulation hello.json --port 8080 &` starts without error
+- `curl http://localhost:8080/tree` returns JSON with entity names
+- `curl -X POST http://localhost:8080/command -d '{"entity":"Greeter","variable":"rate","value":5}'` returns 200
+```
+
+The builder verifies these before committing. The reviewer verifies them again independently. This catches the gap where unit tests pass but the system doesn't actually work end-to-end.
+
+**Do NOT hardcode verification methods in hat instructions** (e.g. "run pytest, mypy, ruff"). Instead instruct hats to read the scratchpad for what to verify. Different tasks need different verification — a CLI tool needs to be run, an API needs to be curled, a config file needs to be parsed.
+
 ---
 
 ## Topology Selection
@@ -306,7 +333,7 @@ event_loop:
 hats:
   planner:
     name: "Architect"
-    description: "Reads specs and breaks work into tasks"
+    description: "Reads specs, breaks work into tasks with acceptance criteria"
     backend: claude
     backend_args: ["--model", "opus"]
     triggers: ["work.start", "phase.next"]
@@ -314,34 +341,41 @@ hats:
     default_publishes: "plan.ready"
     max_activations: 8
     instructions: |
-      Read specs. Break into concrete tasks ordered by dependency.
-      Emit scaffold.done if scaffolding, then plan.ready.
+      Read PROMPT.md and the scratchpad. Break work into tasks.
+      For EACH task, write acceptance criteria in the scratchpad:
+      what command to run, what output to expect, what to curl, etc.
+      The reviewer will verify against these — make them concrete.
 
   builder:
     name: "Builder"
-    description: "Implements tasks from the plan"
-    backend: codex
+    description: "Implements tasks and verifies against acceptance criteria"
+    backend: claude
+    backend_args: ["--model", "sonnet"]
     triggers: ["plan.ready", "work.resume"]
     publishes: ["build.done", "tests.passing"]
     default_publishes: "build.done"
     instructions: |
-      Implement next task. Write tests. Run them. Fix failures. Commit.
+      Read the scratchpad for the current task and its acceptance criteria.
+      Implement. Write tests. Verify against acceptance criteria before committing.
+      If a criterion says "run this command", actually run it.
 
   reviewer:
     name: "Reviewer"
-    description: "Verifies implementation against spec"
+    description: "Verifies against acceptance criteria from the scratchpad"
     backend: claude
     backend_args: ["--model", "sonnet"]
     triggers: ["build.done"]
     publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready"]
     default_publishes: "plan.ready"
-    max_activations: 2
+    max_activations: 1
     instructions: |
-      Review the latest build. Run tests, lint, type checks.
-      If issues found: emit work.resume with details.
-      If all plan tasks done: emit LOOP_COMPLETE.
-      If current task passes but more remain: emit plan.ready.
-      IMPORTANT: Never emit build.done — it triggers you again.
+      Read the scratchpad for acceptance criteria. Verify by actually
+      running what they specify — commands, curl, file checks.
+      Do NOT rely only on pytest. Emit exactly ONE event:
+      - work.resume: criteria not met (say which failed)
+      - LOOP_COMPLETE: all tasks verified
+      - plan.ready: this task passes, more remain
+      NEVER emit build.done.
 ```
 
 ### Other Stages
