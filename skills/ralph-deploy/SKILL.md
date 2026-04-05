@@ -80,11 +80,13 @@ Multiple projects, coordinated        → C (multi-tmux)
 
 ```bash
 tmux new-session -d -s "$NAME" -c "$PROJECT_PATH"
-tmux send-keys -t "$NAME:0" "ralph run -q -c ralph.yml -H hats/greenfield.yml 2>&1 | tee .ralph/run.log" Enter
-tmux split-window -h -t "$NAME:0" -c "$PROJECT_PATH"
-tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter  # dashboard pane
-tmux split-window -v -t "$NAME:0.0" -c "$PROJECT_PATH"        # steering pane
+tmux send-keys -t "$NAME:0" "ralph run -q -c ralph.yml -H hats/greenfield.yml > .ralph/run.log 2>&1" Enter
+tmux split-window -v -t "$NAME:0" -c "$PROJECT_PATH" -l 80%   # monitor gets 80% height
+tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter
+tmux resize-pane -t "$NAME:0.0" -y 3                           # shrink ralph pane to minimum
 ```
+
+Layout: ralph process on top (3 rows, just shows it's alive), monitor dashboard below (full width, 80% height). The ralph pane output goes to `.ralph/run.log` not the terminal — no ugly JSONL. The monitor reads from the log file and `ralph events`.
 
 **Monitoring options**:
 - **`.ralph/monitor.sh`** — copy from `scripts/monitor.sh` in this skill. Dashboard showing active task (from scratchpad), events, uncommitted changes, commits, memory count. Detects claude/codex/aichat for AI-summarized status. Best for VS Code terminal panes.
