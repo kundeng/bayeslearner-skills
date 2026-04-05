@@ -86,7 +86,7 @@ tmux send-keys -t "$NAME:0.1" "bash .ralph/monitor.sh" Enter  # dashboard pane
 tmux split-window -v -t "$NAME:0.0" -c "$PROJECT_PATH"        # steering pane
 ```
 
-**Monitor dashboard** (`.ralph/monitor.sh`): Create this script as part of setup. It should show:
+**Monitor dashboard** (`.ralph/monitor.sh`): Copy from `scripts/monitor.sh` in this skill directory during setup. It should show:
 - Loop status and current iteration/hat
 - **Active task** — extract from scratchpad (current task heading + acceptance criteria)
 - Recent events (last 3, compact)
