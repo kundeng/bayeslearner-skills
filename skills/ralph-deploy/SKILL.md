@@ -147,12 +147,61 @@ Codex can be used for builder but may not commit reliably.
 
 ## Greenfield Hat Config
 
-See `hats/greenfield.yml` in any project configured with this skill. Key fields per hat: `backend`, `backend_args`, `triggers`, `publishes`, `default_publishes`, `max_activations`, `instructions`.
+```yaml
+event_loop:
+  starting_event: "work.start"
+  completion_promise: "LOOP_COMPLETE"
+
+hats:
+  planner:
+    name: "Architect"
+    description: "Reads specs, breaks work into tasks with acceptance criteria"
+    backend: claude
+    backend_args: ["--model", "opus"]
+    triggers: ["work.start", "phase.next", "replan"]
+    publishes: ["plan.ready", "scaffold.done"]
+    default_publishes: "plan.ready"
+    max_activations: 8
+    instructions: |
+      Research first: read code, PROMPT.md, CLAUDE.md, scratchpad, memories.
+      Write artifact registry + acceptance criteria per task in scratchpad.
+      Include infrastructure setup and handoff artifact tasks.
+
+  builder:
+    name: "Builder"
+    description: "Implements tasks and verifies against acceptance criteria"
+    backend: claude
+    backend_args: ["--model", "sonnet"]
+    triggers: ["plan.ready", "work.resume"]
+    publishes: ["build.done", "tests.passing"]
+    default_publishes: "build.done"
+    instructions: |
+      Read scratchpad for task + criteria. Read memories for constraints.
+      Implement, test, verify criteria yourself before committing.
+      Write to memories when you discover non-obvious constraints.
+
+  reviewer:
+    name: "Reviewer"
+    description: "Verifies implementation and diagnoses failures"
+    backend: claude
+    backend_args: ["--model", "sonnet"]
+    triggers: ["build.done"]
+    publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready", "replan"]
+    default_publishes: "plan.ready"
+    max_activations: 1
+    instructions: |
+      Read scratchpad for criteria. Read memories. Verify by running
+      what criteria specify. On failure: capture error, diagnose,
+      write to scratchpad + memories, emit work.resume or replan.
+      On pass: mark verified, emit plan.ready or LOOP_COMPLETE.
+      NEVER emit build.done.
+```
 
 Critical rules:
 - **Reserved triggers**: `task.*` names reserved by ralph. Use `work.start`, `build.done`, etc.
 - **No self-triggering**: reviewer must NEVER emit `build.done`. Set `default_publishes: plan.ready`, `max_activations: 1`.
-- **Reviewer must diagnose failures**: capture error, write findings in scratchpad, emit `work.resume` (code bug) or `replan` (plan wrong).
+- **Reviewer diagnoses failures**: capture error, write findings in scratchpad + memories, emit `work.resume` (code bug) or `replan` (plan wrong).
+- **All hats read/write memories**: discovered constraints persist across iterations.
 
 ## Operational Discipline
 
