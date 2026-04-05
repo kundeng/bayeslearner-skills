@@ -53,11 +53,18 @@ The event flow for a typical greenfield build:
 
 ```
 work.start → [planner] → plan.ready → [builder] → build.done → [reviewer]
-                ↑                                                    │
-                └──── work.resume (issues found) ────────────────────┘
+                ↑                         ↑                          │
+                │                         └── work.resume ───────────┤ (code bug)
+                └──────── replan ────────────────────────────────────┘ (plan wrong)
                                                                      │
-                                                        LOOP_COMPLETE (all done)
+                                                        LOOP_COMPLETE (verified)
 ```
+
+The reviewer has three failure paths:
+- **work.resume → builder**: implementation bug — code is wrong, tests missing, wrong output. Include the specific error and what to fix.
+- **replan → planner**: plan is wrong — task is infeasible, missing dependency, wrong approach, acceptance criteria are impossible. The planner re-scopes and emits a new `plan.ready`.
+- **plan.ready → builder**: this task passes, move to the next one.
+- **LOOP_COMPLETE**: all tasks verified against acceptance criteria.
 
 ### How Information Flows Between Hats
 
@@ -336,7 +343,7 @@ hats:
     description: "Reads specs, breaks work into tasks with acceptance criteria"
     backend: claude
     backend_args: ["--model", "opus"]
-    triggers: ["work.start", "phase.next"]
+    triggers: ["work.start", "phase.next", "replan"]
     publishes: ["plan.ready", "scaffold.done"]
     default_publishes: "plan.ready"
     max_activations: 8
@@ -365,15 +372,17 @@ hats:
     backend: claude
     backend_args: ["--model", "sonnet"]
     triggers: ["build.done"]
-    publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready"]
+    publishes: ["LOOP_COMPLETE", "work.resume", "plan.ready", "replan"]
     default_publishes: "plan.ready"
     max_activations: 1
     instructions: |
       Read the scratchpad for acceptance criteria. Verify by actually
       running what they specify. On failure: capture error, diagnose
-      root cause, write findings in scratchpad, emit work.resume with
-      specifics. On pass: mark task verified in scratchpad, emit
-      plan.ready or LOOP_COMPLETE. NEVER emit build.done.
+      root cause, write findings in scratchpad. Then decide:
+      - work.resume (code bug): tell builder what's wrong and how to fix
+      - replan (plan wrong): tell planner what's infeasible and why
+      On pass: mark verified in scratchpad, emit plan.ready or
+      LOOP_COMPLETE. NEVER emit build.done.
 ```
 
 ### Other Stages
