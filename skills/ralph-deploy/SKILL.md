@@ -240,3 +240,4 @@ Critical rules:
 - **Update PROJECT_PLAN.md** after each spec completes.
 - **TUI needs real TTY** — use `-q` mode in tmux. Monitor via dashboard script.
 - **Handoff artifacts are deliverables** — README, docs, demo are tasks with acceptance criteria, not afterthoughts.
+- **Archive specs for history** — if the spec-driven-dev skill is available, archive each loop's PROMPT.md as `requirements.md` and the planner's scratchpad as `design.md` in `.spec-workflow/specs/<name>/` before cleaning. PROMPT.md and scratchpad get overwritten between loops — without archiving, past specs and plans are lost.
