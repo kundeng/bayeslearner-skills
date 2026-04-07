@@ -1,0 +1,46 @@
+[
+  {
+    "query": "Build a LangGraph graph with conditional edges for routing between specialists",
+    "should_trigger": true
+  },
+  {
+    "query": "How do I use create_deep_agent with custom subagents?",
+    "should_trigger": true
+  },
+  {
+    "query": "Bridge MCP servers into LangGraph using langchain-mcp-adapters",
+    "should_trigger": true
+  },
+  {
+    "query": "Add HITL interrupt gates to my agent graph with checkpointing",
+    "should_trigger": true
+  },
+  {
+    "query": "Wrap a Claude SDK agent as a LangGraph runnable",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up subagent tool isolation so each specialist only sees its own MCP tools",
+    "should_trigger": true
+  },
+  {
+    "query": "Configure the Deep Agents middleware stack with custom middleware",
+    "should_trigger": true
+  },
+  {
+    "query": "Stream events from a LangGraph compiled graph",
+    "should_trigger": true
+  },
+  {
+    "query": "Write a saved search in SPL2 for Splunk",
+    "should_trigger": false
+  },
+  {
+    "query": "Build a React dashboard component",
+    "should_trigger": false
+  },
+  {
+    "query": "Parse a PDF and extract tables",
+    "should_trigger": false
+  }
+]
