@@ -1,6 +1,6 @@
 ---
 name: robotframework
-description: Use this skill for general Robot Framework work: authoring `.robot` suites, tasks, keywords, variables, resource files, execution, dry runs, tags, Rebot/Libdoc usage, and Python test-library patterns. Trigger when the user mentions Robot Framework, `.robot` files, keywords, libraries, resource files, tasks, listeners, Libdoc, Rebot, or Robot Framework syntax and execution.
+description: "Use this skill for general Robot Framework work: authoring `.robot` suites, tasks, keywords, variables, resource files, execution, dry runs, tags, Rebot/Libdoc usage, and Python test-library patterns. Trigger when the user mentions Robot Framework, `.robot` files, keywords, libraries, resource files, tasks, listeners, Libdoc, Rebot, or Robot Framework syntax and execution."
 metadata:
   author: kundeng
   version: "2.1.0"
