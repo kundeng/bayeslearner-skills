@@ -1,0 +1,7 @@
+interface:
+  display_name: "ck"
+  short_description: "Semantic and hybrid code search"
+  default_prompt: "Use $ck to search code semantically, lexically, or with hybrid ranking, then check or rebuild the index if results seem stale."
+
+policy:
+  allow_implicit_invocation: true
