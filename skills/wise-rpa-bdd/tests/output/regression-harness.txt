@@ -1,0 +1,78 @@
+Testing 15 regression profiles with wise-rpa-bdd
+
+== skills/wise-scraper/tests/profiles/practice/books-mystery-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/laptop-paginated-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/laptop-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/quotes-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/revspin-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/tables-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/variants-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/practice/webscraper-ecommerce.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/amazon-plumbing-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/hamilton-doc-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/splunk-itsi-focused-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/splunk-itsi-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/splunk-spl2-overview-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/splunk-spl2-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== skills/wise-scraper/tests/profiles/production/umsalary-test.yaml ==
+  generate: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+All profiles passed.

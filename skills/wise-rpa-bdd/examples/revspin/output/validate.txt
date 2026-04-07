@@ -1,0 +1,1 @@
+BDD format OK: skills/wise-rpa-bdd/examples/revspin/suite.robot

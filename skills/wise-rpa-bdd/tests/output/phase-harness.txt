@@ -1,0 +1,17 @@
+
+== quotes ==
+  orient/evidence/output files: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== revspin ==
+  orient/evidence/output files: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+== splunk-itsi ==
+  orient/evidence/output files: PASS
+  bdd format: PASS
+  robot dryrun: PASS
+
+All phase examples passed.
