@@ -1,0 +1,38 @@
+[
+  {
+    "query": "Write a Robot Framework suite that uses resource files and user keywords",
+    "should_trigger": true
+  },
+  {
+    "query": "How do I validate a .robot file with dry run before executing it?",
+    "should_trigger": true
+  },
+  {
+    "query": "Create a Python Robot Framework library and document it with Libdoc",
+    "should_trigger": true
+  },
+  {
+    "query": "Refactor this Robot Framework test case into reusable keywords",
+    "should_trigger": true
+  },
+  {
+    "query": "What's the difference between Robot Framework tasks and test cases?",
+    "should_trigger": true
+  },
+  {
+    "query": "Build a Playwright browser scraping suite in Robot Framework BDD style",
+    "should_trigger": true
+  },
+  {
+    "query": "Write a pytest fixture for API tests",
+    "should_trigger": false
+  },
+  {
+    "query": "Create a Selenium test in Java without Robot Framework",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain Python decorators",
+    "should_trigger": false
+  }
+]
