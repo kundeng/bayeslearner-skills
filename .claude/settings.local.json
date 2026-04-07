@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx skills:*)",
+      "Bash(mkdir -p ../../tests/output)",
+      "Bash(node dist/run.js ../../tests/books-mystery-test.yaml --output-dir ../../tests/output -v)"
+    ]
+  }
+}
