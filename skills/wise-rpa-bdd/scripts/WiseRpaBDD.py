@@ -547,7 +547,7 @@ class ExecutionEngine:
             for attempt in range(1, rule.retry_max + 1):
                 logger.info(f"  Retry {attempt}/{rule.retry_max} for rule '{rule.name}'")
                 time.sleep(rule.retry_delay_ms / 1000.0)
-                self._execute_actions(rule, res)
+                self._execute_actions(rule, res, context=ctx)
                 state_ok = self._check_state(rule, current_url)
                 if state_ok:
                     break
@@ -608,14 +608,16 @@ class ExecutionEngine:
                 pass
         return True
 
-    def _execute_actions(self, rule: RuleNode, res: ResourceContext) -> None:
+    def _execute_actions(self, rule: RuleNode, res: ResourceContext,
+                         context: dict[str, Any] | None = None) -> None:
         for action in rule.actions:
             try:
-                self._do_action(action, res)
+                self._do_action(action, res, context=context)
             except Exception as e:
                 logger.warn(f"  Action {action.type} failed: {e}")
 
-    def _do_action(self, action: Action, res: ResourceContext) -> None:
+    def _do_action(self, action: Action, res: ResourceContext,
+                   context: dict[str, Any] | None = None) -> None:
         bl = self._bl()
         delay_ms = int(action.options.get("delay_ms", 0))
 
@@ -643,7 +645,25 @@ class ExecutionEngine:
             if page_delay:
                 time.sleep(page_delay / 1000.0)
         elif action.type == "open_bound":
-            pass
+            # Resolve field value from context or artifact store
+            field_name = action.value or ""
+            url = ""
+            if context and field_name in (context or {}):
+                url = str(context[field_name])
+            elif "." in field_name:
+                # Try artifacts.name.field reference
+                parts = field_name.split(".")
+                if len(parts) >= 2:
+                    art_name = parts[-2]
+                    fld = parts[-1]
+                    records = self.ctx.artifact_store.get(art_name, [])
+                    if records:
+                        url = str(records[-1].get("data", {}).get(fld, ""))
+            if url:
+                bl.go_to(url)
+                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
+                if page_delay:
+                    time.sleep(page_delay / 1000.0)
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
@@ -923,6 +943,9 @@ class ExecutionEngine:
         if not data:
             return None
 
+        # Run post_extract hooks
+        data = self._invoke_hooks("post_extract", data)
+
         return {
             "node": rule.name,
             "url": current_url,
@@ -932,21 +955,27 @@ class ExecutionEngine:
 
     def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
+        data = {}
         if rule.field_specs:
-            data = {}
             for fs in rule.field_specs:
                 data[fs.name] = self._extract_field(fs, elem_selector)
-            return {
-                "node": rule.name,
-                "url": current_url,
-                "data": data,
-                "extracted_at": datetime.now(timezone.utc).isoformat(),
-            }
+        elif rule.table_spec:
+            table_result = self._extract_table_data(rule.table_spec, elem_selector, current_url, rule.name)
+            if table_result:
+                data = table_result.get("data", {})
 
-        if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, elem_selector, current_url, rule.name)
+        if not data:
+            return None
 
-        return None
+        # Run post_extract hooks
+        data = self._invoke_hooks("post_extract", data)
+
+        return {
+            "node": rule.name,
+            "url": current_url,
+            "data": data,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def _extract_field(self, fs: FieldSpec, scope: str | None) -> Any:
         bl = self._bl()
@@ -1151,14 +1180,46 @@ class ExecutionEngine:
                 pass
 
     def _invoke_hooks(self, lifecycle_point: str, data: dict) -> dict:
-        """Invoke registered hooks at a lifecycle point."""
+        """Invoke registered hooks at a lifecycle point.
+
+        Hooks can transform data via config-driven rules:
+        - rename=old_field:new_field — rename a field
+        - drop=field_name — remove a field
+        - strip_html=field_name — strip HTML tags from a field
+        - default=field_name:value — set default if field empty
+        - lowercase=field_name — lowercase a field
+        - regex=field_name:pattern:replacement — regex replace
+        """
+        result = dict(data)
         for hook in self.ctx.hooks:
-            if hook.lifecycle_point == lifecycle_point:
-                logger.info(f"  Hook '{hook.name}' at {lifecycle_point}")
-                # Hooks can transform data via config-driven rules
-                # For now: log and pass through. Real hook system would
-                # call registered Python functions or external tools.
-        return data
+            if hook.lifecycle_point != lifecycle_point:
+                continue
+            logger.info(f"  Hook '{hook.name}' at {lifecycle_point}")
+            cfg = hook.config
+            for key, val in cfg.items():
+                try:
+                    if key == "rename" and ":" in val:
+                        old, new = val.split(":", 1)
+                        if old in result:
+                            result[new] = result.pop(old)
+                    elif key == "drop" and val in result:
+                        del result[val]
+                    elif key == "strip_html" and val in result:
+                        result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
+                    elif key == "default" and ":" in val:
+                        field, default_val = val.split(":", 1)
+                        if not result.get(field):
+                            result[field] = default_val
+                    elif key == "lowercase" and val in result:
+                        result[val] = str(result[val]).lower()
+                    elif key == "regex" and val.count(":") >= 2:
+                        parts = val.split(":", 2)
+                        field, pattern, replacement = parts
+                        if field in result:
+                            result[field] = re.sub(pattern, replacement, str(result[field]))
+                except Exception as e:
+                    logger.warn(f"  Hook transform {key}={val} failed: {e}")
+        return result
 
     def _emit_records(self, target: str, rule: RuleNode,
                       records: list[dict], current_url: str) -> None:
