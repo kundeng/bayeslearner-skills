@@ -20,6 +20,11 @@ This skill expresses structured browser extraction flows in strict Robot Framewo
 | `emit` | `And I emit to artifact ...` |
 | `consumes` | `Given I consume artifact ...` |
 | `entry.url: { from: ... }` | `Given I resolve entry from "...""` |
+| `setup` | `Given I configure state setup` continuation rows |
+| `hooks` | `And I register hook` at lifecycle point |
+| `interrupts` | `And I configure interrupts` continuation rows |
+| `ai extraction` | `Then I extract with AI` with prompt/input/schema |
+| `context refs` | `{field}`, `{artifacts.name.field}`, `{config.key}` |
 | quality gates | explicit quality steps at end of suite or resource |
 
 ## What Stays Visible
@@ -54,6 +59,26 @@ Typical shapes:
   - extraction resources with `Given I resolve entry from "..."`
   - nested + flat output artifacts
 
+- **ai extraction**:
+  - extract raw HTML or text with normal `extract fields`
+  - pass captured field to `Then I extract with AI` with prompt and schema
+  - emit AI-structured output to artifact
+
+- **matrix / combinations**:
+  - `When I expand over combinations` with axis continuation rows
+  - each axis defines action type, control selector, and values
+  - extract results after each combination is applied
+
+- **element click**:
+  - expand over clickable elements with `When I expand over elements`
+  - click each element with `When I click locator` and `uniqueness=<text|css>`
+  - extract revealed content after click, emit per element
+
+- **sort verify**:
+  - click sort header via `When I click locator`
+  - verify sort applied via `Given url contains` or `And selector ... exists`
+  - extract sorted table rows
+
 ## AI Role
 
 AI may:
@@ -67,3 +92,9 @@ AI may not:
 
 - replace the generic keyword contract with site-specific verbs
 - hide chaining semantics inside unnamed runtime magic
+- use AI extraction as a shortcut when CSS selectors would work
+
+Additional AI guidance:
+
+- AI may draft AI extraction prompts and schemas when deterministic extraction is insufficient
+- AI may not reach for `Then I extract with AI` before proving that normal extractors cannot handle the task

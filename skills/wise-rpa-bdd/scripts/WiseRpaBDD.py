@@ -174,6 +174,34 @@ class WiseRpaBDD:
     def set_filled_percentage(self, field: str, percent: Any) -> None:
         self._record("set_filled_percentage", field, percent)
 
+    @keyword('Then I extract with AI "${name}"')
+    def extract_with_ai(self, name: str, *specs: str) -> None:
+        self._record("extract_with_ai", name, *specs)
+
+    @keyword('And I register hook "${name}" at "${lifecycle_point}"')
+    def register_hook(self, name: str, lifecycle_point: str, *config: str) -> None:
+        self._record("register_hook", name, lifecycle_point, *config)
+
+    @keyword("Given I configure state setup")
+    def configure_state_setup(self, *actions: str) -> None:
+        self._record("configure_state_setup", *actions)
+
+    @keyword("And I configure interrupts")
+    def configure_interrupts(self, *dismissals: str) -> None:
+        self._record("configure_interrupts", *dismissals)
+
+    @keyword('When I select "${value}" from locator "${locator}"')
+    def select_from_locator(self, value: str, locator: str, *options: str) -> None:
+        self._record("select_from_locator", value, locator, *options)
+
+    @keyword('When I check locator "${locator}"')
+    def check_locator(self, locator: str, *options: str) -> None:
+        self._record("check_locator", locator, *options)
+
+    @keyword('And I set max failed percentage to ${percent}')
+    def set_max_failed_percentage(self, percent: Any) -> None:
+        self._record("set_max_failed_percentage", percent)
+
     @keyword("Then I close the browser")
     def close_browser(self) -> None:
         self._record("close_browser")

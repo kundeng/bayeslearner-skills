@@ -132,7 +132,8 @@ def render_expand(lines: list[str], expand: dict[str, Any]) -> None:
 
 def render_extract(lines: list[str], extract: list[dict[str, Any]]) -> None:
     table_extracts = [item["table"] for item in extract if "table" in item]
-    non_table = [item for item in extract if "table" not in item]
+    non_table = [item for item in extract if "table" not in item and "ai" not in item]
+    ai_items = [item for item in extract if "ai" in item]
 
     if non_table:
         add_step(lines, "Then I extract fields")
@@ -152,6 +153,9 @@ def render_extract(lines: list[str], extract: list[dict[str, Any]]) -> None:
                 cells.append(f'prompt={quote(payload["prompt"])}')
             add_continuation(lines, *cells)
 
+    if ai_items:
+        render_ai_extract(lines, ai_items)
+
     for table in table_extracts:
         add_step(lines, f'Then I extract table {quote(table["name"])} from {quote(table["css"])}')
         if "header_row" in table:
@@ -161,6 +165,50 @@ def render_extract(lines: list[str], extract: list[dict[str, Any]]) -> None:
             if "header" in column:
                 cells.append(f'header={quote(column["header"])}')
             add_continuation(lines, *cells)
+
+
+def render_ai_extract(lines: list[str], ai_items: list[dict[str, Any]]) -> None:
+    for item in ai_items:
+        payload = item["ai"]
+        add_step(lines, f'Then I extract with AI {quote(payload["name"])}')
+        if "prompt" in payload:
+            add_continuation(lines, f'prompt={quote(payload["prompt"])}')
+        if "input" in payload:
+            add_continuation(lines, f'input={quote(payload["input"])}')
+        if "schema" in payload:
+            import json
+            add_continuation(lines, f'schema={quote(json.dumps(payload["schema"]))}')
+        if "categories" in payload:
+            cats = "|".join(payload["categories"])
+            add_continuation(lines, f'categories={cats}')
+
+
+def render_hooks(lines: list[str], hooks: dict[str, Any]) -> None:
+    for lifecycle_point, hook_list in hooks.items():
+        if not isinstance(hook_list, list):
+            hook_list = [hook_list]
+        for hook in hook_list:
+            name = hook.get("name", lifecycle_point)
+            add_step(lines, f'And I register hook {quote(name)} at {quote(lifecycle_point)}')
+            for key, value in hook.get("config", {}).items():
+                add_continuation(lines, f"{key}={scalar(value)}")
+
+
+def render_setup(lines: list[str], setup: dict[str, Any]) -> None:
+    add_step(lines, "Given I configure state setup")
+    if "skip_when" in setup:
+        add_continuation(lines, f'skip_when={setup["skip_when"]}')
+    for action in setup.get("actions", []):
+        if "open" in action:
+            add_continuation(lines, f'action=open url="{action["open"]}"')
+        elif "click" in action:
+            add_continuation(lines, f'action=click css="{action["click"]["css"]}"')
+        elif "input" in action:
+            payload = action["input"]
+            add_continuation(lines, f'action=input css="{payload["css"]}" value="{payload["value"]}"')
+        elif "password" in action:
+            payload = action["password"]
+            add_continuation(lines, f'action=password css="{payload["css"]}" value="{payload["value"]}"')
 
 
 def render_emit(lines: list[str], emit: Any, artifact_vars: dict[str, str]) -> None:
@@ -251,6 +299,14 @@ def generate_suite(profile: dict[str, Any], source: Path) -> str:
             add_step(lines, "And I set resource globals")
             for key, value in globals_.items():
                 add_continuation(lines, f"{key}={scalar(value)}")
+
+        setup = resource.get("setup")
+        if setup:
+            render_setup(lines, setup)
+
+        hooks = resource.get("hooks")
+        if hooks:
+            render_hooks(lines, hooks)
 
         any_emit = False
         last_extract_index: int | None = None

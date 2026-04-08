@@ -3,7 +3,7 @@ name: wise-rpa-bdd
 description: Structured browser extraction for AI coders: explore first, then draft repeatable Robot Framework BDD RPA suites with shipped generic keywords, templates, and validation harnesses.
 metadata:
   author: kundeng
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # WISE RPA BDD
@@ -76,6 +76,10 @@ Avoid collapsing the flow into one opaque keyword.
 - Allowed generic keywords: `references/keyword-contract.md`
 - Flow shape and structural conventions: `references/flow-shape.md`
 - Harness usage and validation loop: `references/harness.md`
+- Internal architecture and data model: `references/architecture.md`
+- AI extraction pattern: `references/ai-adapter.md`
+- Plain English field reference: `references/field-guide.md`
+- Positioning and alternatives: `references/comparisons.md`
 - Starter files: `templates/*.robot`
 - Tested examples and outputs: `examples/overview.md`
 
