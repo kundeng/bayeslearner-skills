@@ -20,11 +20,11 @@ theguardian.com, wired.com. Requires Playwright (banners are JS-rendered).
 strip_html, default, lowercase, regex. Wired into post_extract lifecycle.
 Commit: e8bc6fa.
 
-### 4. AI extraction untested at runtime
-Now uses pluggable adapter (aichat → anthropic → openai → cli:<cmd>).
-Adapter chain works but live test blocked on local router auth (sk-dummy
-rejected by router on port 20128). Need working AI backend to validate.
-Adapter code + golden suite (splunk-itsi with AI) are ready. Commit: 2f22bd3.
+### ~~4. AI extraction untested at runtime~~ RESOLVED
+Pluggable adapter works end-to-end via aichat → 9router. Tested:
+- cleanup mode: HTML → structured markdown with code blocks extracted
+- classify mode: text → category classification with JSON output
+Router config: https://rrscd37.9router.com/v1. Commit: 2f22bd3.
 
 ### ~~5. `generate_from_wise_yaml.py` removed but referenced in memories~~ RESOLVED
 Cleaned `.ralph/agent/memories.md`. Stale references removed.
