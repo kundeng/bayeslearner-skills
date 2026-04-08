@@ -1,93 +1,74 @@
-# Format
-
-Author strict Robot Framework suites. Do not invent a parallel DSL.
+# Suite Format and Structure
 
 ## Required Shape
 
+Every suite follows this layout:
+
 ```robot
 *** Settings ***
-Documentation     Short suite summary
+Documentation     Short summary
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment
 
 *** Variables ***
-${DEPLOYMENT}     example-deployment
-${ARTIFACT_ROWS}  rows
-${ENTRY_URL}      https://example.com
+${DEPLOYMENT}     ...
+${ARTIFACT_...}   ...
+${ENTRY_...}      ...
 
 *** Test Cases ***
-Artifact Catalog
-    Given I register artifact "${ARTIFACT_ROWS}"
-    ...    field=name    type=string    required=true
-    ...    field=url     type=url       required=true
-    And I set artifact options for "${ARTIFACT_ROWS}"
-    ...    format=jsonl
-    ...    output=true
-
-Listing Resource
-    [Setup]    Given I start resource "listing" at "${ENTRY_URL}"
-    Given url contains "/browse"
-    And selector ".card" exists
-    When I expand over elements ".card" with order "bfs"
-    Then I extract fields
-    ...    field=name    extractor=text    locator=".title"
-    ...    field=url     extractor=link    locator="a"
-    And I emit to artifact "${ARTIFACT_ROWS}"
-
-Detail Resource
-    [Setup]    Given I iterate over parent records from "Listing Resource"
-    When I open the bound field "url"
-    Then I extract fields
-    ...    field=description    extractor=text    locator=".description"
-    And I merge into artifact "${ARTIFACT_ROWS}" on key "url"
-
-*** Keywords ***
-Given I am authenticated
-    Given I open "${LOGIN_URL}"
-    But url does not contain "/dashboard"
-    When I type "${USERNAME}" into locator "#username"
-    And I type secret "${PASSWORD}" into locator "#password"
-    And I click locator "#login-btn"
-    Then url contains "/dashboard"
+Artifact Catalog          # artifact registrations + quality gates
+Resource Name             # one test case per resource
 ```
 
 ## Rules
 
 - Every executable step starts with `Given`, `When`, `Then`, `And`, or `But`.
-- Keep strings quoted.
-- Use continuation rows for structured specs.
+- Use continuation rows (`...`) for field specs, schemas, globals, options.
 - Use `*** Keywords ***` only for reusable generic flow fragments.
-- Keep artifact and quality declarations visible in the suite.
+- Keep artifact names, resource names, parent relationships, merge keys, and quality gates **visible** — never hide the flow in one opaque keyword.
 
-## Continuation Rows
+## Structural Mapping
 
-Use continuation rows for:
+| Concept | Robot BDD shape |
+| --- | --- |
+| deployment name | `${DEPLOYMENT}` variable |
+| artifacts | `Artifact Catalog` test case |
+| resource | one test case per resource |
+| entry URL | `[Setup] Given I start resource "name" at "${ENTRY}"` |
+| node | `And I begin rule "name"` block |
+| parent chain | `And I declare parents "a, b"` |
+| state check | `Given url ...` / `And selector ... exists` |
+| action | `When I click ...` / `When I open ...` |
+| expansion | `When I expand ...` / `When I paginate ...` |
+| extraction | `Then I extract fields` / `Then I extract table ...` |
+| emit | `And I emit to artifact ...` |
+| quality | `And I set quality gate ...` |
 
-- field specs
-- artifact field schemas
-- resource globals
-- table column mappings
-- quality gates
-- action options
-- expansion axes/options
+## Common Patterns
 
-Examples:
+**Pagination + element extraction** (quotes, books):
+resource start → paginate by next button → expand over elements → extract fields → emit
 
-```robot
-Then I extract fields
-...    field=title    extractor=text    locator="h1"
-...    field=body     extractor=html    locator="article"
+**Sort + table extraction** (revspin):
+click sort header → verify state → numeric pagination → extract table → emit
 
-Given I register artifact "${ARTIFACT_DOCS}"
-...    field=title    type=string    required=true
-...    field=body     type=string    required=true
-```
+**Discovery + detail chaining** (docs):
+resource 1: BFS expand nav links → emit URLs → resource 2: consume URLs → open each → extract → emit
+
+**Matrix / combinations** (variants):
+expand over combinations (axis values) → extract after each combo → emit
+
+**AI extraction** (when CSS isn't enough):
+extract raw HTML → pass to `Then I extract with AI` with prompt/schema → emit
 
 ## Setup Placement
 
-- **Suite Setup**: deployment/bootstrap/auth that applies broadly
-- **Test Setup**: per-resource entry navigation or parent binding
-- **Keyword setup flow**: when setup itself needs multiple BDD steps
+- **Suite Setup**: deployment init, auth
+- **Test Setup** (`[Setup]`): per-resource entry navigation
+- **Keywords section**: reusable multi-step flows (e.g. login)
 
-Use `Suite Setup` / `Test Setup` when it genuinely improves readability. Do not hide the whole extraction flow inside setup.
+## AI Role
+
+AI may propose selectors, draft suites from evidence, and author AI extraction prompts. AI must not replace generic keywords with site-specific verbs or use AI extraction as a shortcut when CSS selectors work.

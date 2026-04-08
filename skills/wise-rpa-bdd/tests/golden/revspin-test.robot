@@ -1,5 +1,11 @@
+*** Comments ***
+Requirement    Scrape table tennis rubber ratings from https://revspin.net/top-rubber/overall-desc.html — click durability sort, then extract all rubber attributes (rank, name, speed, spin, control, durability, overall, price) from 2 pages of results.
+Expected       rubber,speed,durable,overall
+Min Records    50
+
 *** Settings ***
 Documentation     Generated from tests/profiles/practice/revspin-test.yaml
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment

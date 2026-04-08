@@ -1,5 +1,11 @@
+*** Comments ***
+Requirement    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation from help.splunk.com. Two sections only. Discover page URLs from left-nav, extract title and body from each page. Output as markdown.
+Expected       title,body
+Min Records    20
+
 *** Settings ***
 Documentation     Generated from tests/profiles/production/splunk-itsi-focused-test.yaml
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment

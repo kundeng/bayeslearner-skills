@@ -1,6 +1,0 @@
-  PASS: test_explicit_emit_preserved
-  PASS: test_synthesized_emit_from_produces
-  PASS: test_multi_artifact_synthesized_emit
-  PASS: test_no_emit_when_no_produces
-
-4 passed, 0 failed

@@ -14,21 +14,13 @@ Core pieces:
 
 Typical loop:
 
-1. `/rrpa-explore`
-2. `/rrpa-evidence`
-3. `/rrpa-draft`
-4. `/rrpa-validate` with `validate_suite.py`
-5. `/rrpa-validate` with `robot --dryrun`
-6. `/rrpa-refine` until the suite is readable and executable
+1. `/rrpa-explore` — visit live site, confirm selectors, collect evidence
+2. `/rrpa-draft` — write the `.robot` suite grounded in explore evidence
+3. `/rrpa-review` — run `robot --dryrun`, fix issues, loop back to draft until clean
 
-## 2. Regression Harness
+## 2. E2E Test
 
-Use the regression harness to test the skill against the bundled profile corpus.
-
-- `tests/harness/run-tests.py`
-- `tests/harness/run-phase-tests.py`
-
-This harness drafts suites from the corpus, validates BDD structure, and runs `robot --dryrun`. It is a regression check for the skill itself, not the main authoring experience.
+`tests/e2e_test_agent_generates_valid_suites.robot` — sends requirement strings to the AI agent via Claude Agent SDK, validates the generated `.robot` suite passes BDD validation and dryrun, and compares against vetted golden baselines in `tests/golden/`.
 
 ## Explorer-Driven Usage
 

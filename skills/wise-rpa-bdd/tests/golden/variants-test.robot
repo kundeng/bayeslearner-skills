@@ -1,5 +1,11 @@
+*** Comments ***
+Requirement    Scrape laptop variant data from https://www.webscraper.io/test-sites/e-commerce/ajax/computers/laptops — discover product URLs, then for each product click HDD size buttons (128/256/512/1024) and extract the price for each variant.
+Expected       title,hdd_size,price
+Min Records    24
+
 *** Settings ***
 Documentation     Generated from tests/profiles/practice/variants-test.yaml
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment

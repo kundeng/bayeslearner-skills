@@ -1,5 +1,11 @@
+*** Comments ***
+Requirement    Scrape all laptops from https://www.webscraper.io/test-sites/e-commerce/static/computers/laptops — paginated site with next button, extract title, price, description, and rating.
+Expected       title,price,description,rating
+Min Records    100
+
 *** Settings ***
 Documentation     Generated from tests/profiles/practice/laptop-paginated-test.yaml
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment

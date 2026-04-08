@@ -1,11 +1,12 @@
-"""Robot Framework keyword library for BDD RPA suites with Playwright execution.
+"""Robot Framework keyword library for BDD RPA suites.
 
 Keywords build a declarative rule tree during test execution. The Suite Teardown
-(finalize_deployment) walks the tree with a real Playwright browser to scrape data.
+(finalize_deployment) walks the tree using robotframework-browser (RF's Playwright
+wrapper) to scrape data.
 
 Architecture: Plan-then-Execute (deferred execution model).
 - Phase A: RF keywords called sequentially build an in-memory scraping plan.
-- Phase B: finalize_deployment executes the entire plan with Playwright.
+- Phase B: finalize_deployment executes the plan via robotframework-browser keywords.
 
 This is necessary because RF keywords are called once each in sequence, but the
 scraping logic requires nested loops (pagination x element expansion x extraction).
@@ -213,53 +214,44 @@ def _parse_table_specs(specs: tuple[str, ...]) -> tuple[int, list[TableFieldSpec
 
 
 # ---------------------------------------------------------------------------
-# Execution engine
+# Execution engine (uses robotframework-browser)
 # ---------------------------------------------------------------------------
 
 class ExecutionEngine:
-    """Walks the rule tree with a Playwright browser."""
+    """Walks the rule tree using robotframework-browser keywords."""
 
     def __init__(self, ctx: DeploymentContext, headed: bool = False):
         self.ctx = ctx
         self.headed = headed
-        self._browser = None
-        self._pw = None
-        self._page = None
+        self._browser_lib = None
+
+    def _bl(self):
+        """Get the Browser library instance from RF."""
+        if self._browser_lib is None:
+            from robot.libraries.BuiltIn import BuiltIn
+            self._browser_lib = BuiltIn().get_library_instance('Browser')
+        return self._browser_lib
 
     def run(self) -> None:
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            logger.error(
-                "playwright not installed. Run: pip install playwright && "
-                "python -m playwright install chromium"
-            )
-            return
-
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
 
-        self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=not self.headed)
+        bl = self._bl()
+        bl.new_browser(headless=not self.headed)
 
         try:
             self._execute_resources()
             self._write_outputs(output_dir)
             self._check_quality_gates()
         finally:
-            if self._browser:
-                self._browser.close()
-            if self._pw:
-                self._pw.stop()
+            bl.close_browser("ALL")
 
     def _execute_resources(self) -> None:
-        # Order: resources without consumes first, then those that consume
         independent = []
         dependent = []
         for res in self.ctx.resources:
             consumes = res.consumes
             if not consumes:
-                # Check if any artifact this resource produces has consumes
                 for rname in res.root_names:
                     rule = res.rules.get(rname)
                     if rule:
@@ -268,12 +260,6 @@ class ExecutionEngine:
                             if art and art.consumes:
                                 consumes = art.consumes
                                 break
-                # Also check deeply for consumes option on artifacts
-                if not consumes:
-                    for art_name, art in self.ctx.artifacts.items():
-                        if art.consumes:
-                            # Check if this resource uses this artifact
-                            pass
             if consumes or res.entry_template or res.iterates_parent:
                 dependent.append(res)
             else:
@@ -286,27 +272,27 @@ class ExecutionEngine:
 
     def _execute_resource(self, res: ResourceContext) -> None:
         logger.info(f"Executing resource: {res.name}")
+        bl = self._bl()
         globals_ = res.globals_
-        timeout = int(globals_.get("timeout_ms", 30000))
+        timeout = globals_.get("timeout_ms", "30000")
         page_delay = int(globals_.get("page_load_delay_ms", 0))
-        user_agent = globals_.get("user_agent")
 
         ctx_opts = {}
+        user_agent = globals_.get("user_agent")
         if user_agent:
-            ctx_opts["user_agent"] = user_agent
+            ctx_opts["userAgent"] = user_agent
 
-        browser_ctx = self._browser.new_context(**ctx_opts)
-        browser_ctx.set_default_timeout(timeout)
-        self._page = browser_ctx.new_page()
+        bl.new_context(**ctx_opts)
+        bl.set_browser_timeout(f"{timeout}ms")
+        bl.new_page()
 
         try:
-            # Resolve entry URLs
             entry_urls = self._resolve_entry_urls(res)
 
             for entry_url in entry_urls:
                 logger.info(f"  Navigating to: {entry_url}")
                 try:
-                    self._page.goto(entry_url, wait_until="domcontentloaded")
+                    bl.go_to(entry_url)
                 except Exception as e:
                     logger.warn(f"  Navigation failed: {e}")
                     continue
@@ -314,26 +300,20 @@ class ExecutionEngine:
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
 
-                # Build child tree from rules
                 root_rules = self._build_rule_tree(res)
                 for root in root_rules:
-                    self._walk_rule(root, res, self._page, entry_url)
+                    self._walk_rule(root, res, None, entry_url)
         finally:
-            self._page.close()
-            browser_ctx.close()
+            bl.close_context()
 
     def _resolve_entry_urls(self, res: ResourceContext) -> list[str]:
-        """Resolve entry URLs, expanding templates from consumed artifacts."""
         url = res.entry_url
         if not url:
             return []
 
-        # Check for template pattern like https://site.com{field}
         if "{" in url and "}" in url:
-            # Find which artifact to consume
             consumes = res.consumes
             if not consumes:
-                # Look at artifact schemas for consumes
                 for art in self.ctx.artifacts.values():
                     if art.consumes:
                         consumes = art.consumes
@@ -355,7 +335,6 @@ class ExecutionEngine:
         return [url]
 
     def _build_rule_tree(self, res: ResourceContext) -> list[RuleNode]:
-        """Build tree from flat rules dict using parent references."""
         roots = []
         for rname in res.root_names:
             if rname in res.rules:
@@ -365,7 +344,6 @@ class ExecutionEngine:
         return roots
 
     def _attach_children(self, node: RuleNode, all_rules: dict[str, RuleNode]) -> None:
-        """Recursively attach child rules based on parent declarations."""
         node.children = []
         for name, rule in all_rules.items():
             if node.name in rule.parents:
@@ -373,25 +351,20 @@ class ExecutionEngine:
                 node.children.append(rule)
 
     def _walk_rule(self, rule: RuleNode, res: ResourceContext,
-                   scope: Any, current_url: str) -> list[dict]:
-        """Walk a rule node, executing actions and collecting records."""
+                   scope: str | None, current_url: str) -> list[dict]:
+        """Walk a rule node. scope is a CSS selector string or None for page."""
         records = []
 
-        # Check state preconditions
         if not self._check_state(rule, current_url):
             return records
 
-        # Execute actions
         self._execute_actions(rule, res)
 
-        # Handle expansion
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url)
         else:
-            # No expansion — extract directly if there are field specs
             record = self._extract_from_scope(rule, scope, current_url)
 
-            # Walk children
             child_records: dict[str, list] = {}
             for child in rule.children:
                 child_data = self._walk_rule(child, res, scope, current_url)
@@ -405,14 +378,13 @@ class ExecutionEngine:
                     record["_children"] = child_records
                 records.append(record)
 
-        # Emit to artifacts
         for target in rule.emit_targets:
             self._emit_records(target, rule, records, current_url)
 
         return records
 
     def _check_state(self, rule: RuleNode, current_url: str) -> bool:
-        """Check state preconditions for a rule."""
+        bl = self._bl()
         for check in rule.state_checks:
             if check.type == "url_matches":
                 if check.pattern not in current_url:
@@ -425,16 +397,16 @@ class ExecutionEngine:
                     return False
             elif check.type == "selector_exists":
                 try:
-                    if not self._page.query_selector(check.pattern):
+                    count = bl.get_element_count(check.pattern)
+                    if count == 0:
                         return False
                 except Exception:
                     return False
             elif check.type == "table_headers":
-                pass  # Informational only
+                pass
         return True
 
     def _execute_actions(self, rule: RuleNode, res: ResourceContext) -> None:
-        """Execute action list for a rule."""
         for action in rule.actions:
             try:
                 self._do_action(action, res)
@@ -442,78 +414,71 @@ class ExecutionEngine:
                 logger.warn(f"  Action {action.type} failed: {e}")
 
     def _do_action(self, action: Action, res: ResourceContext) -> None:
-        """Execute a single action."""
+        bl = self._bl()
         delay_ms = int(action.options.get("delay_ms", 0))
 
         if action.type == "click":
-            loc = self._page.locator(action.locator).first
-            loc.click()
+            bl.click(action.locator)
             if delay_ms:
                 time.sleep(delay_ms / 1000.0)
         elif action.type == "type":
-            loc = self._page.locator(action.locator).first
-            loc.fill(action.value or "")
+            bl.fill_text(action.locator, action.value or "")
             if delay_ms:
                 time.sleep(delay_ms / 1000.0)
         elif action.type == "select":
-            loc = self._page.locator(action.locator).first
-            loc.select_option(action.value or "")
+            bl.select_options_by(action.locator, "value", action.value or "")
         elif action.type == "scroll":
-            self._page.evaluate("window.scrollBy(0, window.innerHeight)")
+            bl.evaluate_javascript(None, "window.scrollBy(0, window.innerHeight)")
             time.sleep(0.5)
         elif action.type == "wait":
-            self._page.wait_for_load_state("networkidle")
+            bl.wait_for_load_state("networkidle")
         elif action.type == "wait_ms":
             ms = int(action.value or 0)
             time.sleep(ms / 1000.0)
         elif action.type == "open":
-            self._page.goto(action.value or "", wait_until="domcontentloaded")
+            bl.go_to(action.value or "")
             page_delay = int(res.globals_.get("page_load_delay_ms", 0))
             if page_delay:
                 time.sleep(page_delay / 1000.0)
         elif action.type == "open_bound":
-            # Open a URL from a previously extracted field
             pass
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str) -> list[dict]:
-        """Handle element/page expansion."""
         exp = rule.expansion
-        records = []
-
         if exp.over == "elements":
-            records = self._expand_elements(rule, res, current_url)
+            return self._expand_elements(rule, res, current_url)
         elif exp.over == "pages_next":
-            records = self._expand_pages_next(rule, res, current_url)
+            return self._expand_pages_next(rule, res, current_url)
         elif exp.over == "pages_numeric":
-            records = self._expand_pages_numeric(rule, res, current_url)
-
-        return records
+            return self._expand_pages_numeric(rule, res, current_url)
+        return []
 
     def _expand_elements(self, rule: RuleNode, res: ResourceContext,
                          current_url: str) -> list[dict]:
-        """Expand over matching elements."""
+        bl = self._bl()
         exp = rule.expansion
         selector = exp.scope
         limit = exp.limit
         records = []
 
         try:
-            elements = self._page.query_selector_all(selector)
+            count = bl.get_element_count(selector)
         except Exception as e:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
             return records
 
-        if limit and len(elements) > limit:
-            elements = elements[:limit]
+        if limit and count > limit:
+            count = limit
 
-        for elem in elements:
-            record = self._extract_from_element(rule, elem, current_url)
+        for i in range(count):
+            # RF Browser uses 1-based nth selector
+            elem_selector = f"{selector} >> nth={i}"
+            record = self._extract_from_element(rule, elem_selector, current_url)
 
-            # Walk children with this element as scope
             child_records: dict[str, list] = {}
             for child in rule.children:
-                child_data = self._walk_rule(child, res, elem, current_url)
+                child_data = self._walk_rule(child, res, elem_selector, current_url)
                 if child_data:
                     child_records[child.name] = child_data
 
@@ -526,34 +491,32 @@ class ExecutionEngine:
 
     def _expand_pages_next(self, rule: RuleNode, res: ResourceContext,
                            current_url: str) -> list[dict]:
-        """Paginate by clicking a next button."""
+        bl = self._bl()
         exp = rule.expansion
         next_selector = exp.locator
         limit = exp.limit
         records = []
 
         for page_num in range(limit):
-            page_url = self._page.url
+            page_url = bl.get_url()
             logger.info(f"    Page {page_num + 1}: {page_url}")
 
-            # Walk children on this page
             for child in rule.children:
-                child_data = self._walk_rule(child, res, self._page, page_url)
+                child_data = self._walk_rule(child, res, None, page_url)
                 if child_data:
                     records.extend(child_data)
 
-            # Try to click next
             try:
-                next_btn = self._page.query_selector(next_selector)
-                if not next_btn:
-                    logger.info(f"    No next button found, stopping pagination")
+                count = bl.get_element_count(next_selector)
+                if count == 0:
+                    logger.info("    No next button found, stopping pagination")
                     break
-                next_btn.click()
-                self._page.wait_for_load_state("domcontentloaded")
+                bl.click(next_selector)
+                bl.wait_for_load_state("domcontentloaded")
                 page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
-                time.sleep(0.5)  # Brief settle
+                time.sleep(0.5)
             except Exception as e:
                 logger.info(f"    Pagination ended: {e}")
                 break
@@ -562,7 +525,7 @@ class ExecutionEngine:
 
     def _expand_pages_numeric(self, rule: RuleNode, res: ResourceContext,
                               current_url: str) -> list[dict]:
-        """Paginate by clicking numeric page controls."""
+        bl = self._bl()
         exp = rule.expansion
         control_selector = exp.locator
         start = exp.start
@@ -570,30 +533,28 @@ class ExecutionEngine:
         records = []
 
         for page_num in range(start, start + limit):
-            page_url = self._page.url
+            page_url = bl.get_url()
             logger.info(f"    Numeric page {page_num}: {page_url}")
 
-            # Walk children on this page
             for child in rule.children:
-                child_data = self._walk_rule(child, res, self._page, page_url)
+                child_data = self._walk_rule(child, res, None, page_url)
                 if child_data:
                     records.extend(child_data)
 
-            # Click the next page number
             next_num = page_num + 1
             if next_num >= start + limit:
                 break
 
             try:
-                # Try to find a link with the page number
-                page_links = self._page.query_selector_all(control_selector)
+                count = bl.get_element_count(control_selector)
                 clicked = False
-                for link in page_links:
-                    href = link.get_attribute("href") or ""
-                    text = link.text_content() or ""
+                for idx in range(count):
+                    link_sel = f"{control_selector} >> nth={idx}"
+                    href = bl.get_attribute(link_sel, "href") or ""
+                    text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
-                        link.click()
-                        self._page.wait_for_load_state("domcontentloaded")
+                        bl.click(link_sel)
+                        bl.wait_for_load_state("domcontentloaded")
                         page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                         if page_delay:
                             time.sleep(page_delay / 1000.0)
@@ -609,16 +570,15 @@ class ExecutionEngine:
 
         return records
 
-    def _extract_from_scope(self, rule: RuleNode, scope: Any,
+    def _extract_from_scope(self, rule: RuleNode, scope: str | None,
                             current_url: str) -> dict | None:
-        """Extract fields from the current page scope."""
         if not rule.field_specs and not rule.table_spec:
             return None
 
         if rule.field_specs:
             data = {}
             for fs in rule.field_specs:
-                data[fs.name] = self._extract_field(fs, self._page)
+                data[fs.name] = self._extract_field(fs, scope)
             return {
                 "node": rule.name,
                 "url": current_url,
@@ -627,17 +587,16 @@ class ExecutionEngine:
             }
 
         if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, self._page, current_url, rule.name)
+            return self._extract_table_data(rule.table_spec, scope, current_url, rule.name)
 
         return None
 
-    def _extract_from_element(self, rule: RuleNode, element: Any,
+    def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
-        """Extract fields from a specific element."""
         if rule.field_specs:
             data = {}
             for fs in rule.field_specs:
-                data[fs.name] = self._extract_field(fs, element)
+                data[fs.name] = self._extract_field(fs, elem_selector)
             return {
                 "node": rule.name,
                 "url": current_url,
@@ -646,77 +605,83 @@ class ExecutionEngine:
             }
 
         if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, element, current_url, rule.name)
+            return self._extract_table_data(rule.table_spec, elem_selector, current_url, rule.name)
 
         return None
 
-    def _extract_field(self, fs: FieldSpec, scope: Any) -> Any:
-        """Extract a single field value from scope."""
+    def _extract_field(self, fs: FieldSpec, scope: str | None) -> Any:
+        bl = self._bl()
         try:
+            selector = f"{scope} >> {fs.locator}" if scope else fs.locator
+
             if fs.extractor == "text":
-                el = scope.query_selector(fs.locator)
-                if el:
-                    return (el.text_content() or "").strip()
-                return ""
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                return bl.get_text(selector).strip()
             elif fs.extractor == "attr":
-                el = scope.query_selector(fs.locator)
-                if el and fs.attr:
-                    return (el.get_attribute(fs.attr) or "").strip()
-                return ""
+                count = bl.get_element_count(selector)
+                if count == 0 or not fs.attr:
+                    return ""
+                return (bl.get_attribute(selector, fs.attr) or "").strip()
             elif fs.extractor == "grouped":
-                elements = scope.query_selector_all(fs.locator)
-                return [
-                    (el.text_content() or "").strip()
-                    for el in elements
-                    if (el.text_content() or "").strip()
-                ]
+                count = bl.get_element_count(selector)
+                results = []
+                for i in range(count):
+                    text = bl.get_text(f"{selector} >> nth={i}").strip()
+                    if text:
+                        results.append(text)
+                return results
             elif fs.extractor == "html":
-                el = scope.query_selector(fs.locator)
-                if el:
-                    return el.inner_html()
-                return ""
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                return bl.get_property(selector, "innerHTML") or ""
             elif fs.extractor == "link":
-                el = scope.query_selector(fs.locator)
-                if el:
-                    return el.get_attribute("href") or ""
-                return ""
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                return bl.get_attribute(selector, "href") or ""
             elif fs.extractor == "image":
-                el = scope.query_selector(fs.locator)
-                if el:
-                    return el.get_attribute("src") or ""
-                return ""
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                return bl.get_attribute(selector, "src") or ""
         except Exception as e:
             logger.warn(f"    Extract {fs.name} failed: {e}")
         return ""
 
-    def _extract_table_data(self, tspec: TableSpec, scope: Any,
+    def _extract_table_data(self, tspec: TableSpec, scope: str | None,
                             current_url: str, rule_name: str) -> dict | None:
-        """Extract a table into structured records."""
+        bl = self._bl()
         try:
-            table_el = scope.query_selector(tspec.locator)
-            if not table_el:
-                # If the scope itself matches (e.g., expanding over "table" elements),
-                # use the scope element directly
-                tag = ""
-                try:
-                    tag = scope.evaluate("el => el.tagName.toLowerCase()")
-                except Exception:
-                    pass
-                if tag == "table":
-                    table_el = scope
-            if not table_el:
+            table_sel = f"{scope} >> {tspec.locator}" if scope else tspec.locator
+            count = bl.get_element_count(table_sel)
+            if count == 0:
+                # Try scope itself as table
+                if scope:
+                    table_sel = scope
+                    count = bl.get_element_count(table_sel)
+                if count == 0:
+                    return None
+
+            # Get all rows via JS for efficiency
+            rows_data = bl.evaluate_javascript(
+                table_sel,
+                """(table) => {
+                    const rows = table.querySelectorAll('tr');
+                    return Array.from(rows).map(row => {
+                        const cells = row.querySelectorAll('th, td');
+                        return Array.from(cells).map(c => c.textContent.trim());
+                    });
+                }"""
+            )
+
+            if not rows_data or len(rows_data) <= tspec.header_row:
                 return None
 
-            rows = table_el.query_selector_all("tr")
-            if not rows or len(rows) <= tspec.header_row:
-                return None
+            headers = rows_data[tspec.header_row]
 
-            # Get headers
-            header_row = rows[tspec.header_row]
-            header_cells = header_row.query_selector_all("th, td")
-            headers = [(c.text_content() or "").strip() for c in header_cells]
-
-            # Map field specs to column indices
             field_map: dict[str, int] = {}
             for fs in tspec.fields:
                 for i, h in enumerate(headers):
@@ -724,19 +689,13 @@ class ExecutionEngine:
                         field_map[fs.name] = i
                         break
 
-            # Extract data rows
             table_records = []
-            for row in rows[tspec.header_row + 1:]:
-                cells = row.query_selector_all("td, th")
-                cell_texts = [(c.text_content() or "").strip() for c in cells]
-                if not any(cell_texts):
+            for row_cells in rows_data[tspec.header_row + 1:]:
+                if not any(row_cells):
                     continue
                 rec = {}
                 for fname, idx in field_map.items():
-                    if idx < len(cell_texts):
-                        rec[fname] = cell_texts[idx]
-                    else:
-                        rec[fname] = ""
+                    rec[fname] = row_cells[idx] if idx < len(row_cells) else ""
                 table_records.append(rec)
 
             return {
@@ -751,11 +710,9 @@ class ExecutionEngine:
 
     def _emit_records(self, target: str, rule: RuleNode,
                       records: list[dict], current_url: str) -> None:
-        """Emit records to an artifact store."""
         if target not in self.ctx.artifact_store:
             self.ctx.artifact_store[target] = []
 
-        art = self.ctx.artifacts.get(target)
         flatten_field = rule.emit_flatten_by.get(target)
         merge_key = rule.emit_merge_on.get(target)
 
@@ -764,8 +721,6 @@ class ExecutionEngine:
                 continue
 
             if flatten_field:
-                # Flatten: extract the named field (expected to be a list of dicts)
-                # and emit each sub-record as a top-level record
                 data = record.get("data", {})
                 items = data.get(flatten_field, [])
                 if isinstance(items, list):
@@ -781,7 +736,6 @@ class ExecutionEngine:
                 continue
 
             if merge_key:
-                # Merge on key: update existing record with same key value
                 data = record.get("data", {})
                 key_val = data.get(merge_key)
                 if key_val:
@@ -797,8 +751,6 @@ class ExecutionEngine:
             self.ctx.artifact_store[target].append(record)
 
     def _write_outputs(self, output_dir: str) -> None:
-        """Write artifact outputs to JSON files."""
-        # Write deployment summary
         summary = {
             "deployment": self.ctx.name,
             "artifacts": {},
@@ -816,7 +768,6 @@ class ExecutionEngine:
             if not art.output:
                 continue
 
-            # Apply deduplication
             if art.dedupe and records:
                 seen = set()
                 deduped = []
@@ -829,7 +780,6 @@ class ExecutionEngine:
                         deduped.append(r)
                 records = deduped
 
-            # Apply JMESPath query if specified
             output_data = records
             if art.query:
                 try:
@@ -840,16 +790,13 @@ class ExecutionEngine:
                 except Exception as e:
                     logger.warn(f"JMESPath query failed for {art_name}: {e}")
 
-            # Determine structure
             if art.structure == "flat":
-                # Flatten nested records: just emit data dicts
                 flat = []
                 for r in (output_data if isinstance(output_data, list) else [output_data]):
                     if isinstance(r, dict):
                         flat.append(r)
                 output_data = flat
 
-            # Write path
             override = self.ctx.write_overrides.get(art_name)
             if override:
                 out_path = Path(override)
@@ -861,14 +808,12 @@ class ExecutionEngine:
                 json.dump(output_data, f, indent=2, ensure_ascii=False)
             logger.info(f"  Wrote {len(records)} records to {out_path}")
 
-        # Write deployment summary
         summary_path = Path(output_dir) / f"{self.ctx.name}.json"
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
         logger.info(f"  Wrote deployment summary to {summary_path}")
 
     def _check_quality_gates(self) -> None:
-        """Check quality gates and log warnings."""
         qg = self.ctx.quality_gate
         total_records = sum(len(v) for v in self.ctx.artifact_store.values())
 

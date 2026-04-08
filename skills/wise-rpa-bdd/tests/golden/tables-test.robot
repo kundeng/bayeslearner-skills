@@ -1,5 +1,11 @@
+*** Comments ***
+Requirement    Scrape all table rows from https://www.webscraper.io/test-sites/tables — extract row number, first name, last name, and username from both HTML tables on the page.
+Expected       First Name,Last Name,Username
+Min Records    6
+
 *** Settings ***
 Documentation     Generated from tests/profiles/practice/tables-test.yaml
+Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
 Suite Teardown    Then I finalize deployment

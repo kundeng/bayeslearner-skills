@@ -13,7 +13,7 @@ WISE RPA BDD teaches an AI coding agent **structured, repeatable browser extract
 > **Rule 0 — Orient before acting.** Before opening a browser or drafting a suite, read `references/workflow.md § Big Picture` so you understand the shipped harness, keyword library, and what evidence you need to gather.
 
 ```
-/rrpa-orient → /rrpa-explore → /rrpa-evidence → /rrpa-draft → /rrpa-validate → /rrpa-refine → /rrpa-ship
+/rrpa-orient → /rrpa-explore → /rrpa-draft ⇄ /rrpa-review → /rrpa-ship
 ```
 
 Use when:
@@ -31,12 +31,10 @@ Do not use when:
 Use these mode verbs in your scratchpad, notes, or progress updates so the current action is obvious:
 
 - `/rrpa-orient` — read the workflow, keyword contract, and templates before touching the target
-- `/rrpa-explore` — inspect the live site, test selectors, map auth, pagination, and detail traversal
-- `/rrpa-evidence` — write down proof: selectors, DOM notes, merge keys, state markers, sample rows
-- `/rrpa-draft` — draft or refine the `.robot` suite using the shipped generic harness
-- `/rrpa-validate` — run `validate_suite.py` and `robot --dryrun`
-- `/rrpa-refine` — tighten variables, continuation rows, resources, and setup after validation
-- `/rrpa-ship` — deliver the suite plus the supporting evidence and outputs needed for reruns
+- `/rrpa-explore` — use Playwright MCP or agent-browser to visit the live site, test CSS selectors against the real DOM, map auth, pagination, and detail traversal. Every selector in the final suite must come from live exploration. Output: confirmed selectors, DOM notes, sample data.
+- `/rrpa-draft` — draft the `.robot` suite using WiseRpaBDD keywords, grounded in explore evidence
+- `/rrpa-review` — run `robot --dryrun` to verify keyword resolution, tighten variables, fix issues. Loops back to `/rrpa-draft` until the suite is clean.
+- `/rrpa-ship` — package the suite, WiseRpaBDD keyword library, and any custom resources into the target project with proper structure, documentation, and a ready-to-run layout
 
 ## Non-Negotiables
 
@@ -50,11 +48,11 @@ Use these mode verbs in your scratchpad, notes, or progress updates so the curre
 ## Agent Contract
 
 1. Start in `/rrpa-orient`, not `/rrpa-draft`.
-2. Use `/rrpa-explore` before committing to selectors or flow boundaries.
-3. Produce `/rrpa-evidence` before claiming the suite is ready.
-4. Prefer shipped templates, generic keywords, and validation harness pieces.
-5. Extend the harness only with new **generic** capabilities.
-6. The final suite must be readable and rerunnable by another agent.
+2. Use `/rrpa-explore` before committing to selectors or flow boundaries. No guessing.
+3. `/rrpa-draft` and `/rrpa-review` loop until `robot --dryrun` passes clean.
+4. Prefer shipped templates, generic keywords, and the WiseRpaBDD library.
+5. Extend the library only with new **generic** capabilities.
+6. `/rrpa-ship` delivers a self-contained package: suite, keyword library, docs, ready to run.
 
 ## Authoring Shape
 
@@ -71,17 +69,11 @@ Avoid collapsing the flow into one opaque keyword.
 
 ## Read Next
 
-- Operating loop and shipped harness: `references/workflow.md`
-- Format and suite layout: `references/format.md`
-- Allowed generic keywords: `references/keyword-contract.md`
-- Flow shape and structural conventions: `references/flow-shape.md`
-- Harness usage and validation loop: `references/harness.md`
-- Internal architecture and data model: `references/architecture.md`
-- AI extraction pattern: `references/ai-adapter.md`
-- Plain English field reference: `references/field-guide.md`
-- Positioning and alternatives: `references/comparisons.md`
-- Starter files: `templates/*.robot`
-- Tested examples and outputs: `examples/overview.md`
+- `references/workflow.md` — operating loop and phases
+- `references/format.md` — suite structure, patterns, and AI role
+- `references/keyword-reference.md` — complete keyword API with examples
+- `references/architecture.md` — runtime data model and internals
+- `references/harness.md` — validation and E2E testing
 
 ## Publish Bar
 

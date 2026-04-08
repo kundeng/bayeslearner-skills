@@ -6,3 +6,9 @@ __pycache__/
 *.pyc
 references/skills
 .ralph/
+
+# Robot Framework runtime output
+output.xml
+log.html
+report.html
+playwright-log.txt

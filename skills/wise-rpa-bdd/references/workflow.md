@@ -15,10 +15,8 @@ Use the mode verbs from `SKILL.md` while you work:
 
 - `/rrpa-orient`
 - `/rrpa-explore`
-- `/rrpa-evidence`
 - `/rrpa-draft`
-- `/rrpa-validate`
-- `/rrpa-refine`
+- `/rrpa-review`
 - `/rrpa-ship`
 
 **Task brief** — what the user wants extracted or automated.
