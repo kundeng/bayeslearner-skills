@@ -1,6 +1,6 @@
 *** Comments ***
-Requirement    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation from help.splunk.com. Two sections only. Discover page URLs from left-nav, extract title and body from each page. Output as markdown.
-Expected       title,body
+Requirement    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation from help.splunk.com. Two sections only. Discover page URLs from left-nav, extract title and body from each page. Use AI to extract code blocks and key definitions from the HTML body. Output as markdown.
+Expected       title,body,cleaned
 Min Records    20
 
 *** Settings ***
@@ -63,7 +63,7 @@ Resource discover_events
     ...    field=title    extractor=text    locator="nav a[href*='/detect-and-act-on-notable-events/4.21/']"
 
 Resource extract_entity_pages
-    [Documentation]    Produces: ['itsi_pages_nested', 'itsi_pages_flat']
+    [Documentation]    Produces: itsi_pages_nested, itsi_pages_flat
     [Setup]    Given I start resource "extract_entity_pages"
     Given I resolve entry from "discover_entity.toc.url"
     And I set resource globals
@@ -74,11 +74,15 @@ Resource extract_entity_pages
     Then I extract fields
     ...    field=title    extractor=text    locator="h1"
     ...    field=body    extractor=html    locator="article"
+    Then I extract with AI "cleaned"
+    ...    input=body
+    ...    prompt=Extract code blocks, CLI commands, configuration snippets, and key technical definitions from this documentation HTML. Return clean markdown.
+    ...    schema={"type":"object","properties":{"code_blocks":{"type":"array","items":"string"},"definitions":{"type":"array","items":{"type":"object","properties":{"term":"string","definition":"string"}}}}}
     And I emit to artifact "${ARTIFACT_ITSI_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_ITSI_PAGES_FLAT}"
 
 Resource extract_events_pages
-    [Documentation]    Produces: ['itsi_pages_nested', 'itsi_pages_flat']
+    [Documentation]    Produces: itsi_pages_nested, itsi_pages_flat
     [Setup]    Given I start resource "extract_events_pages"
     Given I resolve entry from "discover_events.toc.url"
     And I set resource globals
@@ -89,6 +93,10 @@ Resource extract_events_pages
     Then I extract fields
     ...    field=title    extractor=text    locator="h1"
     ...    field=body    extractor=html    locator="article"
+    Then I extract with AI "cleaned"
+    ...    input=body
+    ...    prompt=Extract code blocks, CLI commands, configuration snippets, and key technical definitions from this documentation HTML. Return clean markdown.
+    ...    schema={"type":"object","properties":{"code_blocks":{"type":"array","items":"string"},"definitions":{"type":"array","items":{"type":"object","properties":{"term":"string","definition":"string"}}}}}
     And I emit to artifact "${ARTIFACT_ITSI_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_ITSI_PAGES_FLAT}"
 

@@ -66,13 +66,23 @@ Variants Click Expansion
     Generated Suite Should Match Golden Baseline
     ...    ${GOLDEN_DIR}/variants-test.robot
 
-Splunk ITSI Event Analytics
+Splunk ITSI Event Analytics With AI Extraction
     [Tags]    needs-work
-    [Documentation]    Multi-section doc scraping with TOC discovery (needs more work)
+    [Documentation]    Multi-section doc scraping + AI extraction for code blocks
     ${path}=    Generate Suite From Requirement
-    ...    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation from help.splunk.com. Two sections only. Discover page URLs from left-nav, extract title and body from each page. Output as markdown.
+    ...    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation from help.splunk.com. Two sections only. Discover page URLs from left-nav, extract title and body from each page. Use AI to extract code blocks and key definitions from the HTML body. Output as markdown.
     ...    ${GENERATED_DIR}/splunk-itsi-focused-test.robot
     Generated Suite Should Pass BDD Validation
     Generated Suite Should Pass Dryrun
     Generated Suite Should Match Golden Baseline
     ...    ${GOLDEN_DIR}/splunk-itsi-focused-test.robot
+
+Quotes With Login Auth
+    [Documentation]    Auth test: login via state setup, then scrape quotes
+    ${path}=    Generate Suite From Requirement
+    ...    Log in to quotes.toscrape.com using the login page (username: admin, password: admin), then scrape quotes visible to authenticated users. Extract quote text, author, and tags. Paginate via next button for 3 pages.
+    ...    ${GENERATED_DIR}/quotes-login-test.robot
+    Generated Suite Should Pass BDD Validation
+    Generated Suite Should Pass Dryrun
+    Generated Suite Should Match Golden Baseline
+    ...    ${GOLDEN_DIR}/quotes-login-test.robot

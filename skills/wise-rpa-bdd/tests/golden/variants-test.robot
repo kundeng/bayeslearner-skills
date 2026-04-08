@@ -4,7 +4,8 @@ Expected       title,hdd_size,price
 Min Records    24
 
 *** Settings ***
-Documentation     Generated from tests/profiles/practice/variants-test.yaml
+Documentation     Two-resource variant extraction: discover product URLs via BFS,
+...               then use combination expansion to click each HDD size and extract prices.
 Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
@@ -67,7 +68,7 @@ Resource discover
     And I emit to artifact "${ARTIFACT_PRODUCT_URLS}"
 
 Resource variants
-    [Documentation]    Produces: ['variant_data', 'variant_data_flat']
+    [Documentation]    Produces: variant_data, variant_data_flat
     [Setup]    Given I start resource "variants" at "${ENTRY_VARIANTS}"
     And I set resource globals
     ...    timeout_ms=30000
@@ -76,50 +77,10 @@ Resource variants
     And I begin rule "detail_root"
     Given url matches "/ajax/product/"
     And selector ".swatches" exists
-    And I begin rule "hdd_128"
+    And I begin rule "hdd_variants"
     And I declare parents "detail_root"
-    When I click locator "button.swatch[value='128']"
-    ...    type=real
-    ...    delay_ms=1000
-    When I wait 500 ms
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h4.card-title"
-    ...    field=description    extractor=text    locator="p.description"
-    ...    field=price    extractor=text    locator="h4.price.pull-right"
-    ...    field=hdd_size    extractor=text    locator="button.swatch.active"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA}"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
-    And I begin rule "hdd_256"
-    And I declare parents "detail_root"
-    When I click locator "button.swatch[value='256']"
-    ...    type=real
-    ...    delay_ms=1000
-    When I wait 500 ms
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h4.card-title"
-    ...    field=description    extractor=text    locator="p.description"
-    ...    field=price    extractor=text    locator="h4.price.pull-right"
-    ...    field=hdd_size    extractor=text    locator="button.swatch.active"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA}"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
-    And I begin rule "hdd_512"
-    And I declare parents "detail_root"
-    When I click locator "button.swatch[value='512']"
-    ...    type=real
-    ...    delay_ms=1000
-    When I wait 500 ms
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h4.card-title"
-    ...    field=description    extractor=text    locator="p.description"
-    ...    field=price    extractor=text    locator="h4.price.pull-right"
-    ...    field=hdd_size    extractor=text    locator="button.swatch.active"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA}"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
-    And I begin rule "hdd_1024"
-    And I declare parents "detail_root"
-    When I click locator "button.swatch[value='1024']"
-    ...    type=real
-    ...    delay_ms=1000
+    When I expand over combinations
+    ...    action=click    control="button.swatch"    values=128|256|512|1024
     When I wait 500 ms
     Then I extract fields
     ...    field=title    extractor=text    locator="h4.card-title"
