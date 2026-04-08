@@ -261,6 +261,9 @@ class ExecutionEngine:
         if self._browser_lib is None:
             from robot.libraries.BuiltIn import BuiltIn
             self._browser_lib = BuiltIn().get_library_instance('Browser')
+            # Cache enum for wait_for_load_state
+            from Browser.utils.data_types import PageLoadStates
+            self._PageLoadStates = PageLoadStates
         return self._browser_lib
 
     def run(self) -> None:
@@ -404,10 +407,21 @@ class ExecutionEngine:
         if "{" in url and "}" in url:
             consumes = res.consumes
             if not consumes:
-                for art in self.ctx.artifacts.values():
-                    if art.consumes:
+                # Check artifacts that this resource's rules emit to
+                res_emit_targets = set()
+                for rule in res.rules.values():
+                    res_emit_targets.update(rule.emit_targets)
+                # Find which artifact has consumes and is emitted by this resource
+                for art_name, art in self.ctx.artifacts.items():
+                    if art.consumes and art_name in res_emit_targets:
                         consumes = art.consumes
                         break
+                # Fallback: any artifact with consumes
+                if not consumes:
+                    for art in self.ctx.artifacts.values():
+                        if art.consumes:
+                            consumes = art.consumes
+                            break
 
             if consumes and consumes in self.ctx.artifact_store:
                 records = self.ctx.artifact_store[consumes]
@@ -555,7 +569,13 @@ class ExecutionEngine:
         if not state_ok:
             return records
 
-        self._execute_actions(rule, res)
+        self._execute_actions(rule, res, context=ctx)
+
+        # Refresh current_url after actions (click may have navigated)
+        try:
+            current_url = self._bl().get_url()
+        except Exception:
+            pass
 
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url,
@@ -636,7 +656,7 @@ class ExecutionEngine:
             bl.evaluate_javascript(None, "window.scrollBy(0, window.innerHeight)")
             time.sleep(0.5)
         elif action.type == "wait":
-            bl.wait_for_load_state("networkidle")
+            bl.wait_for_load_state(self._PageLoadStates.networkidle)
         elif action.type == "wait_ms":
             ms = int(action.value or 0)
             time.sleep(ms / 1000.0)
@@ -767,9 +787,11 @@ class ExecutionEngine:
             page_url = bl.get_url()
             logger.info(f"    Page {page_num + 1}: {page_url}")
 
+            # Fresh executed set per page — children must re-run on each page
+            page_executed: set[str] = set()
             for child in rule.children:
                 child_data = self._walk_rule(child, res, None, page_url,
-                                             executed=executed, context=context)
+                                             executed=page_executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
@@ -779,7 +801,7 @@ class ExecutionEngine:
                     logger.info("    No next button found, stopping pagination")
                     break
                 bl.click(next_selector)
-                bl.wait_for_load_state("domcontentloaded")
+                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
                 page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
@@ -805,9 +827,11 @@ class ExecutionEngine:
             page_url = bl.get_url()
             logger.info(f"    Numeric page {page_num}: {page_url}")
 
+            # Fresh executed set per page — children must re-run on each page
+            page_executed: set[str] = set()
             for child in rule.children:
                 child_data = self._walk_rule(child, res, None, page_url,
-                                             executed=executed, context=context)
+                                             executed=page_executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
@@ -824,7 +848,7 @@ class ExecutionEngine:
                     text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
                         bl.click(link_sel)
-                        bl.wait_for_load_state("domcontentloaded")
+                        bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
                         page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                         if page_delay:
                             time.sleep(page_delay / 1000.0)
@@ -903,19 +927,27 @@ class ExecutionEngine:
 
             # Wait for page to settle
             try:
-                bl.wait_for_load_state("domcontentloaded")
+                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
             except Exception:
                 pass
             time.sleep(0.3)
 
-            # Walk children for this combination
+            # Build per-combo context
             combo_ctx = dict(context or {})
             for axis, value in zip(axes, combo):
                 combo_ctx[f"_combo_{axis.control}"] = value
 
+            # Extract from this rule's own field specs (if any) for each combo
+            if rule.field_specs:
+                record = self._extract_from_scope(rule, None, current_url)
+                if record:
+                    records.append(record)
+
+            # Walk children for this combination
+            combo_executed: set[str] = set()
             for child in rule.children:
                 child_data = self._walk_rule(child, res, None, current_url,
-                                             executed=executed, context=combo_ctx)
+                                             executed=combo_executed, context=combo_ctx)
                 if child_data:
                     records.extend(child_data)
 
@@ -1215,7 +1247,7 @@ class ExecutionEngine:
             except Exception as e:
                 logger.warn(f"  Setup action {sa.action} failed: {e}")
         try:
-            bl.wait_for_load_state("networkidle")
+            bl.wait_for_load_state(self._PageLoadStates.networkidle)
         except Exception:
             pass
 
