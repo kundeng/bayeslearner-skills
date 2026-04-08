@@ -1,9 +1,9 @@
 ---
-name: ralph-deploy
-description: Plan and configure ralph-orchestrator deployments for projects at any stage — from a vague phase plan to a mature codebase. Use this skill whenever the user wants to set up ralph for a new project, choose between deployment topologies (direct, Claude+MCP, multi-project supervisor), pick the right config for their project's maturity, run oneshot autonomous builds, or manage multiple concurrent ralph loops across tmux sessions. Also use when the user asks "how should I run ralph on this?", mentions phase plans, or wants to configure cost budgets, hat workflows, or guardrails for a specific project type.
+name: ralph-loop
+description: Launch and manage ralph-orchestrator planner→builder���reviewer loops for autonomous multi-step implementation. Use this skill whenever the user says "ralph loop", "ralph orchestrate", "ralph run", wants to delegate work to a plan/build/review cycle, mentions phase plans, wants to configure loop iterations (max activations), hat workflows, cost budgets, or guardrails. Also trigger when the user asks to "orchestrate", "delegate to ralph", "launch a loop", "reduce max to N", or references the planner/builder/reviewer pattern. Covers: project setup, spec writing, tmux launch, loop monitoring, steering, and ceremony.
 ---
 
-# Ralph Deploy
+# Ralph Loop
 
 Configure and launch ralph-orchestrator. Install: `cargo install --git https://github.com/mikeyobrien/ralph-orchestrator ralph-cli`
 
