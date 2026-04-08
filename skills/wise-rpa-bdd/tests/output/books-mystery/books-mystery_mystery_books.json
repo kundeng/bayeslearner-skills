@@ -1,0 +1,354 @@
+[
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Sharp Objects",
+      "price": "£47.82",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.683257+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "In a Dark, Dark Wood",
+      "price": "£19.63",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.702079+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "The Past Never Ends",
+      "price": "£56.50",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.720878+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "A Murder in Time",
+      "price": "£16.64",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.733803+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "The Murder of Roger Ackroyd (Hercule Poirot #4)",
+      "price": "£44.10",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.746994+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "The Last Mile (Amos Decker #2)",
+      "price": "£54.21",
+      "rating": "star-rating Two",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.760365+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "That Darkness (Gardiner and Renner #1)",
+      "price": "£13.92",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.778004+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Tastes Like Fear (DI Marnie Rome #3)",
+      "price": "£10.69",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.791556+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "A Time of Torment (Charlie Parker #14)",
+      "price": "£48.35",
+      "rating": "star-rating Five",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.804398+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "A Study in Scarlet (Sherlock Holmes #1)",
+      "price": "£16.73",
+      "rating": "star-rating Two",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.817689+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Poisonous (Max Revere Novels #3)",
+      "price": "£26.80",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.830906+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Murder at the 42nd Street Library (Raymond Ambler #1)",
+      "price": "£54.36",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.845429+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Most Wanted",
+      "price": "£35.28",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.858320+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Hide Away (Eve Duncan #20)",
+      "price": "£11.84",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.870516+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Boar Island (Anna Pigeon #19)",
+      "price": "£59.48",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.882627+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "The Widow",
+      "price": "£27.26",
+      "rating": "star-rating Two",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.894015+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Playing with Fire",
+      "price": "£13.71",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.905397+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "What Happened on Beale Street (Secrets of the South Mysteries #2)",
+      "price": "£25.37",
+      "rating": "star-rating Five",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.917575+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "The Bachelor Girl's Guide to Murder (Herringford and Watts Mysteries #1)",
+      "price": "£52.30",
+      "rating": "star-rating Five",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.932601+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+    "data": {
+      "title": "Delivering the Truth (Quaker Midwife Mystery #1)",
+      "price": "£20.89",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:44.949734+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Mysterious Affair at Styles (Hercule Poirot #1)",
+      "price": "£24.80",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.564053+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "In the Woods (Dublin Murder Squad #1)",
+      "price": "£38.38",
+      "rating": "star-rating Two",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.575917+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Silkworm (Cormoran Strike #2)",
+      "price": "£23.05",
+      "rating": "star-rating Five",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.587477+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Exiled",
+      "price": "£43.45",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.600281+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Cuckoo's Calling (Cormoran Strike #1)",
+      "price": "£19.21",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.613704+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "Extreme Prey (Lucas Davenport #26)",
+      "price": "£25.40",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.627497+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "Career of Evil (Cormoran Strike #3)",
+      "price": "£24.72",
+      "rating": "star-rating Two",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.638518+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The No. 1 Ladies' Detective Agency (No. 1 Ladies' Detective Agency #1)",
+      "price": "£57.70",
+      "rating": "star-rating Four",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.649337+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Girl You Lost",
+      "price": "£12.29",
+      "rating": "star-rating Five",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.659732+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "The Girl In The Ice (DCI Erika Foster #1)",
+      "price": "£15.85",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.671408+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "Blood Defense (Samantha Brinkman #1)",
+      "price": "£20.30",
+      "rating": "star-rating Three",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.684257+00:00"
+  },
+  {
+    "node": "books",
+    "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/page-2.html",
+    "data": {
+      "title": "1st to Die (Women's Murder Club #1)",
+      "price": "£53.98",
+      "rating": "star-rating One",
+      "availability": "In stock"
+    },
+    "extracted_at": "2026-04-08T14:34:45.697570+00:00"
+  }
+]

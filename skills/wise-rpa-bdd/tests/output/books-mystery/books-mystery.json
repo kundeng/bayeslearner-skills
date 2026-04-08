@@ -1,0 +1,26 @@
+{
+  "deployment": "books-mystery",
+  "artifacts": {
+    "mystery_books": {
+      "record_count": 32,
+      "output": true,
+      "structure": "nested"
+    },
+    "mystery_books_flat": {
+      "record_count": 32,
+      "output": true,
+      "structure": "flat"
+    },
+    "mystery_books_query_down": {
+      "record_count": 0,
+      "output": true,
+      "structure": "flat"
+    },
+    "mystery_books_query_up": {
+      "record_count": 0,
+      "output": true,
+      "structure": "flat"
+    }
+  },
+  "completed_at": "2026-04-08T14:34:45.702972+00:00"
+}

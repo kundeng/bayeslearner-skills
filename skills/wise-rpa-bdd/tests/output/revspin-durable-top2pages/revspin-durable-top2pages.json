@@ -1,0 +1,16 @@
+{
+  "deployment": "revspin-durable-top2pages",
+  "artifacts": {
+    "rubbers_nested": {
+      "record_count": 0,
+      "output": true,
+      "structure": "nested"
+    },
+    "rubbers_flat": {
+      "record_count": 0,
+      "output": true,
+      "structure": "flat"
+    }
+  },
+  "completed_at": "2026-04-08T14:34:43.448693+00:00"
+}
