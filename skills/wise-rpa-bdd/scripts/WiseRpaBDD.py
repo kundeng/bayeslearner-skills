@@ -247,28 +247,79 @@ class ExecutionEngine:
             bl.close_browser("ALL")
 
     def _execute_resources(self) -> None:
-        independent = []
-        dependent = []
-        for res in self.ctx.resources:
-            consumes = res.consumes
-            if not consumes:
-                for rname in res.root_names:
-                    rule = res.rules.get(rname)
-                    if rule:
-                        for target in rule.emit_targets:
-                            art = self.ctx.artifacts.get(target)
-                            if art and art.consumes:
-                                consumes = art.consumes
-                                break
-            if consumes or res.entry_template or res.iterates_parent:
-                dependent.append(res)
-            else:
-                independent.append(res)
+        """Execute resources in topological order based on artifact dependencies."""
+        resources = self.ctx.resources
+        if not resources:
+            return
 
-        for res in independent:
-            self._execute_resource(res)
-        for res in dependent:
-            self._execute_resource(res)
+        # Build maps: which artifacts each resource produces and consumes
+        res_produces: dict[str, set[str]] = {}  # resource name → artifact names
+        res_consumes: dict[str, set[str]] = {}  # resource name → artifact names
+        art_producer: dict[str, str] = {}       # artifact name → resource name
+
+        for res in resources:
+            produces = set()
+            consumes = set()
+            # Collect all emit targets from rules
+            for rule in res.rules.values():
+                for target in rule.emit_targets:
+                    produces.add(target)
+            # Collect consumption edges
+            if res.consumes:
+                consumes.add(res.consumes)
+            if res.iterates_parent:
+                # iterates_parent references a test case name, not an artifact
+                # but the resource depends on whatever that case produced
+                pass
+            # Check artifact-level consumes
+            for art_name in produces:
+                art = self.ctx.artifacts.get(art_name)
+                if art and art.consumes:
+                    consumes.add(art.consumes)
+            # Template URLs imply consumption
+            if res.entry_template:
+                for art_name, art in self.ctx.artifacts.items():
+                    if art.consumes and art_name in produces:
+                        consumes.add(art.consumes)
+
+            res_produces[res.name] = produces
+            res_consumes[res.name] = consumes
+            for art in produces:
+                art_producer[art] = res.name
+
+        # Build adjacency: if resource B consumes artifact X produced by A → A must run before B
+        in_degree: dict[str, int] = {r.name: 0 for r in resources}
+        dependents: dict[str, list[str]] = {r.name: [] for r in resources}
+
+        for res in resources:
+            for consumed_art in res_consumes.get(res.name, set()):
+                producer = art_producer.get(consumed_art)
+                if producer and producer != res.name:
+                    dependents[producer].append(res.name)
+                    in_degree[res.name] += 1
+
+        # Kahn's algorithm
+        queue = [r.name for r in resources if in_degree[r.name] == 0]
+        ordered: list[str] = []
+
+        while queue:
+            name = queue.pop(0)
+            ordered.append(name)
+            for dep in dependents.get(name, []):
+                in_degree[dep] -= 1
+                if in_degree[dep] == 0:
+                    queue.append(dep)
+
+        if len(ordered) != len(resources):
+            cycle_members = [r.name for r in resources if r.name not in ordered]
+            raise RuntimeError(
+                f"Cycle detected in resource dependencies: {cycle_members}"
+            )
+
+        # Execute in topological order
+        res_by_name = {r.name: r for r in resources}
+        for name in ordered:
+            self._execute_resource(res_by_name[name])
 
     def _execute_resource(self, res: ResourceContext) -> None:
         logger.info(f"Executing resource: {res.name}")
