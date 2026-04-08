@@ -168,7 +168,8 @@ work.start → [planner] → plan.ready → [builder] → build.done → [review
 ```
 
 Use when: the plan is uncertain and may need revision based on review findings.
-The reviewer can emit `replan` to change direction. Best for exploratory work.
+The reviewer can emit `replan` to change direction. Best for exploratory work
+and specs with 4+ tasks.
 
 ### 2-hat: planner+builder → reviewer
 
@@ -178,9 +179,10 @@ work.start → [planner+builder] → build.done → [reviewer]
 
 Use when: the task requires deep research that the builder needs in-context.
 The planner reads the codebase, understands the architecture, and implements
-in the same session — no lossy scratchpad handoff. Best for: complex refactors,
-engine rewrites, parity work where understanding thousands of lines of reference
-code is critical. The reviewer still runs verification independently.
+in the same session — no lossy scratchpad handoff. Best for: small specs (1-3
+tasks) where context is critical. **Warning:** combining roles on large specs
+causes the first activation to absorb too much context and stall. Prefer
+3-hat with phase-scoped planning for specs with 4+ tasks.
 
 ### 2-hat: planner → builder+reviewer
 
@@ -192,6 +194,20 @@ Use when: tasks have clear pass/fail criteria and the builder should self-verify
 Saves an iteration per task by skipping the separate review cycle. The builder
 runs tests, lint, dryrun before emitting. Best for: well-defined tasks with
 mechanical acceptance criteria (all tests pass, dryrun clean, files exist).
+
+### Phase-scoped planning
+
+For specs with many tasks, instruct the planner to plan only the next 2-3
+tasks per activation — not the entire spec. This prevents the planner from
+spending a full iteration reading the whole codebase upfront. The planner
+advances phase by phase as the reviewer emits `phase.next`.
+
+### Reviewer discipline
+
+The reviewer must run verification commands itself. It should never reject
+because the `build.done` payload lacks formatted evidence. If the reviewer
+wants to verify coverage, lint, or dryrun — it runs them. It decides based
+on its own command output, not on what the builder reported.
 
 ## Operational Discipline
 
