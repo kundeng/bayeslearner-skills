@@ -1,8 +1,18 @@
-# Python bytecode
+# Python
 __pycache__/
 *.pyc
 
-# Robot Framework output
-log.html
+# uv
+.venv/
+uv.lock
+
+# Robot Framework runtime output (goes everywhere if not contained)
 output.xml
+log.html
 report.html
+playwright-log.txt
+output/
+
+# Test runtime artifacts
+tests/generated/
+tests/output/
