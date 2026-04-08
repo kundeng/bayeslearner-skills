@@ -68,14 +68,22 @@ class Action:
 
 
 @dataclass
+class CombinationAxis:
+    action: str  # type, select, click
+    control: str  # CSS selector
+    values: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Expansion:
-    over: str  # elements, pages_next, pages_numeric
+    over: str  # elements, pages_next, pages_numeric, combinations
     scope: str | None = None
     locator: str | None = None
     limit: int = 100
     start: int = 1
     order: str = "dfs"
     options: dict = field(default_factory=dict)
+    axes: list[CombinationAxis] = field(default_factory=list)
 
 
 @dataclass
@@ -92,6 +100,8 @@ class RuleNode:
     emit_flatten_by: dict[str, str] = field(default_factory=dict)
     emit_merge_on: dict[str, str] = field(default_factory=dict)
     children: list[RuleNode] = field(default_factory=list)
+    retry_max: int = 0
+    retry_delay_ms: int = 1000
 
 
 @dataclass
@@ -99,6 +109,7 @@ class ArtifactSchema:
     name: str
     fields: list[dict] = field(default_factory=list)
     output: bool = False
+    format: str = "json"  # json, jsonl, csv, markdown
     structure: str = "flat"  # nested or flat
     dedupe: str | None = None
     query: str | None = None
@@ -126,6 +137,21 @@ class ResourceContext:
 
 
 @dataclass
+class HookDef:
+    name: str
+    lifecycle_point: str  # post_discover, pre_extract, post_extract, pre_assemble, post_assemble
+    config: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SetupAction:
+    action: str  # open, input, password, click
+    css: str = ""
+    url: str = ""
+    value: str = ""
+
+
+@dataclass
 class DeploymentContext:
     name: str
     artifacts: dict[str, ArtifactSchema] = field(default_factory=dict)
@@ -134,6 +160,10 @@ class DeploymentContext:
     quality_gate: QualityGate = field(default_factory=QualityGate)
     output_dir: str = ""
     write_overrides: dict[str, str] = field(default_factory=dict)
+    hooks: list[HookDef] = field(default_factory=list)
+    setup_actions: list[SetupAction] = field(default_factory=list)
+    setup_skip_when: str = ""
+    interrupt_selectors: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +368,9 @@ class ExecutionEngine:
         bl.new_page()
 
         try:
+            # Run state setup (auth, consent) if configured
+            self._run_setup(bl)
+
             entry_urls = self._resolve_entry_urls(res)
 
             for entry_url in entry_urls:
@@ -347,6 +380,8 @@ class ExecutionEngine:
                 except Exception as e:
                     logger.warn(f"  Navigation failed: {e}")
                     continue
+
+                self._dismiss_interrupts(bl)
 
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
@@ -506,7 +541,17 @@ class ExecutionEngine:
         ctx = dict(context or {})
         records: list[dict] = []
 
-        if not self._check_state(rule, current_url):
+        # State check with retry
+        state_ok = self._check_state(rule, current_url)
+        if not state_ok and rule.retry_max > 0:
+            for attempt in range(1, rule.retry_max + 1):
+                logger.info(f"  Retry {attempt}/{rule.retry_max} for rule '{rule.name}'")
+                time.sleep(rule.retry_delay_ms / 1000.0)
+                self._execute_actions(rule, res)
+                state_ok = self._check_state(rule, current_url)
+                if state_ok:
+                    break
+        if not state_ok:
             return records
 
         self._execute_actions(rule, res)
@@ -614,6 +659,9 @@ class ExecutionEngine:
         elif exp.over == "pages_numeric":
             return self._expand_pages_numeric(rule, res, current_url,
                                               executed=executed, context=context)
+        elif exp.over == "combinations":
+            return self._expand_combinations(rule, res, current_url,
+                                             executed=executed, context=context)
         return []
 
     def _expand_elements(self, rule: RuleNode, res: ResourceContext,
@@ -624,6 +672,7 @@ class ExecutionEngine:
         exp = rule.expansion
         selector = exp.scope
         limit = exp.limit
+        use_bfs = (exp.order == "bfs")
         records = []
 
         try:
@@ -635,27 +684,51 @@ class ExecutionEngine:
         if limit and count > limit:
             count = limit
 
-        for i in range(count):
-            elem_selector = f"{selector} >> nth={i}"
-            record = self._extract_from_element(rule, elem_selector, current_url)
+        if use_bfs:
+            # BFS: extract ALL elements first, then walk children per element
+            extracted: list[tuple[str, dict | None, dict]] = []
+            for i in range(count):
+                elem_selector = f"{selector} >> nth={i}"
+                record = self._extract_from_element(rule, elem_selector, current_url)
+                elem_ctx = dict(context or {})
+                if record and record.get("data"):
+                    elem_ctx.update(record["data"])
+                extracted.append((elem_selector, record, elem_ctx))
 
-            # Build per-element context from parent context + this extraction
-            elem_ctx = dict(context or {})
-            if record and record.get("data"):
-                elem_ctx.update(record["data"])
+            for elem_selector, record, elem_ctx in extracted:
+                child_records: dict[str, list] = {}
+                for child in rule.children:
+                    child_data = self._walk_rule(child, res, elem_selector,
+                                                 current_url, executed=executed,
+                                                 context=elem_ctx)
+                    if child_data:
+                        child_records[child.name] = child_data
+                if record is not None:
+                    if child_records:
+                        record["_children"] = child_records
+                    records.append(record)
+        else:
+            # DFS: process each element fully before next
+            for i in range(count):
+                elem_selector = f"{selector} >> nth={i}"
+                record = self._extract_from_element(rule, elem_selector, current_url)
 
-            child_records: dict[str, list] = {}
-            for child in rule.children:
-                child_data = self._walk_rule(child, res, elem_selector,
-                                             current_url, executed=executed,
-                                             context=elem_ctx)
-                if child_data:
-                    child_records[child.name] = child_data
+                elem_ctx = dict(context or {})
+                if record and record.get("data"):
+                    elem_ctx.update(record["data"])
 
-            if record is not None:
-                if child_records:
-                    record["_children"] = child_records
-                records.append(record)
+                child_records: dict[str, list] = {}
+                for child in rule.children:
+                    child_data = self._walk_rule(child, res, elem_selector,
+                                                 current_url, executed=executed,
+                                                 context=elem_ctx)
+                    if child_data:
+                        child_records[child.name] = child_data
+
+                if record is not None:
+                    if child_records:
+                        record["_children"] = child_records
+                    records.append(record)
 
         return records
 
@@ -746,26 +819,116 @@ class ExecutionEngine:
 
         return records
 
+    def _expand_combinations(self, rule: RuleNode, res: ResourceContext,
+                             current_url: str, *,
+                             executed: set[str] | None = None,
+                             context: dict[str, Any] | None = None) -> list[dict]:
+        """Cartesian product of combination axes."""
+        bl = self._bl()
+        exp = rule.expansion
+        axes = exp.axes
+        if not axes:
+            return []
+
+        # Build value lists per axis (support "auto" discovery)
+        axis_values: list[list[str]] = []
+        for axis in axes:
+            if axis.values == ["auto"]:
+                # Discover values from the control element
+                try:
+                    if axis.action == "select":
+                        vals = bl.evaluate_javascript(
+                            axis.control,
+                            "(el) => Array.from(el.options).map(o => o.value)"
+                        )
+                    else:
+                        count = bl.get_element_count(axis.control)
+                        vals = []
+                        for i in range(count):
+                            text = bl.get_text(f"{axis.control} >> nth={i}").strip()
+                            if text:
+                                vals.append(text)
+                    axis_values.append(vals)
+                except Exception as e:
+                    logger.warn(f"  Auto-discover failed for {axis.control}: {e}")
+                    axis_values.append([])
+            else:
+                axis_values.append(axis.values)
+
+        # Cartesian product
+        import itertools
+        combos = list(itertools.product(*axis_values))
+        records = []
+
+        for combo in combos:
+            # Apply each axis action
+            for axis, value in zip(axes, combo):
+                try:
+                    if axis.action == "type":
+                        bl.fill_text(axis.control, value)
+                    elif axis.action == "select":
+                        bl.select_options_by(axis.control, "value", value)
+                    elif axis.action == "click":
+                        # Find the matching element by text
+                        count = bl.get_element_count(axis.control)
+                        for i in range(count):
+                            sel = f"{axis.control} >> nth={i}"
+                            text = bl.get_text(sel).strip()
+                            if text == value:
+                                bl.click(sel)
+                                break
+                except Exception as e:
+                    logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
+
+            # Wait for page to settle
+            try:
+                bl.wait_for_load_state("domcontentloaded")
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+            # Walk children for this combination
+            combo_ctx = dict(context or {})
+            for axis, value in zip(axes, combo):
+                combo_ctx[f"_combo_{axis.control}"] = value
+
+            for child in rule.children:
+                child_data = self._walk_rule(child, res, None, current_url,
+                                             executed=executed, context=combo_ctx)
+                if child_data:
+                    records.extend(child_data)
+
+        return records
+
     def _extract_from_scope(self, rule: RuleNode, scope: str | None,
                             current_url: str) -> dict | None:
-        if not rule.field_specs and not rule.table_spec:
+        if not rule.field_specs and not rule.table_spec and not rule.ai_extraction:
             return None
 
+        data = {}
         if rule.field_specs:
-            data = {}
             for fs in rule.field_specs:
                 data[fs.name] = self._extract_field(fs, scope)
-            return {
-                "node": rule.name,
-                "url": current_url,
-                "data": data,
-                "extracted_at": datetime.now(timezone.utc).isoformat(),
-            }
 
         if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, scope, current_url, rule.name)
+            table_result = self._extract_table_data(rule.table_spec, scope, current_url, rule.name)
+            if table_result:
+                data.update(table_result.get("data", {}))
 
-        return None
+        if rule.ai_extraction:
+            ai_result = self._run_ai_extraction(rule.ai_extraction, data)
+            if ai_result:
+                data.update(ai_result)
+
+        if not data:
+            return None
+
+        return {
+            "node": rule.name,
+            "url": current_url,
+            "data": data,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
@@ -884,6 +1047,107 @@ class ExecutionEngine:
             logger.warn(f"    Table extraction failed: {e}")
             return None
 
+    def _run_ai_extraction(self, config: dict, existing_data: dict) -> dict | None:
+        """Run AI extraction on previously extracted text via Claude API."""
+        opts = _parse_options(tuple(config.get("specs", [])))
+        name = config.get("name", "ai_result")
+        prompt = opts.get("prompt", "Extract structured data from the text.")
+        input_field = opts.get("input")
+        schema = opts.get("schema")
+        categories = opts.get("categories")
+
+        # Get input text from already-extracted data
+        input_text = ""
+        if input_field and input_field in existing_data:
+            input_text = str(existing_data[input_field])
+        elif not input_field:
+            input_text = json.dumps(existing_data, ensure_ascii=False)
+
+        if not input_text:
+            return None
+
+        # Build the AI prompt
+        full_prompt = prompt
+        if categories:
+            full_prompt += f"\n\nClassify into one of: {categories}"
+        if schema:
+            full_prompt += f"\n\nReturn JSON matching this schema: {schema}"
+        full_prompt += f"\n\nInput:\n{input_text}"
+        full_prompt += "\n\nRespond with ONLY valid JSON, no explanation."
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic()
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": full_prompt}],
+            )
+            result_text = response.content[0].text.strip()
+            # Parse JSON response
+            parsed = json.loads(result_text)
+            return {name: parsed}
+        except ImportError:
+            logger.warn("anthropic SDK not installed, skipping AI extraction")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warn(f"AI extraction returned invalid JSON: {e}")
+            return {name: result_text}
+        except Exception as e:
+            logger.warn(f"AI extraction failed: {e}")
+            return None
+
+    def _run_setup(self, bl: Any) -> None:
+        """Execute state setup actions (auth, consent)."""
+        if not self.ctx.setup_actions:
+            return
+        # Check skip condition
+        if self.ctx.setup_skip_when:
+            try:
+                count = bl.get_element_count(self.ctx.setup_skip_when)
+                if count > 0:
+                    logger.info("  Setup skipped — skip_when selector found")
+                    return
+            except Exception:
+                pass
+        for sa in self.ctx.setup_actions:
+            try:
+                if sa.action == "open":
+                    bl.go_to(sa.url)
+                elif sa.action == "input":
+                    bl.fill_text(sa.css, sa.value)
+                elif sa.action == "password":
+                    bl.fill_text(sa.css, sa.value)
+                elif sa.action == "click":
+                    bl.click(sa.css)
+            except Exception as e:
+                logger.warn(f"  Setup action {sa.action} failed: {e}")
+        try:
+            bl.wait_for_load_state("networkidle")
+        except Exception:
+            pass
+
+    def _dismiss_interrupts(self, bl: Any) -> None:
+        """Auto-dismiss overlay selectors (cookie banners, modals)."""
+        for selector in self.ctx.interrupt_selectors:
+            try:
+                count = bl.get_element_count(selector)
+                if count > 0:
+                    bl.click(selector)
+                    logger.info(f"  Dismissed interrupt: {selector}")
+            except Exception:
+                pass
+
+    def _invoke_hooks(self, lifecycle_point: str, data: dict) -> dict:
+        """Invoke registered hooks at a lifecycle point."""
+        for hook in self.ctx.hooks:
+            if hook.lifecycle_point == lifecycle_point:
+                logger.info(f"  Hook '{hook.name}' at {lifecycle_point}")
+                # Hooks can transform data via config-driven rules
+                # For now: log and pass through. Real hook system would
+                # call registered Python functions or external tools.
+        return data
+
     def _emit_records(self, target: str, rule: RuleNode,
                       records: list[dict], current_url: str) -> None:
         if target not in self.ctx.artifact_store:
@@ -973,15 +1237,59 @@ class ExecutionEngine:
                         flat.append(r)
                 output_data = flat
 
+            # Determine output path and format
+            fmt = art.format or "json"
+            ext = {"json": ".json", "jsonl": ".jsonl", "csv": ".csv",
+                   "markdown": ".md"}.get(fmt, ".json")
+
             override = self.ctx.write_overrides.get(art_name)
             if override:
                 out_path = Path(override)
             else:
-                out_path = Path(output_dir) / f"{self.ctx.name}_{art_name}.json"
+                out_path = Path(output_dir) / f"{self.ctx.name}_{art_name}{ext}"
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_path, "w") as f:
-                json.dump(output_data, f, indent=2, ensure_ascii=False)
+
+            if fmt == "jsonl":
+                with open(out_path, "w") as f:
+                    for item in (output_data if isinstance(output_data, list)
+                                 else [output_data]):
+                        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            elif fmt == "csv":
+                import csv as csv_mod
+                rows = output_data if isinstance(output_data, list) else [output_data]
+                if rows:
+                    # Flatten data dicts for CSV
+                    flat_rows = []
+                    for r in rows:
+                        if isinstance(r, dict) and "data" in r:
+                            flat_rows.append(r["data"])
+                        elif isinstance(r, dict):
+                            flat_rows.append(r)
+                    if flat_rows:
+                        keys = list(flat_rows[0].keys())
+                        with open(out_path, "w", newline="") as f:
+                            writer = csv_mod.DictWriter(f, fieldnames=keys)
+                            writer.writeheader()
+                            writer.writerows(flat_rows)
+            elif fmt == "markdown":
+                with open(out_path, "w") as f:
+                    for item in (output_data if isinstance(output_data, list)
+                                 else [output_data]):
+                        data = item.get("data", item) if isinstance(item, dict) else item
+                        if isinstance(data, dict):
+                            title = data.get("title", "")
+                            body = data.get("body", "")
+                            if title:
+                                f.write(f"# {title}\n\n")
+                            if body:
+                                f.write(f"{body}\n\n")
+                        else:
+                            f.write(f"{data}\n\n")
+            else:  # json
+                with open(out_path, "w") as f:
+                    json.dump(output_data, f, indent=2, ensure_ascii=False)
+
             logger.info(f"  Wrote {len(records)} records to {out_path}")
 
         summary_path = Path(output_dir) / f"{self.ctx.name}.json"
@@ -1093,6 +1401,7 @@ class WiseRpaBDD:
             return
         opts = _parse_options(options)
         art.output = opts.get("output", "").lower() in ("true", "1", "yes")
+        art.format = opts.get("format", art.format)
         art.structure = opts.get("structure", art.structure)
         art.dedupe = opts.get("dedupe", art.dedupe)
         art.query = opts.get("query", art.query)
@@ -1164,6 +1473,13 @@ class WiseRpaBDD:
         if not self._current_rule:
             return
         self._current_rule.parents = [p.strip() for p in parents.split(",")]
+
+    @keyword("And I set retry ${max} times with ${delay} ms delay")
+    def set_retry(self, max: Any, delay: Any) -> None:
+        self._record("set_retry", max, delay)
+        if self._current_rule:
+            self._current_rule.retry_max = int(max)
+            self._current_rule.retry_delay_ms = int(delay)
 
     # -- State checks --
 
@@ -1338,8 +1654,32 @@ class WiseRpaBDD:
     @keyword("When I expand over combinations")
     def expand_over_combinations(self, *axes: str) -> None:
         self._record("expand_over_combinations", *axes)
-        # Combination expansion is handled by the generator producing
-        # individual click rules for each combination value
+        if not self._current_rule:
+            return
+        # Parse axis specs: action=type control="#sel" values=a|b|c
+        parsed_axes: list[CombinationAxis] = []
+        current: dict[str, str] = {}
+        for spec in axes:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "action" and current.get("action"):
+                parsed_axes.append(CombinationAxis(
+                    action=current["action"],
+                    control=_strip_quotes(current.get("control", "")),
+                    values=current.get("values", "").split("|"),
+                ))
+                current = {}
+            current[k] = v
+        if current.get("action"):
+            parsed_axes.append(CombinationAxis(
+                action=current["action"],
+                control=_strip_quotes(current.get("control", "")),
+                values=current.get("values", "").split("|"),
+            ))
+        self._current_rule.expansion = Expansion(
+            over="combinations", axes=parsed_axes,
+        )
 
     # -- Extraction --
 
@@ -1415,19 +1755,47 @@ class WiseRpaBDD:
         if self._deployment:
             self._deployment.quality_gate.max_failed_pct = float(percent)
 
-    # -- Hooks and configuration (stubs for now) --
+    # -- Hooks and configuration --
 
     @keyword('And I register hook "${name}" at "${lifecycle_point}"')
     def register_hook(self, name: str, lifecycle_point: str, *config: str) -> None:
         self._record("register_hook", name, lifecycle_point, *config)
+        if self._deployment:
+            self._deployment.hooks.append(HookDef(
+                name=name, lifecycle_point=lifecycle_point,
+                config=_parse_options(config),
+            ))
 
     @keyword("Given I configure state setup")
     def configure_state_setup(self, *actions: str) -> None:
         self._record("configure_state_setup", *actions)
+        if not self._deployment:
+            return
+        for spec in actions:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            v = _strip_quotes(v)
+            if k == "skip_when":
+                self._deployment.setup_skip_when = v
+            elif k == "action":
+                # Parse: action=open url="..." or action=click css="..."
+                # The action type is the value, rest comes in subsequent opts
+                self._deployment.setup_actions.append(SetupAction(action=v))
+            elif k in ("url", "css", "value") and self._deployment.setup_actions:
+                setattr(self._deployment.setup_actions[-1], k, v)
 
     @keyword("And I configure interrupts")
     def configure_interrupts(self, *dismissals: str) -> None:
         self._record("configure_interrupts", *dismissals)
+        if not self._deployment:
+            return
+        for spec in dismissals:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "dismiss":
+                self._deployment.interrupt_selectors.append(_strip_quotes(v))
 
     @keyword("Then I close the browser")
     def close_browser(self) -> None:
