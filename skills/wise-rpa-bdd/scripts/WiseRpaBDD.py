@@ -1047,11 +1047,23 @@ class ExecutionEngine:
             logger.warn(f"    Table extraction failed: {e}")
             return None
 
+    # Built-in AI mode prompts
+    _AI_MODES = {
+        "extract": "Extract structured data from the following content.",
+        "cleanup": "Clean and normalize this content. Remove HTML artifacts, "
+                   "fix formatting, and return well-structured markdown.",
+        "classify": "Classify the following content.",
+        "refine": "Refine and improve the quality of this text. Fix grammar, "
+                  "improve clarity, normalize formatting.",
+    }
+
     def _run_ai_extraction(self, config: dict, existing_data: dict) -> dict | None:
         """Run AI extraction on previously extracted text via Claude API."""
         opts = _parse_options(tuple(config.get("specs", [])))
         name = config.get("name", "ai_result")
-        prompt = opts.get("prompt", "Extract structured data from the text.")
+        mode = opts.get("mode")
+        prompt = opts.get("prompt") or self._AI_MODES.get(mode or "extract",
+                                                           "Extract structured data from the text.")
         input_field = opts.get("input")
         schema = opts.get("schema")
         categories = opts.get("categories")
