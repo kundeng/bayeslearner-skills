@@ -160,6 +160,7 @@ class DeploymentContext:
     quality_gate: QualityGate = field(default_factory=QualityGate)
     output_dir: str = ""
     write_overrides: dict[str, str] = field(default_factory=dict)
+    ai_adapter: str = ""  # aichat, anthropic, openai, cli:<cmd>
     hooks: list[HookDef] = field(default_factory=list)
     setup_actions: list[SetupAction] = field(default_factory=list)
     setup_skip_when: str = ""
@@ -1086,8 +1087,71 @@ class ExecutionEngine:
                   "improve clarity, normalize formatting.",
     }
 
+    def _call_ai(self, prompt: str) -> str:
+        """Call AI via the configured adapter. Adapters tried in order:
+
+        1. ``cli:<command>`` — arbitrary CLI, prompt on stdin
+        2. ``aichat`` — aichat CLI (default if available)
+        3. ``anthropic`` — Anthropic Python SDK
+        4. ``openai`` — OpenAI Python SDK
+        """
+        import subprocess as _sp
+        adapter = self.ctx.ai_adapter if hasattr(self.ctx, "ai_adapter") else ""
+
+        # Explicit CLI adapter: "cli:my-tool --flag"
+        if adapter.startswith("cli:"):
+            cmd = adapter[4:].strip()
+            result = _sp.run(cmd, shell=True, input=prompt,
+                             capture_output=True, text=True)
+            return result.stdout.strip()
+
+        # aichat (default when available)
+        if adapter in ("aichat", ""):
+            aichat = os.popen("which aichat 2>/dev/null").read().strip()
+            if aichat:
+                result = _sp.run([aichat, "-S", prompt],
+                                 capture_output=True, text=True, timeout=60)
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                logger.warn(f"aichat failed: {result.stderr[:200]}")
+                if adapter == "aichat":
+                    return ""
+                # Fall through to SDK adapters
+
+        # anthropic SDK
+        if adapter in ("anthropic", ""):
+            try:
+                import anthropic
+                client = anthropic.Anthropic()
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.content[0].text.strip()
+            except Exception as e:
+                logger.warn(f"anthropic adapter failed: {e}")
+                if adapter == "anthropic":
+                    return ""
+
+        # openai SDK
+        if adapter in ("openai", ""):
+            try:
+                import openai
+                client = openai.OpenAI()
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                logger.warn(f"openai adapter failed: {e}")
+
+        return ""
+
     def _run_ai_extraction(self, config: dict, existing_data: dict) -> dict | None:
-        """Run AI extraction on previously extracted text via Claude API."""
+        """Run AI extraction on previously extracted text."""
         opts = _parse_options(tuple(config.get("specs", [])))
         name = config.get("name", "ai_result")
         mode = opts.get("mode")
@@ -1097,7 +1161,6 @@ class ExecutionEngine:
         schema = opts.get("schema")
         categories = opts.get("categories")
 
-        # Get input text from already-extracted data
         input_text = ""
         if input_field and input_field in existing_data:
             input_text = str(existing_data[input_field])
@@ -1107,7 +1170,6 @@ class ExecutionEngine:
         if not input_text:
             return None
 
-        # Build the AI prompt
         full_prompt = prompt
         if categories:
             full_prompt += f"\n\nClassify into one of: {categories}"
@@ -1116,26 +1178,15 @@ class ExecutionEngine:
         full_prompt += f"\n\nInput:\n{input_text}"
         full_prompt += "\n\nRespond with ONLY valid JSON, no explanation."
 
+        result_text = self._call_ai(full_prompt)
+        if not result_text:
+            return None
+
         try:
-            import anthropic
-            client = anthropic.Anthropic()
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": full_prompt}],
-            )
-            result_text = response.content[0].text.strip()
-            # Parse JSON response
             parsed = json.loads(result_text)
             return {name: parsed}
-        except ImportError:
-            logger.warn("anthropic SDK not installed, skipping AI extraction")
-            return None
-        except json.JSONDecodeError as e:
-            logger.warn(f"AI extraction returned invalid JSON: {e}")
+        except json.JSONDecodeError:
             return {name: result_text}
-        except Exception as e:
-            logger.warn(f"AI extraction failed: {e}")
             return None
 
     def _run_setup(self, bl: Any) -> None:
@@ -1424,6 +1475,13 @@ class WiseRpaBDD:
     def start_deployment(self, deployment: str) -> None:
         self._record("start_deployment", deployment)
         self._deployment = DeploymentContext(name=deployment)
+
+    @keyword('And I set AI adapter "${adapter}"')
+    def set_ai_adapter(self, adapter: str) -> None:
+        """Set the AI backend: aichat, anthropic, openai, or cli:<command>."""
+        self._record("set_ai_adapter", adapter)
+        if self._deployment:
+            self._deployment.ai_adapter = adapter
 
     @keyword("Then I finalize deployment")
     def finalize_deployment(self) -> None:
