@@ -132,6 +132,67 @@ human writes requirements.md  →  ralph run -P requirements.md
 
 One spec = one loop. Only write requirements.md before launching. Archive after loop. Migrate legacy spec locations on sight.
 
+## Iteration Budgeting
+
+Each full plan→build→review cycle costs 3 iterations minimum. Budget accordingly:
+
+```
+iterations_needed = (num_phases × 3) + retries_buffer
+```
+
+| Spec shape | Tasks | Recommended max_iterations |
+|-----------|-------|---------------------------|
+| Single phase, 1-3 tasks | 1-3 | 6 |
+| Two phases, 3-5 tasks | 3-5 | 9-12 |
+| Three phases, 5-8 tasks | 5-8 | 12-15 |
+| Complex multi-phase | 8+ | 15-20 or split into multiple specs |
+
+**Common budget killers:**
+- Reviewer backpressure rejections for ceremony reasons (not code bugs) — costs 1 iteration each
+- Planner re-engaging between phases (`phase.next` → replanning) — costs 1 iteration each
+- Sequential dependent tasks split into separate build/review cycles when they could be batched
+
+**Task merging rule:** If tasks are sequential dependencies within the same phase (A feeds B feeds C), merge them into one task. Three separate build→review cycles for dependent work burns 9 iterations; one batched cycle burns 3.
+
+**Continuation loops:** When a loop terminates at max_iterations with remaining tasks, write a new spec referencing prior commits. Seed the scratchpad/memories with what's already done. Budget only for the remaining work.
+
+## Hat Configurations
+
+Create a hat file per spec (e.g. `.ralph/hats/05-parity.yml`), never edit the
+greenfield template in-place. Choose the right hat topology for the work:
+
+### 3-hat: planner → builder → reviewer (default)
+
+```
+work.start → [planner] → plan.ready → [builder] → build.done → [reviewer]
+```
+
+Use when: the plan is uncertain and may need revision based on review findings.
+The reviewer can emit `replan` to change direction. Best for exploratory work.
+
+### 2-hat: planner+builder → reviewer
+
+```
+work.start → [planner+builder] → build.done → [reviewer]
+```
+
+Use when: the task requires deep research that the builder needs in-context.
+The planner reads the codebase, understands the architecture, and implements
+in the same session — no lossy scratchpad handoff. Best for: complex refactors,
+engine rewrites, parity work where understanding thousands of lines of reference
+code is critical. The reviewer still runs verification independently.
+
+### 2-hat: planner → builder+reviewer
+
+```
+work.start → [planner] → plan.ready → [builder+reviewer]
+```
+
+Use when: tasks have clear pass/fail criteria and the builder should self-verify.
+Saves an iteration per task by skipping the separate review cycle. The builder
+runs tests, lint, dryrun before emitting. Best for: well-defined tasks with
+mechanical acceptance criteria (all tests pass, dryrun clean, files exist).
+
 ## Operational Discipline
 
 - Minimize loop restarts — each costs a planner re-analysis
@@ -216,8 +277,16 @@ hats:
     instructions: |
       Read the scratchpad for the current task's acceptance criteria.
       Read .ralph/agent/memories.md for known constraints and past fixes.
-      Verify by actually running what they specify — commands, curl, file checks.
-      Run the test suite as a baseline but do NOT stop there.
+
+      RUN EVERYTHING YOURSELF: tests, lint, dryrun, coverage — whatever you
+      think is appropriate. Your job is thorough verification. But base your
+      accept/reject decision on YOUR OWN command results, not on what the
+      builder included in the build.done payload.
+
+      Do NOT reject because the event payload lacks formatted evidence.
+      Do NOT re-request the same checks the builder already passed.
+      If you want to verify something, run it yourself — don't ask the
+      builder to re-emit with more metadata.
 
       WHEN VERIFICATION FAILS:
       1. Capture the actual error (stderr, stack trace, diff from expected)
