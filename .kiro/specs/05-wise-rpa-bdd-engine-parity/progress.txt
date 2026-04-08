@@ -1,0 +1,6 @@
+# Progress Log: 05-wise-rpa-bdd-engine-parity
+# Auto-updated by builder during ralph loop
+# Format: [TIMESTAMP] STATUS task-id — description
+# SUMMARY: 1/11 done | next: parity:task-02
+
+[2026-04-08 17:45] DONE parity:task-01 — Topological sort for node execution (Kahn's algorithm, diamond DAG test) (b3ec658)
