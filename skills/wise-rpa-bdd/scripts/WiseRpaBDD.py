@@ -281,52 +281,30 @@ class ExecutionEngine:
             bl.close_browser("ALL")
 
     def _execute_resources(self) -> None:
-        """Execute resources in topological order based on artifact dependencies."""
+        """Execute resources in topological order based on artifact dependencies.
+
+        Ordering is derived from artifact ``consumes`` declarations:
+        if resource B's output artifacts consume artifact X, and resource A
+        emits to X, then A must run before B.
+        """
         resources = self.ctx.resources
         if not resources:
             return
 
-        # Build maps: which artifacts each resource produces and consumes
-        res_produces: dict[str, set[str]] = {}  # resource name → artifact names
-        res_consumes: dict[str, set[str]] = {}  # resource name → artifact names
-        art_producer: dict[str, str] = {}       # artifact name → resource name
-
+        # Build: artifact_name → resource that emits to it
+        art_producer: dict[str, str] = {}
         for res in resources:
-            produces = set()
-            consumes = set()
-            # Collect all emit targets from rules
             for rule in res.rules.values():
                 for target in rule.emit_targets:
-                    produces.add(target)
-            # Collect consumption edges
-            if res.consumes:
-                consumes.add(res.consumes)
-            if res.iterates_parent:
-                # iterates_parent references a test case name, not an artifact
-                # but the resource depends on whatever that case produced
-                pass
-            # Check artifact-level consumes
-            for art_name in produces:
-                art = self.ctx.artifacts.get(art_name)
-                if art and art.consumes:
-                    consumes.add(art.consumes)
-            # Template URLs imply consumption
-            if res.entry_template:
-                for art_name, art in self.ctx.artifacts.items():
-                    if art.consumes and art_name in produces:
-                        consumes.add(art.consumes)
+                    art_producer[target] = res.name
 
-            res_produces[res.name] = produces
-            res_consumes[res.name] = consumes
-            for art in produces:
-                art_producer[art] = res.name
-
-        # Build adjacency: if resource B consumes artifact X produced by A → A must run before B
+        # Build dependency edges using _find_consumed_artifact
         in_degree: dict[str, int] = {r.name: 0 for r in resources}
         dependents: dict[str, list[str]] = {r.name: [] for r in resources}
 
         for res in resources:
-            for consumed_art in res_consumes.get(res.name, set()):
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art:
                 producer = art_producer.get(consumed_art)
                 if producer and producer != res.name:
                     dependents[producer].append(res.name)
@@ -377,23 +355,6 @@ class ExecutionEngine:
 
             entry_urls = self._resolve_entry_urls(res)
 
-            # If no entry URLs but resource consumes an artifact,
-            # iterate over consumed records (each provides context for open_bound)
-            if not entry_urls and res.consumes:
-                consumed = self.ctx.artifact_store.get(res.consumes, [])
-                logger.info(f"  Consuming {len(consumed)} records from '{res.consumes}'")
-                for record in consumed:
-                    record_data = record.get("data", {})
-                    # Find a URL field in the record
-                    nav_url = ""
-                    # Find a URL-typed field in the record
-                    for v in record_data.values():
-                        if isinstance(v, str) and v.startswith(("http://", "https://")):
-                            nav_url = v
-                            break
-                    if nav_url:
-                        entry_urls.append(nav_url)
-
             for entry_url in entry_urls:
                 logger.info(f"  Navigating to: {entry_url}")
                 try:
@@ -415,40 +376,66 @@ class ExecutionEngine:
         finally:
             bl.close_context()
 
+    def _find_consumed_artifact(self, res: ResourceContext) -> str | None:
+        """Find which artifact this resource consumes.
+
+        The source of truth is the artifact-level ``consumes`` declaration.
+        A resource consumes artifact X if any artifact it emits to declares
+        ``consumes=X``. Falls back to ``res.consumes`` if set explicitly.
+        """
+        # Explicit resource-level consumes (legacy, from 'Given I consume artifact')
+        if res.consumes:
+            return res.consumes
+
+        # Derive from artifact declarations: find artifacts this resource emits to
+        res_emit_targets: set[str] = set()
+        for rule in res.rules.values():
+            res_emit_targets.update(rule.emit_targets)
+
+        # Which of those artifacts declares consumes?
+        for art_name, art in self.ctx.artifacts.items():
+            if art.consumes and art_name in res_emit_targets:
+                return art.consumes
+
+        return None
+
     def _resolve_entry_urls(self, res: ResourceContext) -> list[str]:
-        """Resolve entry URLs, expanding {field} templates from consumed artifacts."""
+        """Resolve entry URLs.
+
+        Three cases:
+        1. Static URL (no template) → [url]
+        2. Template URL with {field} → expand per consumed artifact record
+        3. No URL but resource consumes → iterate consumed records for URL fields
+        """
         url = res.entry_url
+
+        # Case 3: no entry URL, but consumes an artifact → iterate its records
         if not url:
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art and consumed_art in self.ctx.artifact_store:
+                records = self.ctx.artifact_store[consumed_art]
+                urls = []
+                for record in records:
+                    data = record.get("data", {})
+                    for v in data.values():
+                        if isinstance(v, str) and v.startswith(("http://", "https://")):
+                            urls.append(v)
+                            break
+                return urls
             return []
 
+        # Case 2: template URL with {field} → expand per consumed record
         if "{" in url and "}" in url:
-            consumes = res.consumes
-            if not consumes:
-                # Check artifacts that this resource's rules emit to
-                res_emit_targets = set()
-                for rule in res.rules.values():
-                    res_emit_targets.update(rule.emit_targets)
-                # Find which artifact has consumes and is emitted by this resource
-                for art_name, art in self.ctx.artifacts.items():
-                    if art.consumes and art_name in res_emit_targets:
-                        consumes = art.consumes
-                        break
-                # Fallback: any artifact with consumes
-                if not consumes:
-                    for art in self.ctx.artifacts.values():
-                        if art.consumes:
-                            consumes = art.consumes
-                            break
-
-            if consumes and consumes in self.ctx.artifact_store:
-                records = self.ctx.artifact_store[consumes]
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art and consumed_art in self.ctx.artifact_store:
+                records = self.ctx.artifact_store[consumed_art]
                 urls = []
                 for record in records:
                     data = record.get("data", record)
                     rendered = url
                     for k, v in data.items():
                         rendered = rendered.replace("{" + k + "}", str(v))
-                    # Also try {artifacts.name.field} cross-artifact refs
+                    # Also expand {artifacts.name.field} cross-refs
                     for art_name, art_records in self.ctx.artifact_store.items():
                         if art_records:
                             latest = art_records[-1].get("data", {})
@@ -460,6 +447,7 @@ class ExecutionEngine:
                 return urls
             return []
 
+        # Case 1: static URL
         return [url]
 
     @staticmethod

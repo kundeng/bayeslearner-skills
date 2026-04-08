@@ -136,13 +136,12 @@ Discover Event Analytics Pages
 
 Extract Entity Integration Pages
     [Documentation]    Open each Entity Integration page, extract title, body, and AI-cleaned content.
-    [Setup]    Given I start resource "extract_entity"
-    Given I consume artifact "${ARTIFACT_ENTITY_URLS}"
+    [Setup]    Given I start resource "extract_entity" at "{page_url}"
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    When I open the bound field "page_url"
+    And I begin rule "page"
     And selector "article[role='article']" exists
     Then I extract fields
     ...    field=title    extractor=text    locator="h1.title"
@@ -156,13 +155,12 @@ Extract Entity Integration Pages
 
 Extract Event Analytics Pages
     [Documentation]    Open each Event Analytics page, extract title, body, and AI-cleaned content.
-    [Setup]    Given I start resource "extract_events"
-    Given I consume artifact "${ARTIFACT_EVENTS_URLS}"
+    [Setup]    Given I start resource "extract_events" at "{page_url}"
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    When I open the bound field "page_url"
+    And I begin rule "page"
     And selector "article[role='article']" exists
     Then I extract fields
     ...    field=title    extractor=text    locator="h1.title"

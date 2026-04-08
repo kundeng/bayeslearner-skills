@@ -97,13 +97,12 @@ Discover API Listing Links
 Extract API Details
     [Documentation]    Open each discovered API page and extract the name (h1) and
     ...                one-line description (first paragraph inside the article).
-    [Setup]    Given I start resource "detail"
-    Given I consume artifact "${ARTIFACT_API_URLS}"
+    [Setup]    Given I start resource "detail" at "{page_url}"
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=1500
-    When I open the bound field "page_url"
+    And I begin rule "page"
     And selector "article h1" exists
     Then I extract fields
     ...    field=name           extractor=text    locator="article h1"

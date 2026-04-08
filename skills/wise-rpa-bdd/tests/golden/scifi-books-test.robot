@@ -101,15 +101,13 @@ Detail Resource
     #           #product_description ~ p = description; table.table-striped for UPC,
     #           Availability, Number of reviews (key-value rows via table extraction).
     [Documentation]    Produces: books (16 records with title, price, description, upc, availability, num_reviews)
-    [Setup]    Given I start resource "detail"
-    Given I consume artifact "${ARTIFACT_URLS}"
+    [Setup]    Given I start resource "detail" at "{detail_url}"
     And I set resource globals
     ...    timeout_ms=30000
     ...    retries=2
     ...    page_load_delay_ms=1500
-
-    When I open the bound field "detail_url"
-
+    And I begin rule "page"
+    And selector ".product_main" exists
     Then I extract fields
     ...    field=title          extractor=text    locator=.product_main h1
     ...    field=price          extractor=text    locator=.product_main p.price_color
