@@ -8,16 +8,18 @@ You are building a **repeatable exploitation suite** for a browser task. The shi
 
 ```mermaid
 flowchart LR
-    orient["orient\n─────────────\nreads workflow docs,\nkeyword contract"]
-    explore["explore\n─────────────\nvisits live site\n→ confirmed selectors\n+ DOM evidence"]
-    draft["draft\n─────────────\nwrites .robot suite\ngrounded in evidence"]
-    review["review\n─────────────\nruns robot --dryrun\n(loops back if issues)"]
-    ship["ship\n─────────────\npackages suite\n+ keyword library\n+ docs"]
-
-    orient --> explore --> draft
-    draft <--> review
-    review --> ship
+    orient[orient] --> explore[explore] --> draft[draft]
+    draft <--> review[review]
+    review --> ship[ship]
 ```
+
+| Phase | What happens | Output |
+|-------|-------------|--------|
+| **orient** | Read workflow, keyword contract, templates | Understanding of harness |
+| **explore** | Visit live site via Playwright/agent-browser, test selectors | Confirmed selectors, DOM evidence |
+| **draft** | Write .robot suite using WiseRpaBDD keywords | .robot file grounded in evidence |
+| **review** | Run `robot --dryrun`, fix issues, loop back to draft | Clean dryrun pass |
+| **ship** | Package suite + keyword library + docs | Ready-to-run project layout |
 
 Use the mode verbs from `SKILL.md` while you work:
 

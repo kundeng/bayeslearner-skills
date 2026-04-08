@@ -1,6 +1,13 @@
 # Progress Log: 05-wise-rpa-bdd-engine-parity
-# Auto-updated by builder during ralph loop
-# Format: [TIMESTAMP] STATUS task-id — description
-# SUMMARY: 1/11 done | next: parity:task-02
+# SUMMARY: 10/10 done | next: DONE
 
-[2026-04-08 17:45] DONE parity:task-01 — Topological sort for node execution (Kahn's algorithm, diamond DAG test) (b3ec658)
+[2026-04-08 17:45] DONE task-01 — Topological sort for node execution (b3ec658)
+[2026-04-08 19:58] DONE task-02 — Resource dependency ordering (3220451)
+[2026-04-08 20:15] DONE task-03 — Context inheritance between nodes (6d53f38)
+[2026-04-08 20:25] DONE task-04 — Retry logic for state check failures (2517161)
+[2026-04-08 20:25] DONE task-05 — Combination expansion (2517161)
+[2026-04-08 20:25] DONE task-06 — AI extraction via Claude API (2517161)
+[2026-04-08 20:25] DONE task-07 — Hook system skeleton (2517161)
+[2026-04-08 20:25] DONE task-08 — BFS expansion mode (2517161)
+[2026-04-08 20:25] DONE task-09 — Output format support (2517161)
+[2026-04-08 20:25] DONE task-10 — Auth/state setup and interrupts (2517161)
