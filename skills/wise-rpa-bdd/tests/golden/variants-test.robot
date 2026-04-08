@@ -3,6 +3,26 @@ Requirement    Scrape laptop variant data from https://www.webscraper.io/test-si
 Expected       title,hdd_size,price
 Min Records    24
 
+# -- Evidence (live DOM -- npx agent-browser session) --------------------------
+#
+# Listing page: https://www.webscraper.io/test-sites/e-commerce/ajax/computers/laptops
+#   Product cards : div.thumbnail          -- 6 per page
+#   Product link  : a.title                -- href="/test-sites/e-commerce/ajax/product/60"
+#                   attr "title" holds full product name (e.g. "Asus VivoBook X441NA-GA190")
+#   Pagination    : 20 pages (buttons 1-20); AJAX-loaded (no page reload)
+#
+# Detail page: e.g. /test-sites/e-commerce/ajax/product/60
+#   Title         : h4.card-title          -- "Asus VivoBook X441NA-GA190"
+#   Price         : h4.price.pull-right    -- "$295.99" (changes on swatch click)
+#   Description   : p.description          -- specs string
+#   HDD buttons   : button.swatch          -- values: 128, 256, 512, 1024
+#                   Active button gets class "btn-primary active"
+#   Active swatch : button.swatch.active   -- text = selected HDD size
+#   Price updates after clicking a swatch button (AJAX).
+#
+# Auth / cookies: none required.
+# -------------------------------------------------------------------------------
+
 *** Settings ***
 Documentation     Two-resource variant extraction: discover product URLs via BFS,
 ...               then use combination expansion to click each HDD size and extract prices.
@@ -27,6 +47,7 @@ Artifact Catalog
     And I set artifact options for "${ARTIFACT_PRODUCT_URLS}"
     ...    dedupe=url
     ...    description=Product detail page URLs discovered from AJAX listing page
+
     Given I register artifact "${ARTIFACT_VARIANT_DATA}"
     ...    field=title    type=string    required=true
     ...    field=description    type=string    required=true
@@ -37,6 +58,7 @@ Artifact Catalog
     ...    structure=nested
     ...    consumes=product_urls
     ...    description=Variant data as nested tree records
+
     Given I register artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
     ...    field=title    type=string    required=true
     ...    field=description    type=string    required=true
