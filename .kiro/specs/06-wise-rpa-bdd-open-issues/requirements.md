@@ -21,10 +21,10 @@ strip_html, default, lowercase, regex. Wired into post_extract lifecycle.
 Commit: e8bc6fa.
 
 ### 4. AI extraction untested at runtime
-The `_run_ai_extraction()` calls Claude API but has never been tested with
-a live run. The splunk-itsi golden uses it but we haven't executed that suite.
-Need to verify: API key handling, haiku model availability, JSON parsing of
-response, error handling when API is unavailable.
+Now uses pluggable adapter (aichat → anthropic → openai → cli:<cmd>).
+Adapter chain works but live test blocked on local router auth (sk-dummy
+rejected by router on port 20128). Need working AI backend to validate.
+Adapter code + golden suite (splunk-itsi with AI) are ready. Commit: 2f22bd3.
 
 ### ~~5. `generate_from_wise_yaml.py` removed but referenced in memories~~ RESOLVED
 Cleaned `.ralph/agent/memories.md`. Stale references removed.
