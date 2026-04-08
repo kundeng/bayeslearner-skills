@@ -1048,6 +1048,17 @@ class ExecutionEngine:
                 if count == 0:
                     return ""
                 return bl.get_attribute(selector, "src") or ""
+            elif fs.extractor == "number":
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                text = bl.get_text(selector).strip()
+                # Extract numeric value, handling commas and whitespace
+                cleaned = re.sub(r"[^\d.\-]", "", text)
+                try:
+                    return float(cleaned) if "." in cleaned else int(cleaned)
+                except (ValueError, TypeError):
+                    return text
         except Exception as e:
             logger.warn(f"    Extract {fs.name} failed: {e}")
         return ""
