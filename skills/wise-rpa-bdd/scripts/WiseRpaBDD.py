@@ -377,6 +377,23 @@ class ExecutionEngine:
 
             entry_urls = self._resolve_entry_urls(res)
 
+            # If no entry URLs but resource consumes an artifact,
+            # iterate over consumed records (each provides context for open_bound)
+            if not entry_urls and res.consumes:
+                consumed = self.ctx.artifact_store.get(res.consumes, [])
+                logger.info(f"  Consuming {len(consumed)} records from '{res.consumes}'")
+                for record in consumed:
+                    record_data = record.get("data", {})
+                    # Find a URL field in the record
+                    nav_url = ""
+                    # Find a URL-typed field in the record
+                    for v in record_data.values():
+                        if isinstance(v, str) and v.startswith(("http://", "https://")):
+                            nav_url = v
+                            break
+                    if nav_url:
+                        entry_urls.append(nav_url)
+
             for entry_url in entry_urls:
                 logger.info(f"  Navigating to: {entry_url}")
                 try:
@@ -620,6 +637,11 @@ class ExecutionEngine:
                     return False
             elif check.type == "selector_exists":
                 try:
+                    # Wait briefly for JS-rendered elements
+                    try:
+                        bl.wait_for_elements_state(check.pattern, "attached", timeout="5s")
+                    except Exception:
+                        pass
                     count = bl.get_element_count(check.pattern)
                     if count == 0:
                         return False
@@ -717,6 +739,11 @@ class ExecutionEngine:
         records = []
 
         try:
+            # Wait for at least one element before counting
+            try:
+                bl.wait_for_elements_state(selector, "attached", timeout="10s")
+            except Exception:
+                pass  # May already exist or not appear — count will be 0
             count = bl.get_element_count(selector)
         except Exception as e:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
@@ -925,12 +952,12 @@ class ExecutionEngine:
                 except Exception as e:
                     logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
 
-            # Wait for page to settle
+            # Wait for page to settle after combo action
             try:
                 bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
             except Exception:
                 pass
-            time.sleep(0.3)
+            time.sleep(1.0)  # Allow AJAX content to load
 
             # Build per-combo context
             combo_ctx = dict(context or {})
@@ -1042,7 +1069,16 @@ class ExecutionEngine:
                 count = bl.get_element_count(selector)
                 if count == 0:
                     return ""
-                return bl.get_attribute(selector, "href") or ""
+                href = bl.get_attribute(selector, "href") or ""
+                # Always resolve to absolute URL
+                if href and not href.startswith(("http://", "https://", "javascript:")):
+                    from urllib.parse import urljoin
+                    try:
+                        page_url = bl.get_url()
+                        href = urljoin(page_url, href)
+                    except Exception:
+                        pass
+                return href
             elif fs.extractor == "image":
                 count = bl.get_element_count(selector)
                 if count == 0:
