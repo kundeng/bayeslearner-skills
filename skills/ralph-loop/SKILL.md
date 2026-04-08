@@ -1,6 +1,6 @@
 ---
 name: ralph-loop
-description: Launch and manage ralph-orchestrator planner→builder���reviewer loops for autonomous multi-step implementation. Use this skill whenever the user says "ralph loop", "ralph orchestrate", "ralph run", wants to delegate work to a plan/build/review cycle, mentions phase plans, wants to configure loop iterations (max activations), hat workflows, cost budgets, or guardrails. Also trigger when the user asks to "orchestrate", "delegate to ralph", "launch a loop", "reduce max to N", or references the planner/builder/reviewer pattern. Covers: project setup, spec writing, tmux launch, loop monitoring, steering, and ceremony.
+description: Launch and manage ralph-orchestrator planner-builder-reviewer loops for autonomous multi-step implementation. Use this skill whenever the user says "ralph loop", "ralph orchestrate", "ralph run", wants to delegate work to a plan/build/review cycle, mentions phase plans, wants to configure loop iterations (max activations), hat workflows, cost budgets, or guardrails. Also trigger when the user asks to "orchestrate", "delegate to ralph", "launch a loop", "reduce max to N", or references the planner/builder/reviewer pattern. Covers project setup, spec writing, tmux launch, loop monitoring, steering, and ceremony.
 ---
 
 # Ralph Loop
