@@ -301,8 +301,10 @@ class ExecutionEngine:
                     time.sleep(page_delay / 1000.0)
 
                 root_rules = self._build_rule_tree(res)
+                executed: set[str] = set()
                 for root in root_rules:
-                    self._walk_rule(root, res, None, entry_url)
+                    self._walk_rule(root, res, None, entry_url,
+                                    executed=executed)
         finally:
             bl.close_context()
 
@@ -334,26 +336,113 @@ class ExecutionEngine:
 
         return [url]
 
+    @staticmethod
+    def _resolve_node_order(nodes: list[RuleNode]) -> list[str]:
+        """Topologically sort nodes using Kahn's algorithm.
+
+        Edges come from two sources:
+        1. Parent declarations — ``rule.parents`` lists predecessors.
+        2. Artifact dependencies — a node that ``emit_targets`` an artifact
+           must run before any node that consumes it (future: ``consumes``
+           field on RuleNode).
+
+        Raises ``ValueError`` on cycles.
+        """
+        if not nodes:
+            return []
+
+        node_names = {n.name for n in nodes}
+
+        # adjacency list and in-degree map
+        adj: dict[str, list[str]] = {n.name: [] for n in nodes}
+        in_deg: dict[str, int] = {n.name: 0 for n in nodes}
+
+        def _add_edge(src: str, dst: str) -> None:
+            if src not in node_names or dst not in node_names:
+                return
+            if src == dst:
+                raise ValueError(
+                    f"Cycle detected in node dependencies: {src}"
+                )
+            if dst not in adj[src]:
+                adj[src].append(dst)
+                in_deg[dst] += 1
+
+        # 1. Parent edges: parent → child
+        for n in nodes:
+            for parent in n.parents:
+                _add_edge(parent, n.name)
+
+        # 2. Artifact edges: emitter → consumer (placeholder for Task 2)
+        # emitter: dict[str, str] = {}
+        # for n in nodes:
+        #     for target in n.emit_targets:
+        #         emitter[target] = n.name
+
+        # Kahn's algorithm — stable: preserves input order for ties
+        queue = [n.name for n in nodes if in_deg[n.name] == 0]
+        order: list[str] = []
+
+        while queue:
+            name = queue.pop(0)
+            order.append(name)
+            for nxt in adj[name]:
+                in_deg[nxt] -= 1
+                if in_deg[nxt] == 0:
+                    queue.append(nxt)
+
+        if len(order) != len(nodes):
+            missing = [n.name for n in nodes if n.name not in set(order)]
+            raise ValueError(
+                f"Cycle detected in node dependencies: {', '.join(missing)}"
+            )
+
+        return order
+
+    def _find_children(self, parent_name: str,
+                       all_rules: dict[str, RuleNode]) -> list[RuleNode]:
+        """Return children of *parent_name*, topologically sorted."""
+        children = [r for r in all_rules.values()
+                    if parent_name in r.parents]
+        if not children:
+            return []
+        sorted_names = self._resolve_node_order(children)
+        return [all_rules[n] for n in sorted_names]
+
     def _build_rule_tree(self, res: ResourceContext) -> list[RuleNode]:
+        """Return root-level rules in topological order.
+
+        Also populates ``rule.children`` on every node so that expansion
+        methods can walk immediate children per element.
+        """
+        # Populate children on all nodes (topologically sorted)
+        for rule in res.rules.values():
+            rule.children = self._find_children(rule.name, res.rules)
+
+        # Validate: full topo sort over all rules detects cycles early
+        self._resolve_node_order(list(res.rules.values()))
+
+        # Return roots in the order they appear in root_names
         roots = []
         for rname in res.root_names:
             if rname in res.rules:
-                root = res.rules[rname]
-                self._attach_children(root, res.rules)
-                roots.append(root)
+                roots.append(res.rules[rname])
         return roots
 
-    def _attach_children(self, node: RuleNode, all_rules: dict[str, RuleNode]) -> None:
-        node.children = []
-        for name, rule in all_rules.items():
-            if node.name in rule.parents:
-                self._attach_children(rule, all_rules)
-                node.children.append(rule)
-
     def _walk_rule(self, rule: RuleNode, res: ResourceContext,
-                   scope: str | None, current_url: str) -> list[dict]:
-        """Walk a rule node. scope is a CSS selector string or None for page."""
-        records = []
+                   scope: str | None, current_url: str, *,
+                   executed: set[str] | None = None) -> list[dict]:
+        """Walk a rule node. scope is a CSS selector string or None for page.
+
+        *executed* tracks which nodes have already run so that multi-parent
+        nodes execute only once (after all parents complete).
+        """
+        if executed is not None:
+            if rule.name in executed:
+                return []
+            executed.add(rule.name)
+
+        records: list[dict] = []
 
         if not self._check_state(rule, current_url):
             return records
@@ -361,13 +450,15 @@ class ExecutionEngine:
         self._execute_actions(rule, res)
 
         if rule.expansion:
-            records = self._handle_expansion(rule, res, current_url)
+            records = self._handle_expansion(rule, res, current_url,
+                                             executed=executed)
         else:
             record = self._extract_from_scope(rule, scope, current_url)
 
             child_records: dict[str, list] = {}
             for child in rule.children:
-                child_data = self._walk_rule(child, res, scope, current_url)
+                child_data = self._walk_rule(child, res, scope, current_url,
+                                             executed=executed)
                 if child_data:
                     child_records[child.name] = child_data
 
@@ -444,18 +535,23 @@ class ExecutionEngine:
             pass
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
-                          current_url: str) -> list[dict]:
+                          current_url: str, *,
+                          executed: set[str] | None = None) -> list[dict]:
         exp = rule.expansion
         if exp.over == "elements":
-            return self._expand_elements(rule, res, current_url)
+            return self._expand_elements(rule, res, current_url,
+                                         executed=executed)
         elif exp.over == "pages_next":
-            return self._expand_pages_next(rule, res, current_url)
+            return self._expand_pages_next(rule, res, current_url,
+                                           executed=executed)
         elif exp.over == "pages_numeric":
-            return self._expand_pages_numeric(rule, res, current_url)
+            return self._expand_pages_numeric(rule, res, current_url,
+                                              executed=executed)
         return []
 
     def _expand_elements(self, rule: RuleNode, res: ResourceContext,
-                         current_url: str) -> list[dict]:
+                         current_url: str, *,
+                         executed: set[str] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         selector = exp.scope
@@ -490,7 +586,8 @@ class ExecutionEngine:
         return records
 
     def _expand_pages_next(self, rule: RuleNode, res: ResourceContext,
-                           current_url: str) -> list[dict]:
+                           current_url: str, *,
+                           executed: set[str] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         next_selector = exp.locator
@@ -524,7 +621,8 @@ class ExecutionEngine:
         return records
 
     def _expand_pages_numeric(self, rule: RuleNode, res: ResourceContext,
-                              current_url: str) -> list[dict]:
+                              current_url: str, *,
+                              executed: set[str] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         control_selector = exp.locator
