@@ -62,6 +62,27 @@ tmux resize-pane -t "$NAME:0.0" -y 3
 
 Monitor: `.ralph/monitor.sh` (copy from `scripts/monitor.sh` in this skill) or `ralph tui` (needs real TTY, attach directly). Set up `CronCreate` every 3 minutes to poll events + commits. Auto-cancel when loop terminates.
 
+## Codex Periodic Watch
+
+For Codex, periodic Ralph monitoring can be implemented by reusing a watcher sub-agent as a timer-like harness.
+
+- Spawn one monitor sub-agent and keep reusing the same agent id/thread.
+- Give it a bounded instruction such as: wait 60-180 seconds, inspect the Ralph loop, then return a compact status summary.
+- When it returns, the main Codex agent should:
+  - summarize status to the user if needed
+  - decide whether to steer Ralph
+  - send the next timed watch instruction to that same monitor sub-agent
+- Treat this as a reusable monitor channel, not as a native always-on daemon.
+
+Recommended Codex watch cycle:
+
+1. Create monitor agent once.
+2. Instruct: wait N minutes, check Ralph status, report `progressing`, `stuck`, `failed`, or `needs-input`.
+3. Main agent inspects result and optionally emits steering.
+4. Main agent reuses the same monitor agent for the next cycle.
+
+Use this when Codex is the meta-orchestrator and no built-in timer tool is available. If another frontend provides a native timer tool, prefer that simpler primitive over a sub-agent watch loop.
+
 ## CLI Reference
 
 | Action | Command |
@@ -136,7 +157,7 @@ hats:
     triggers: ["work.start", "phase.next", "replan"]
     publishes: ["plan.ready", "scaffold.done"]
     default_publishes: "plan.ready"
-    max_activations: 8
+    max_activations: 4
     instructions: |
       RESEARCH FIRST: Read existing code, the requirements.md (passed via -P),
       CLAUDE.md, scratchpad, and .ralph/agent/memories.md. Understand what's
