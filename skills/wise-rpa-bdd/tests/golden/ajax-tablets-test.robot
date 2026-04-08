@@ -29,9 +29,9 @@ Min Records    21
 #                    Numeric value 1-5 stored in data-rating attribute.
 #                    Star icons rendered as child spans; data-rating is the clean value.
 #
-# Pagination       : AJAX-loaded content; page buttons are numeric links.
-#                    Next button: a.page-link.next (present on pages 1-3; absent on page 4).
-#                    Engine stops naturally when next link is absent.
+# Pagination       : AJAX-loaded content; page buttons are <button> elements.
+#                    Numeric buttons: button.page-link.page with data-id="1" through "4".
+#                    Use numeric control pagination clicking each page button in sequence.
 #
 # Auth / cookies   : none required.
 # ----------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ Min Records    21
 Documentation     Scrape tablet products from webscraper.io AJAX e-commerce test site.
 ...               Extracts title, price, description, and rating for each tablet
 ...               across 4 AJAX-paginated pages (21 total items, 6 per page, last page 3).
-...               Pagination via a.page-link.next stops naturally on the final page.
+...               Pagination via numeric button controls (button.page-link.page) from 1 to 4.
 ...               Evidence: div.thumbnail containers; a.title[title] attr; h4.price text;
 ...               p.description text; p[data-rating] attr. No auth required.
 Library           Browser
@@ -69,9 +69,9 @@ Artifact Catalog
 Resource tablet_pages
     # -- Resource: AJAX-paginated tablet listing --------------------------------
     # Entry: https://www.webscraper.io/test-sites/e-commerce/ajax/computers/tablets
-    # Three-rule tree: root (state gate) -> pages (next-button pagination) -> items (extract)
-    # AJAX pagination: a.page-link.next present on pages 1-3; absent on page 4 -> natural stop.
-    # Limit=4 caps at page 4 (matches total page count from DOM).
+    # Three-rule tree: root (state gate) -> pages (numeric button pagination) -> items (extract)
+    # AJAX pagination: button.page-link.page elements with data-id 1-4.
+    # Numeric control clicks each page button in sequence; limit=4 pages.
     [Documentation]    Produces: tablets (21 records: title, price, description, rating)
     [Setup]    Given I start resource "tablet_pages" at "${ENTRY_URL}"
     And I set resource globals
@@ -85,12 +85,12 @@ Resource tablet_pages
     Given url contains "computers/tablets"
     And selector "div.thumbnail" exists
 
-    # Rule: pages -- drive next-button pagination across all 4 pages
-    # Evidence: a.page-link.next present on pages 1-3; absent on page 4 -> natural stop.
+    # Rule: pages -- drive numeric button pagination across all 4 pages
+    # Evidence: button.page-link.page elements (data-id 1-4); AJAX content loads on click.
     # page_load_delay_ms=2000 accounts for AJAX content loading after each page click.
     And I begin rule "pages"
     And I declare parents "root"
-    When I paginate by next button "a.page-link.next" up to 4 pages
+    When I paginate by numeric control "button.page-link.page" from 1 up to 4 pages
 
     # Rule: items -- expand over each div.thumbnail on every visited page, then extract
     # Evidence: 6 div.thumbnail per page (pages 1-3); 3 on page 4 -> 21 total.

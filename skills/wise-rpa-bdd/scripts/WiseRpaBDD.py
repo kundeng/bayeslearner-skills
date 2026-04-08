@@ -849,7 +849,10 @@ class ExecutionEngine:
                 clicked = False
                 for idx in range(count):
                     link_sel = f"{control_selector} >> nth={idx}"
-                    href = bl.get_attribute(link_sel, "href") or ""
+                    try:
+                        href = bl.get_attribute(link_sel, "href") or ""
+                    except Exception:
+                        href = ""
                     text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
                         bl.click(link_sel)
