@@ -360,6 +360,7 @@ class ExecutionEngine:
             bl.close_context()
 
     def _resolve_entry_urls(self, res: ResourceContext) -> list[str]:
+        """Resolve entry URLs, expanding {field} templates from consumed artifacts."""
         url = res.entry_url
         if not url:
             return []
@@ -380,6 +381,13 @@ class ExecutionEngine:
                     rendered = url
                     for k, v in data.items():
                         rendered = rendered.replace("{" + k + "}", str(v))
+                    # Also try {artifacts.name.field} cross-artifact refs
+                    for art_name, art_records in self.ctx.artifact_store.items():
+                        if art_records:
+                            latest = art_records[-1].get("data", {})
+                            for fk, fv in latest.items():
+                                ref = "{artifacts." + art_name + "." + fk + "}"
+                                rendered = rendered.replace(ref, str(fv))
                     if "{" not in rendered:
                         urls.append(rendered)
                 return urls
@@ -482,17 +490,20 @@ class ExecutionEngine:
 
     def _walk_rule(self, rule: RuleNode, res: ResourceContext,
                    scope: str | None, current_url: str, *,
-                   executed: set[str] | None = None) -> list[dict]:
+                   executed: set[str] | None = None,
+                   context: dict[str, Any] | None = None) -> list[dict]:
         """Walk a rule node. scope is a CSS selector string or None for page.
 
         *executed* tracks which nodes have already run so that multi-parent
         nodes execute only once (after all parents complete).
+        *context* carries parent-extracted fields to children.
         """
         if executed is not None:
             if rule.name in executed:
                 return []
             executed.add(rule.name)
 
+        ctx = dict(context or {})
         records: list[dict] = []
 
         if not self._check_state(rule, current_url):
@@ -502,14 +513,18 @@ class ExecutionEngine:
 
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url,
-                                             executed=executed)
+                                             executed=executed, context=ctx)
         else:
             record = self._extract_from_scope(rule, scope, current_url)
+
+            # Merge extracted data into context for children
+            if record and record.get("data"):
+                ctx.update(record["data"])
 
             child_records: dict[str, list] = {}
             for child in rule.children:
                 child_data = self._walk_rule(child, res, scope, current_url,
-                                             executed=executed)
+                                             executed=executed, context=ctx)
                 if child_data:
                     child_records[child.name] = child_data
 
@@ -587,22 +602,24 @@ class ExecutionEngine:
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
-                          executed: set[str] | None = None) -> list[dict]:
+                          executed: set[str] | None = None,
+                          context: dict[str, Any] | None = None) -> list[dict]:
         exp = rule.expansion
         if exp.over == "elements":
             return self._expand_elements(rule, res, current_url,
-                                         executed=executed)
+                                         executed=executed, context=context)
         elif exp.over == "pages_next":
             return self._expand_pages_next(rule, res, current_url,
-                                           executed=executed)
+                                           executed=executed, context=context)
         elif exp.over == "pages_numeric":
             return self._expand_pages_numeric(rule, res, current_url,
-                                              executed=executed)
+                                              executed=executed, context=context)
         return []
 
     def _expand_elements(self, rule: RuleNode, res: ResourceContext,
                          current_url: str, *,
-                         executed: set[str] | None = None) -> list[dict]:
+                         executed: set[str] | None = None,
+                         context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         selector = exp.scope
@@ -619,13 +636,19 @@ class ExecutionEngine:
             count = limit
 
         for i in range(count):
-            # RF Browser uses 1-based nth selector
             elem_selector = f"{selector} >> nth={i}"
             record = self._extract_from_element(rule, elem_selector, current_url)
 
+            # Build per-element context from parent context + this extraction
+            elem_ctx = dict(context or {})
+            if record and record.get("data"):
+                elem_ctx.update(record["data"])
+
             child_records: dict[str, list] = {}
             for child in rule.children:
-                child_data = self._walk_rule(child, res, elem_selector, current_url)
+                child_data = self._walk_rule(child, res, elem_selector,
+                                             current_url, executed=executed,
+                                             context=elem_ctx)
                 if child_data:
                     child_records[child.name] = child_data
 
@@ -638,7 +661,8 @@ class ExecutionEngine:
 
     def _expand_pages_next(self, rule: RuleNode, res: ResourceContext,
                            current_url: str, *,
-                           executed: set[str] | None = None) -> list[dict]:
+                           executed: set[str] | None = None,
+                           context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         next_selector = exp.locator
@@ -650,7 +674,8 @@ class ExecutionEngine:
             logger.info(f"    Page {page_num + 1}: {page_url}")
 
             for child in rule.children:
-                child_data = self._walk_rule(child, res, None, page_url)
+                child_data = self._walk_rule(child, res, None, page_url,
+                                             executed=executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
@@ -673,7 +698,8 @@ class ExecutionEngine:
 
     def _expand_pages_numeric(self, rule: RuleNode, res: ResourceContext,
                               current_url: str, *,
-                              executed: set[str] | None = None) -> list[dict]:
+                              executed: set[str] | None = None,
+                              context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         control_selector = exp.locator
@@ -686,7 +712,8 @@ class ExecutionEngine:
             logger.info(f"    Numeric page {page_num}: {page_url}")
 
             for child in rule.children:
-                child_data = self._walk_rule(child, res, None, page_url)
+                child_data = self._walk_rule(child, res, None, page_url,
+                                             executed=executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
