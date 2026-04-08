@@ -16,9 +16,9 @@ exists but only quotes has been validated end-to-end.
 
 ### 2. Interrupt dismiss — no golden test
 The `_dismiss_interrupts()` implementation exists but no golden test exercises it.
-Need to find a stable public site with a JS-rendered cookie banner and create
-a golden baseline. Candidates: help.splunk.com (OneTrust), bbc.com (GDPR).
-Requires Playwright to detect since banners are JS-rendered, not in raw HTML.
+Best candidate: **Yelp (yelp.com)** — uses OneTrust cookie banner, dismiss via
+`#onetrust-accept-btn-handler`. Has scrapable listings/reviews. Alternatives:
+theguardian.com, wired.com. Requires Playwright (banners are JS-rendered).
 
 ### 3. Hook system is log-through only
 `_invoke_hooks()` logs hook invocations but doesn't execute any actual
