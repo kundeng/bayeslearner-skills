@@ -6,9 +6,17 @@ Read this after `SKILL.md`. This is the operating model for the skill.
 
 You are building a **repeatable exploitation suite** for a browser task. The shipped pieces fit together like this:
 
-```
-task brief  ──→  browser exploration  ──→  evidence  ──→  .robot suite  ──→  BDD validator  ──→  robot --dryrun
- (goal)          (discover)               (proof)        (exploit artifact)   (shape gate)        (execution gate)
+```mermaid
+flowchart LR
+    orient["orient\n─────────────\nreads workflow docs,\nkeyword contract"]
+    explore["explore\n─────────────\nvisits live site\n→ confirmed selectors\n+ DOM evidence"]
+    draft["draft\n─────────────\nwrites .robot suite\ngrounded in evidence"]
+    review["review\n─────────────\nruns robot --dryrun\n(loops back if issues)"]
+    ship["ship\n─────────────\npackages suite\n+ keyword library\n+ docs"]
+
+    orient --> explore --> draft
+    draft <--> review
+    review --> ship
 ```
 
 Use the mode verbs from `SKILL.md` while you work:
