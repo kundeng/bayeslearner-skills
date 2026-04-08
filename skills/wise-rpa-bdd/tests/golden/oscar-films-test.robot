@@ -60,10 +60,9 @@ Resource oscar films
     And I declare parents "root"
     When I expand over combinations
     ...    action=click    control="a.year-link"    values=2015|2014|2013|2012|2011|2010
-    When I wait 1000 ms
-    And selector "tr.film" exists
     And I begin rule "films"
     And I declare parents "year_tabs"
+    And selector "tr.film" exists
     When I expand over elements "tr.film"
     Then I extract fields
     ...    field=title           extractor=text    locator="td.film-title"

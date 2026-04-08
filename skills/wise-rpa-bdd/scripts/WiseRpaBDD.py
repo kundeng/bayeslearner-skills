@@ -625,11 +625,6 @@ class ExecutionEngine:
                     return False
             elif check.type == "selector_exists":
                 try:
-                    # Wait briefly for JS-rendered elements
-                    try:
-                        bl.wait_for_elements_state(check.pattern, "attached", timeout="5s")
-                    except Exception:
-                        pass
                     count = bl.get_element_count(check.pattern)
                     if count == 0:
                         return False
@@ -727,11 +722,6 @@ class ExecutionEngine:
         records = []
 
         try:
-            # Wait for at least one element before counting
-            try:
-                bl.wait_for_elements_state(selector, "attached", timeout="10s")
-            except Exception:
-                pass  # May already exist or not appear — count will be 0
             count = bl.get_element_count(selector)
         except Exception as e:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
@@ -940,12 +930,8 @@ class ExecutionEngine:
                 except Exception as e:
                     logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
 
-            # Wait for page to settle after combo action
-            try:
-                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
-            except Exception:
-                pass
-            time.sleep(1.0)  # Allow AJAX content to load
+            # Brief settle — Playwright auto-waits on next interaction
+            time.sleep(0.5)
 
             # Build per-combo context
             combo_ctx = dict(context or {})
