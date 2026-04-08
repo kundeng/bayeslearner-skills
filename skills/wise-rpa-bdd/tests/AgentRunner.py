@@ -95,18 +95,18 @@ def _run_agent(prompt: str, output_path: Path, model: str = "sonnet",
         f"{prompt}\n\n"
         f"Write the generated .robot suite to: {output_path}\n\n"
         "Follow the wise-rpa-bdd skill phases:\n"
-        "1. /rrpa-orient — read references/workflow.md, keyword-contract.md, "
-        "and the WiseRpaBDD keyword library to understand available keywords\n"
-        "2. /rrpa-explore — use Playwright MCP or agent-browser to visit the "
-        "target site. Inspect the live DOM, test CSS selectors, confirm pagination "
-        "controls, map element structure. DO NOT SKIP. "
-        "Every selector in the .robot file must come from live exploration. "
-        "Output: confirmed selectors, DOM notes, sample data.\n"
+        "1. /rrpa-orient — read references/keyword-reference.md "
+        "to understand available WiseRpaBDD keywords\n"
+        "2. /rrpa-explore — use agent-browser or Playwright MCP to visit "
+        "the target site in a real browser. Inspect the live DOM, test CSS "
+        "selectors, confirm pagination controls. "
+        "Do NOT use curl or WebFetch for exploration. "
+        "Do NOT guess selectors from documentation. "
+        "Every selector must come from live browser inspection.\n"
         "3. /rrpa-draft — draft the .robot suite using WiseRpaBDD keywords "
         "grounded in explore evidence. Include quality gates.\n"
         "4. /rrpa-review — run robot --dryrun --pythonpath scripts/ "
-        "to verify all keywords resolve. Fix issues and loop back to draft "
-        "until dryrun passes clean.\n"
+        "to verify all keywords resolve. Fix and loop until clean.\n"
         "Do NOT run the suite against a live site for full scraping."
     )
 
@@ -115,7 +115,8 @@ def _run_agent(prompt: str, output_path: Path, model: str = "sonnet",
         cwd=str(REPO_ROOT),
         permission_mode="bypassPermissions",
         max_turns=max_turns,
-        allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+        allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash",
+                        "WebFetch", "mcp__*"],
     )
 
     result_text = ""

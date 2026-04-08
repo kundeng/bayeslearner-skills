@@ -9,7 +9,7 @@ matches the vetted golden baseline.
 *** Settings ***
 Documentation     wise-rpa-bdd agent suite generation tests
 Library           AgentRunner    model=sonnet    max_turns=50
-Test Timeout      5 minutes
+Test Timeout      10 minutes
 
 *** Variables ***
 ${GOLDEN_DIR}         ${CURDIR}/golden
