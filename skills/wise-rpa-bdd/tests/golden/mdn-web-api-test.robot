@@ -1,52 +1,5 @@
 *** Comments ***
-Requirement    Scrape the Web API reference index from
-...            https://developer.mozilla.org/en-US/docs/Web/API — discover API page
-...            URLs from the index, then open up to 10 detail pages and extract the
-...            API name and one-line description.
-Expected       name,url,description
-Min Records    5
-
-# -- Evidence (MDN Web API index -- agent-browser + WebFetch, 2026-04-07) ----------------------
-#
-# Explored: https://developer.mozilla.org/en-US/docs/Web/API  (agent-browser, 2026-04-07)
-# Detail:   https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API  (WebFetch, 2026-04-07)
-#
-# Auth:         none -- public documentation, no login required.
-# URL pattern:  /en-US/docs/Web/API/<ApiName>
-#
-# Page layout (redesigned — 2026):
-#   The index page uses <section aria-labelledby="specifications"> and
-#   <section aria-labelledby="interfaces"> as top-level containers.
-#
-#   Specifications section:
-#     <section aria-labelledby="specifications">
-#       <h2 id="specifications">Specifications</h2>
-#       <h3>A</h3>  <ul><li><a href="...">API Name</a></li></ul>
-#       <h3>B</h3>  <ul>...</ul>
-#       ...
-#     </section>
-#     Confirmed 147 links via:
-#       document.querySelectorAll('section[aria-labelledby="specifications"] a[href*="/docs/Web/API"]').length → 147
-#
-#   Interfaces section: ~900+ interface entries (not targeted).
-#
-# Detail page (Fetch API example):
-#   <h1>Fetch API</h1>
-#   <p>The Fetch API provides an interface for fetching resources...</p>
-#   The h1 sits directly in main content; first <p> sibling is the one-liner.
-#   Selector for description: confirmed via WebFetch as the first <p> after h1.
-#
-# Strategy (two-phase, limited to 10 detail pages):
-#   Phase 1 (Discovery): BFS expand over links inside
-#     section[aria-labelledby="specifications"] a  (limit=10 detail pages).
-#     Using locator="." to extract href from <a> elements directly.
-#   Phase 2 (Detail): Consume discovered URLs, open each, extract h1 + first <p>.
-#
-# Quality gates:
-#   min_records = 5 (conservative; discovery limited to 10 pages)
-#   name = 95% fill, description = 80% fill
-#
-# ------------------------------------------------------------------------------------------
+Requirement    Scrape Web API names and descriptions from the MDN Web API reference.
 
 *** Settings ***
 Documentation     Scrape MDN Web API reference index: discover API specification

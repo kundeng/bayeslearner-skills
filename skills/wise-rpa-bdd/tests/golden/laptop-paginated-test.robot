@@ -1,51 +1,6 @@
 *** Comments ***
-Requirement    Scrape all laptops from https://www.webscraper.io/test-sites/e-commerce/static/computers/laptops
-...            Paginated site with a next button. Extract: title, price, description, rating.
-Expected       title,price,description,rating
-Min Records    117
-
-# ── Evidence (live DOM — /rrpa-explore session) ────────────────────────────────
-#
-# Fetched: https://www.webscraper.io/test-sites/e-commerce/static/computers/laptops
-#          (pages 1, 2, 19, 20 confirmed via curl -sL)
-#
-# Item count label : p.item-count         — "117 items" on page 1
-# Total pages      : 20 (links 1-20 visible in ul.pagination; confirmed page 20 has 3 cards)
-# Items per page   : 6 (pages 1-19), 3 (page 20)  →  117 total
-#
-# Product card     : div.card.thumbnail   — 6 per page
-#                    <div class="card thumbnail" itemscope ...>
-#
-# Title            : a.title              — selector: a.title, attr=title
-#                    <a href="..." class="title" title="Packard 255 G2" itemprop="name">
-#                    Full name is in the `title` attribute (not truncated).
-#                    Text content has surrounding whitespace; `title` attr is clean.
-#                    Sample: "Packard 255 G2", "Aspire E1-510", "ThinkPad T540p"
-#
-# Price            : h4.price span        — selector: h4.price span, extractor=text
-#                    <h4 class="price float-end card-title pull-right" itemprop="offers" ...>
-#                      <span itemprop="price">$416.99</span>
-#                    Sample: "$416.99", "$306.99", "$1178.99"
-#
-# Description      : p.description       — selector: p.description, extractor=text
-#                    <p class="description card-text" itemprop="description">
-#                      15.6&quot;, AMD E2-3800 1.3GHz, 4GB, 500GB, Windows 8.1
-#                    Always present; contains specs string. HTML entity &quot; decoded by browser.
-#
-# Rating           : p[data-rating]      — selector: p[data-rating], attr=data-rating
-#                    <p data-rating="2"> (inside div.ratings)
-#                    Numeric value 1–5 stored in data-rating attribute.
-#                    Star spans (span.ws-icon.ws-icon-star) count equals data-rating.
-#                    All 6 cards on page 1 have data-rating present (values: 2,3,1,4,3,1).
-#
-# Next button      : a.page-link.next    — selector: a.page-link.next
-#                    <a class="page-link next" href="...?page=2" rel="next">
-#                    Present on pages 1-19; ABSENT on page 20 → engine stops naturally.
-#                    Previous-only page-item present on p20 — no next class.
-#
-# Auth / cookies   : none — no login prompt, no cookie consent banner observed.
-#
-# ───────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all laptops from the webscraper.io test e-commerce site.
+...            Collect title, price, description, and star rating for each laptop.
 
 *** Settings ***
 Documentation     Scrape all laptops from webscraper.io test e-commerce site.

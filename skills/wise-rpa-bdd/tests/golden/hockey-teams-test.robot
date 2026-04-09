@@ -1,45 +1,6 @@
 *** Comments ***
-Requirement    Search for hockey teams on https://www.scrapethissite.com/pages/forms/?page_num=1
-...            Extract team name, year, wins, losses, goals for, goals against across paginated results.
-Expected       team_name,year,wins,losses,goals_for,goals_against
-Min Records    100
-
-# ── Evidence (live DOM — curl inspection session) ─────────────────────────────
-#
-# Fetched: https://www.scrapethissite.com/pages/forms/?page_num=1
-#          (pages 1, 24 confirmed via curl -s)
-#
-# Page title   : "Hockey Teams: Forms, Searching and Pagination | Scrape This Site"
-# Auth         : none — public page, no login or cookie consent observed.
-#
-# Search form  : form.form.form-inline with GET action="/pages/forms/"
-#   Input      : input#q[name=q][type=text], placeholder="Search for Teams"
-#   Submit     : input[type=submit].btn.btn-primary, value="Search"
-#
-# Table        : table.table — single table with team stats
-#   Header row : <tr> with <th> cells:
-#     Team Name | Year | Wins | Losses | OT Losses | Win % | Goals For (GF) | Goals Against (GA) | + / -
-#
-# Data rows    : tr.team — 25 per page (pages 1-23), 7 on page 24
-#   td.name    : team name (e.g. "Boston Bruins")
-#   td.year    : year (e.g. "1990")
-#   td.wins    : wins (e.g. "44")
-#   td.losses  : losses (e.g. "24")
-#   td.gf      : goals for (e.g. "299")
-#   td.ga      : goals against (e.g. "264")
-#
-# Pagination   : ul.pagination with numbered <li><a> links (page_num=1..24)
-#   Next button: a[aria-label="Next"] — contains » glyph; present pages 1-23, absent page 24.
-#   Total pages: 24 (25 items/page × 23 + 7 = 582 total team records)
-#
-# Extraction strategy:
-#   Single resource with three rules:
-#     root       — state gate: URL contains "pages/forms", selector "tr.team" exists
-#     pages      — paginate by next button a[aria-label="Next"] up to 24 pages
-#     teams      — expand over elements "tr.team", extract text from td.name/.year/.wins etc.
-#   Emit flat records to single artifact.
-#
-# ──────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape NHL hockey team stats from scrapethissite.com.
+...            Collect team name, year, wins, losses, goals for, and goals against.
 
 *** Settings ***
 Documentation     Scrape NHL hockey team stats from scrapethissite.com forms page.

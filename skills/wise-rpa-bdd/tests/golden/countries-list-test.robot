@@ -1,39 +1,6 @@
 *** Comments ***
-Requirement    Scrape all countries from https://www.scrapethissite.com/pages/simple/ — extract country name, capital, population, and area. All data is on a single page in div.country elements.
-Expected       country_name,capital,population,area
-Min Records    200
-
-# ── Evidence (live DOM — curl exploration) ───────────────────────────────────
-#
-# Fetched: https://www.scrapethissite.com/pages/simple/  (single page, no pagination)
-# Method:  curl + grep against live HTML response; selectors confirmed directly.
-#
-# Page heading     : h1 — "Countries of the World: A Simple Example" <small>250 items</small>
-# Total countries  : 250 (stated in heading; confirmed via grep count of div.country)
-#
-# Country container: div.col-md-4.country
-#                    <div class="col-md-4 country"> ... </div>
-#
-# Country name     : h3.country-name
-#                    <h3 class="country-name"><i class="flag-icon ..."></i> Andorra</h3>
-#                    Text node after the <i> flag icon. Always present.
-#
-# Capital          : span.country-capital
-#                    <span class="country-capital">Andorra la Vella</span>
-#                    Always present (some may be empty for territories).
-#
-# Population       : span.country-population
-#                    <span class="country-population">84000</span>
-#                    Numeric string. Always present (some may be 0).
-#
-# Area             : span.country-area
-#                    <span class="country-area">468.0</span>
-#                    Numeric string with decimal. Always present (some may be 0.0).
-#
-# Pagination       : none — all 250 countries rendered on a single page.
-# Auth / cookies   : none — no login required, no cookie consent banner observed.
-#
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all countries from the scrapethissite.com listing.
+...            Collect country name, capital, population, and area.
 
 *** Settings ***
 Documentation     Scrape country name, capital, population, and area from

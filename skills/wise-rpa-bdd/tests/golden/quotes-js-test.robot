@@ -1,41 +1,6 @@
 *** Comments ***
-Requirement    Scrape JavaScript-rendered quotes from https://quotes.toscrape.com/js/ — same content as the regular quotes page but rendered via JavaScript. Extract quote text, author, and tags. Paginate via next button for 3 pages. This tests that the browser engine handles JS rendering.
-Expected       quote_text,author,tags
-Min Records    30
-
-# ── Evidence (live DOM — agent-browser session) ──────────────────────────────
-#
-# Fetched: https://quotes.toscrape.com/js/  (page 1, browser with JS enabled)
-# Method:  npx agent-browser open + eval against live DOM; selectors verified.
-#
-# NOTE: This page renders ALL content via JavaScript. A curl/fetch will see an
-#       empty <div id="content"> that gets populated by an inline <script> tag.
-#       Only a JS-capable browser engine will produce the quote elements below.
-#
-# Quote container  : div.quote              — 10 per page (confirmed via querySelectorAll)
-#                    <div class="quote">
-#
-# Quote text       : span.text              — selector: .text
-#                    <span class="text">"The world as we have created it ..."</span>
-#                    Includes typographic/curly quotes. Always present.
-#
-# Author           : small.author           — selector: small.author
-#                    <small class="author">Albert Einstein</small>
-#                    Direct text node, not inside an anchor. Always populated.
-#
-# Tags             : a.tag                  — selector: .tag (grouped extractor)
-#                    <a class="tag">change</a>
-#                    Multiple per quote; zero tags possible on some quotes.
-#                    NOTE: unlike the static version, tag <a> elements have NO href.
-#
-# Next button      : li.next a              — selector: li.next a
-#                    <a href="/js/page/2/">Next <span aria-hidden="true">→</span></a>
-#                    li.next absent on last page (natural stop).
-#
-# Auth / cookies   : none — no login required, no cookie consent banner observed.
-# Total pages      : 10 (100 quotes). Limit=3 pages -> 30 records minimum.
-#
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape quotes from the JavaScript-rendered version of quotes.toscrape.com.
+...            Collect quote text, author, and tags.
 
 *** Settings ***
 Documentation     Scrape JS-rendered quote text, author, and tags from

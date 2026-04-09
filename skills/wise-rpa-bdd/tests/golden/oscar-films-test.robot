@@ -1,25 +1,6 @@
 *** Comments ***
-Requirement    Scrape Oscar-winning films from https://www.scrapethissite.com/pages/ajax-javascript/ — the page
-...            loads film data via AJAX when clicking year tabs (2010-2015). For each year, click the tab and extract
-...            film title, nominations, awards, and whether it won best picture.
-Expected       title,nominations,awards,best_picture
-Min Records    80
-
-# -- Evidence (live DOM -- npx agent-browser session) --------------------------
-#
-# Page: https://www.scrapethissite.com/pages/ajax-javascript/
-#   Year tabs     : a.year-link              -- id="2015", id="2014", ... id="2010"
-#                   Clicking a tab fires an AJAX request; results populate #table-body.
-#   Table         : table.table > tbody#table-body
-#   Film rows     : tr.film                  -- one per film per year
-#   Title         : td.film-title            -- "Spotlight  " (text, whitespace-padded)
-#   Nominations   : td.film-nominations      -- "6"
-#   Awards        : td.film-awards           -- "2"
-#   Best Picture  : td.film-best-picture     -- contains <i class="glyphicon glyphicon-flag"> if winner,
-#                                               otherwise empty <td>
-#
-# Auth / cookies: none required.
-# -------------------------------------------------------------------------------
+Requirement    Scrape Oscar-winning films from scrapethissite.com for years 2010-2015.
+...            Collect film title, nominations, awards, and best picture status.
 
 *** Settings ***
 Documentation     Single-resource AJAX extraction: use combination expansion to click each year tab

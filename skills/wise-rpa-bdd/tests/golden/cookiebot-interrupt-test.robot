@@ -1,14 +1,5 @@
 *** Comments ***
-Requirement    Scrape article content from https://www.cookiebot.com/en/cookie-consent/ — dismiss the Cookiebot cookie consent banner first, then extract page heading and content sections.
-Expected       heading,content
-Min Records    1
-
-# -- Evidence (live DOM -- agent-browser session) --
-# Cookie banner: #CybotCookiebotDialog (appears on page load)
-# Dismiss button: #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll ("Allow all")
-# Page content: h1 for main heading, article sections
-# No auth required, no CAPTCHA.
-# -----------------------------------------------
+Requirement    Scrape the heading and main content from the Cookiebot test page.
 
 *** Settings ***
 Documentation     Interrupt dismiss test: auto-dismiss Cookiebot cookie consent banner,

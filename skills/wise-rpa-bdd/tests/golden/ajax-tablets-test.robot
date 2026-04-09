@@ -1,40 +1,6 @@
 *** Comments ***
-Requirement    Scrape products from https://www.webscraper.io/test-sites/e-commerce/ajax/computers/tablets
-...            Extract title, price, description, and rating. Page loads content via AJAX.
-...            Paginate if multiple pages exist.
-Expected       title,price,description,rating
-Min Records    21
-
-# -- Evidence (webscraper.io AJAX e-commerce test site) ----------------------------
-#
-# URL: https://www.webscraper.io/test-sites/e-commerce/ajax/computers/tablets
-#   Item count label : 21 items (visible on page)
-#   Total pages      : 4 (pagination links 1-4; 6 items per page, 3 on last page)
-#
-# Product card     : div.thumbnail
-#                    Consistent across webscraper.io AJAX and static variants.
-#
-# Title            : a.title, attr=title
-#                    Full product name in the title attribute (clean, no whitespace).
-#                    e.g. "Lenovo IdeaTab", "Samsung Galaxy Tab"
-#
-# Price            : h4.price
-#                    e.g. "$69.99", "$101.99"
-#                    Price text directly inside h4.price element.
-#
-# Description      : p.description, extractor=text
-#                    Specs string, always present on each card.
-#
-# Rating           : p[data-rating], attr=data-rating
-#                    Numeric value 1-5 stored in data-rating attribute.
-#                    Star icons rendered as child spans; data-rating is the clean value.
-#
-# Pagination       : AJAX-loaded content; page buttons are <button> elements.
-#                    Numeric buttons: button.page-link.page with data-id="1" through "4".
-#                    Use numeric control pagination clicking each page button in sequence.
-#
-# Auth / cookies   : none required.
-# ----------------------------------------------------------------------------------
+Requirement    Scrape all tablets from the webscraper.io AJAX e-commerce test site.
+...            Collect title, price, description, and rating for each tablet.
 
 *** Settings ***
 Documentation     Scrape tablet products from webscraper.io AJAX e-commerce test site.

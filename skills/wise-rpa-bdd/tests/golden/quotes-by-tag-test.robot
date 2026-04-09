@@ -1,37 +1,6 @@
 *** Comments ***
-Requirement    Scrape love-tagged quotes from https://quotes.toscrape.com/tag/love/ — extract quote text, author, and all tags. The tag page has pagination via next button.
-Expected       quote_text,author,tags
-Min Records    10
-
-# ── Evidence (live DOM — WebFetch session) ────────────────────────────────────
-#
-# Fetched: https://quotes.toscrape.com/tag/love/          (page 1)
-#          https://quotes.toscrape.com/tag/love/page/2/    (page 2 — last page)
-# Method:  WebFetch against live HTML responses; selectors confirmed.
-#
-# Quote container  : div.quote              — 10 on page 1, 4 on page 2 (14 total)
-#                    <div class="quote" itemscope itemtype="http://schema.org/CreativeWork">
-#
-# Quote text       : span.text              — selector: .text
-#                    <span class="text" itemprop="text">"…"</span>
-#                    Includes typographic/curly quotes. Always present.
-#
-# Author           : small.author           — selector: small.author
-#                    <small class="author" itemprop="author">André Gide</small>
-#                    Direct text node. Always populated.
-#
-# Tags             : a.tag                  — selector: .tag (grouped extractor)
-#                    <a class="tag" href="/tag/life/page/1/">life</a>
-#                    Multiple per quote. Every quote on this tag page has >= 1 tag.
-#
-# Next button      : li.next a              — selector: li.next a
-#                    <li class="next"><a href="/tag/love/page/2/">Next →</a></li>
-#                    Present on page 1; absent on page 2 (natural stop).
-#
-# Auth / cookies   : none — no login required, no cookie consent banner observed.
-# Total pages      : 2 (14 quotes total). Limit=5 allows natural stop at page 2.
-#
-# ───────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all quotes tagged "love" from quotes.toscrape.com.
+...            Collect quote text, author, and all tags for each quote.
 
 *** Settings ***
 Documentation     Scrape love-tagged quotes from quotes.toscrape.com/tag/love/

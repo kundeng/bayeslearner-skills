@@ -61,10 +61,12 @@ class StateCheck:
 
 @dataclass
 class Action:
-    type: str  # click, type, select, scroll, wait, wait_ms, open, open_bound
+    type: str  # click, type, select, scroll, wait, wait_ms, open, open_bound,
+    #            browser_step, call_keyword
     locator: str | None = None
     value: str | None = None
     options: dict = field(default_factory=dict)
+    args: tuple = ()
 
 
 @dataclass
@@ -287,8 +289,12 @@ class _StealthAdapter:
     # -- lifecycle ----------------------------------------------------------
 
     def new_browser(self, *, headless: bool = True) -> None:
-        from playwright.sync_api import sync_playwright
+        try:
+            from patchright.sync_api import sync_playwright
+        except ImportError:
+            from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
+        logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")
         self._browser = self._pw.chromium.launch(
             headless=headless, channel=self._CHANNEL, args=self._ARGS,
         )
@@ -328,23 +334,6 @@ class _StealthAdapter:
         self._timeout = int(timeout.replace("ms", "").strip())
         if self._page:
             self._page.set_default_timeout(self._timeout)
-
-    # -- cookies ------------------------------------------------------------
-
-    def add_cookie(self, name: str, value: str, *, domain: str | None = None,
-                   path: str | None = None, secure: bool | None = None,
-                   httpOnly: bool | None = None, **_kw: Any) -> None:
-        cookie: dict[str, Any] = {"name": name, "value": value,
-                                  "path": path or "/"}
-        if domain:
-            cookie["domain"] = domain
-        else:
-            cookie["url"] = self._page.url if self._page else "https://example.com"
-        if secure is not None:
-            cookie["secure"] = bool(secure)
-        if httpOnly is not None:
-            cookie["httpOnly"] = bool(httpOnly)
-        self._context.add_cookies([cookie])
 
     # -- navigation ---------------------------------------------------------
 
@@ -392,6 +381,27 @@ class _StealthAdapter:
     def select_options_by(self, selector: str, _attr: str, value: str,
                           **_kw: Any) -> None:
         self._page.locator(selector).first.select_option(value=value)
+
+    def hover(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.hover(timeout=self._timeout)
+
+    def focus(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.focus(timeout=self._timeout)
+
+    def dblclick(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.dblclick(timeout=self._timeout)
+
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None:
+        loc = self._page.locator(selector).first
+        for key in keys:
+            loc.press(key)
+
+    def take_screenshot(self, *, filename: str = "screenshot.png",
+                        **_kw: Any) -> None:
+        self._page.screenshot(path=filename)
+
+    def upload_file(self, selector: str, path: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.set_input_files(path)
 
     # -- JS evaluation ------------------------------------------------------
 
@@ -523,11 +533,6 @@ class ExecutionEngine:
 
         bl.new_context(**ctx_opts)
         bl.set_browser_timeout(f"{timeout}ms")
-
-        # Load cookies before creating the page (so first navigation has them)
-        cookies_file = globals_.get("cookies_file")
-        if cookies_file:
-            self._load_cookies(bl, cookies_file)
 
         bl.new_page()
 
@@ -880,6 +885,33 @@ class ExecutionEngine:
                 page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
+        elif action.type == "hover":
+            bl.hover(action.locator)
+        elif action.type == "focus":
+            bl.focus(action.locator)
+        elif action.type == "dblclick":
+            bl.dblclick(action.locator)
+        elif action.type == "press_keys":
+            bl.press_keys(action.locator, *action.args)
+        elif action.type == "screenshot":
+            bl.take_screenshot(filename=action.value or "screenshot.png")
+        elif action.type == "upload":
+            bl.upload_file(action.locator, action.value or "")
+        elif action.type == "browser_step":
+            # Passthrough: call any method on the browser library
+            method_name = action.value or ""
+            method = getattr(bl, method_name, None)
+            if method and callable(method):
+                logger.info(f"  Browser step: {method_name}({', '.join(str(a) for a in action.args)})")
+                method(*action.args)
+            else:
+                logger.warn(f"  Browser step: method '{method_name}' not found")
+        elif action.type == "call_keyword":
+            # Invoke an arbitrary RF keyword by name (browser is live)
+            from robot.libraries.BuiltIn import BuiltIn
+            kw_name = action.value or ""
+            logger.info(f"  Call keyword: {kw_name}({', '.join(str(a) for a in action.args)})")
+            BuiltIn().run_keyword(kw_name, *action.args)
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
@@ -1211,6 +1243,30 @@ class ExecutionEngine:
             "extracted_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def _resolve_fallback_selector(self, raw: str, scope: str | None) -> str:
+        """If *raw* contains `` | `` (space-pipe-space), try each candidate
+        in order and return the first one that matches elements on the page.
+        If none match, return the first candidate (preserving error messages).
+        Plain selectors (no pipe) pass through with zero overhead.
+        """
+        if " | " not in raw:
+            return f"{scope} >> {raw}" if scope else raw
+
+        bl = self._bl()
+        candidates = [c.strip() for c in raw.split(" | ")]
+        total = len(candidates)
+        for idx, candidate in enumerate(candidates):
+            sel = f"{scope} >> {candidate}" if scope else candidate
+            try:
+                if bl.get_element_count(sel) > 0:
+                    logger.info(f"  Fallback selector: using '{candidate}' (option {idx+1}/{total})")
+                    return sel
+            except Exception:
+                pass  # candidate may be invalid CSS — skip to next
+        # None matched — fall back to first candidate
+        first = candidates[0]
+        return f"{scope} >> {first}" if scope else first
+
     def _extract_field(self, fs: FieldSpec, scope: str | None) -> Any:
         bl = self._bl()
         try:
@@ -1222,10 +1278,8 @@ class ExecutionEngine:
                 if fs.extractor == "link":
                     return bl.get_url()
                 return ""
-            elif scope:
-                selector = f"{scope} >> {fs.locator}"
             else:
-                selector = fs.locator
+                selector = self._resolve_fallback_selector(fs.locator, scope)
 
             if fs.extractor == "text":
                 count = bl.get_element_count(selector)
@@ -1495,28 +1549,6 @@ class ExecutionEngine:
             except json.JSONDecodeError:
                 return {name: result_text}
         return {name: result_text}
-
-    def _load_cookies(self, bl: Any, cookies_file: str) -> None:
-        """Load cookies from a JSON file into the browser context."""
-        import json as _json
-        path = os.path.expanduser(cookies_file)
-        if not os.path.isabs(path):
-            # Resolve relative to the .robot file's directory
-            path = os.path.join(os.getcwd(), path)
-        with open(path) as f:
-            cookies = _json.load(f)
-        for c in cookies:
-            try:
-                bl.add_cookie(
-                    c["name"], c["value"],
-                    domain=c.get("domain"),
-                    path=c.get("path", "/"),
-                    secure=c.get("secure"),
-                    httpOnly=c.get("httpOnly"),
-                )
-            except Exception as e:
-                logger.debug(f"  Cookie {c['name']} skipped: {e}")
-        logger.info(f"  Loaded {len(cookies)} cookies from {cookies_file}")
 
     def _run_setup(self, bl: Any) -> None:
         """Execute state setup actions (auth, consent)."""
@@ -2066,6 +2098,82 @@ class WiseRpaBDD:
         if self._current_rule:
             self._current_rule.actions.append(
                 Action(type="click", locator=locator, options=_parse_options(options))
+            )
+
+    @keyword('When I hover locator "${locator}"')
+    def hover_locator(self, locator: str) -> None:
+        self._record("hover_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="hover", locator=locator))
+
+    @keyword('When I focus locator "${locator}"')
+    def focus_locator(self, locator: str) -> None:
+        self._record("focus_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="focus", locator=locator))
+
+    @keyword('When I double click locator "${locator}"')
+    def dblclick_locator(self, locator: str) -> None:
+        self._record("dblclick_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="dblclick", locator=locator))
+
+    @keyword('When I press keys "${locator}"')
+    def press_keys_locator(self, locator: str, *keys: str) -> None:
+        """Press keyboard keys on a focused element.
+
+        Example: ``When I press keys "#search"    Enter``
+        """
+        self._record("press_keys", locator, *keys)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="press_keys", locator=locator, args=keys)
+            )
+
+    @keyword("When I take screenshot")
+    def take_screenshot(self, *options: str) -> None:
+        self._record("take_screenshot", *options)
+        opts = _parse_options(options)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
+            )
+
+    @keyword('When I upload file "${path}" to locator "${locator}"')
+    def upload_file_to_locator(self, path: str, locator: str) -> None:
+        self._record("upload_file", path, locator)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="upload", locator=locator, value=path)
+            )
+
+    # -- Browser step & call keyword (deferred passthrough) --
+
+    @keyword('And I browser step "${method}"')
+    def browser_step(self, method: str, *args: str) -> None:
+        """Defer a raw Browser library method call into the current rule.
+
+        Executes during the rule walk when the browser is live.
+        Example: ``And I browser step "Press Keys" "#search" "Enter"``
+        """
+        self._record("browser_step", method, *args)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="browser_step", value=method, args=args)
+            )
+
+    @keyword('And I call keyword "${name}"')
+    def call_keyword(self, name: str, *args: str) -> None:
+        """Defer an arbitrary Robot Framework keyword call into the current rule.
+
+        The keyword runs during the rule walk when the browser is live,
+        so it can use raw Browser library keywords freely.
+        Example: ``And I call keyword "Login To Site"``
+        """
+        self._record("call_keyword", name, *args)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="call_keyword", value=name, args=args)
             )
 
     # -- Expansion --

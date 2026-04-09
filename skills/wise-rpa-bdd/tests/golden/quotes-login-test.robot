@@ -1,43 +1,6 @@
 *** Comments ***
-Requirement    Log in to quotes.toscrape.com using the login page (username: admin,
-...            password: admin), then scrape quotes visible to authenticated users.
-...            Extract quote text, author, and tags. Paginate via next button for 3 pages.
-Expected       quote_text,author,tags
-Min Records    30
-
-# ── Evidence (live DOM — curl exploration session) ───────────────────────────
-#
-# Fetched: https://quotes.toscrape.com/login  (login form)
-# Method:  curl against live HTML; selectors verified from raw markup.
-#
-# Login form         : form[action="/login"][method="post"]
-# Username input     : input#username          — <input type="text" class="form-control" id="username" name="username" />
-# Password input     : input#password          — <input type="password" class="form-control" id="password" name="password" />
-# Submit button      : input[type='submit']    — <input type="submit" value="Login" class="btn btn-primary" />
-# CSRF token         : input[name="csrf_token"] — hidden, auto-handled by browser session
-#
-# Auth indicator     : a[href="/logout"]        — present after login (replaces a[href="/login"])
-# Login link         : a[href="/login"]         — present when unauthenticated
-#
-# Fetched: https://quotes.toscrape.com/  (quote listing, pages 1–3)
-#
-# Quote container    : div.quote               — 10 per page (confirmed p1/2/3)
-#                      <div class="quote" itemscope itemtype="http://schema.org/CreativeWork">
-#
-# Quote text         : span.text               — <span class="text" itemprop="text">"…"</span>
-#                      Includes typographic/curly quotes. Always present.
-#
-# Author             : small.author            — <small class="author" itemprop="author">Albert Einstein</small>
-#                      Direct text node. Always populated.
-#
-# Tags               : a.tag                   — <a class="tag" href="/tag/change/page/1/">change</a>
-#                      Multiple per quote; zero tags possible on some quotes.
-#
-# Next button        : li.next a               — <li class="next"><a href="/page/2/">Next …</a></li>
-#                      Absent on last page (page 10) — natural stop.
-#
-# Pagination: 3-page limit → 30 records expected (10 per page).
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Log in to quotes.toscrape.com (username: admin, password: admin),
+...            then scrape quotes. Collect quote text, author, and tags.
 
 *** Settings ***
 Documentation     Auth test: log in to quotes.toscrape.com via state setup, then

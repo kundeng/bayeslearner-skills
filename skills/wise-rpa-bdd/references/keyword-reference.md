@@ -114,20 +114,49 @@ Detail Resource
 
 ## Actions
 
+All actions are **deferred** — they record during test case definition and execute during the rule walk when the browser is live. Never use raw Browser library keywords directly in test cases (see "Deferred Execution Model" below).
+
+### Navigation
+
 **`When I open "${url}"`** — Navigate to URL.
 
 **`When I open the bound field "${field}"`** — Navigate to URL from consumed/parent record.
 
-**`When I click locator "${css}"`** — Click an element. Optional continuation:
-- `delay_ms=<number>`, `uniqueness=<text|css>`
+### Interaction
 
-**`When I type "${value}" into locator "${css}"`** — Type into input.
+**`When I click locator "${css}"`** — Click an element. Optional: `delay_ms=<number>`
+
+**`When I double click locator "${css}"`** — Double-click an element.
+
+**`When I type "${value}" into locator "${css}"`** — Type into input (clears first).
 
 **`When I type secret "${value}" into locator "${css}"`** — Type secret (redacted in logs).
 
 **`When I select "${value}" from locator "${css}"`** — Select dropdown option.
 
-**`When I scroll down`** / **`When I wait for idle`** / **`When I wait ${ms} ms`**
+**`When I check locator "${css}"`** — Check a checkbox.
+
+**`When I hover locator "${css}"`** — Hover over an element (triggers menus, tooltips).
+
+**`When I focus locator "${css}"`** — Focus an element (for keyboard interaction).
+
+**`When I press keys "${css}"`** — Press keyboard keys on a focused element. Keys as continuation args:
+- `When I press keys "#search"    Enter`
+- `When I press keys "#input"    Control+a    Delete`
+
+**`When I upload file "${path}" to locator "${css}"`** — Upload a file to a file input.
+
+### Timing
+
+**`When I scroll down`** — Scroll one viewport height.
+
+**`When I wait for idle`** — Wait for network idle.
+
+**`When I wait ${ms} ms`** — Wait a fixed duration.
+
+### Debugging
+
+**`When I take screenshot`** — Capture the current page. Optional: `filename=<path>`
 
 ### Sort + verify example
 
@@ -137,6 +166,24 @@ Sort By Durability
     When I click locator "th.durability a"
     ...    delay_ms=1000
     Given url contains "durability"
+```
+
+### Auth flow example (pure action rule)
+
+```robot
+Resource protected_content
+    [Setup]    Given I start resource "content" at "${LOGIN_URL}"
+    And I begin rule "login"
+    When I type "${USERNAME}" into locator "#username"
+    When I type secret "${PASSWORD}" into locator "#password"
+    When I click locator "#submit"
+    When I wait for idle
+    And I begin rule "scrape"
+    And I declare parents "login"
+    When I expand over elements ".result"
+    Then I extract fields
+    ...    field=title    extractor=text    locator="h1"
+    And I emit to artifact "${ARTIFACT}"
 ```
 
 ## Expansion
@@ -230,6 +277,68 @@ AI operates on previously extracted text, never on the live DOM. Capture with `h
 - `skip_when=<url>`, `action=open url=<url>`, `action=input css=<sel> value=<val>`, `action=password css=<sel> value=<secret>`, `action=click css=<sel>`
 
 **`And I configure interrupts`** — Auto-dismiss overlays: `dismiss=<css>`
+
+## Browser Step & Call Keyword (passthrough)
+
+For Browser library methods not covered by the action keywords above, two passthrough mechanisms let you call any method at the right time during the rule walk.
+
+**`And I browser step "${method}"`** — Defer a single Browser library method call. The method name must match the adapter interface (e.g. `click`, `fill_text`, `hover`).
+
+```robot
+And I browser step "Press Keys" "#search" "Enter"
+And I browser step "Hover" ".menu-trigger"
+And I browser step "Take Screenshot" "filename=debug.png"
+```
+
+**`And I call keyword "${name}"`** — Defer an arbitrary Robot Framework keyword. The keyword runs during the rule walk when the browser is live, so it can use raw Browser library keywords.
+
+```robot
+*** Keywords ***
+Accept Terms And Login
+    Click    #accept-terms
+    Fill Text    #email    ${EMAIL}
+    Fill Text    #password    ${PASSWORD}
+    Click    #login-submit
+
+*** Test Cases ***
+Resource dashboard
+    [Setup]    Given I start resource "dashboard" at "${ENTRY_URL}"
+    And I begin rule "auth"
+    And I call keyword "Accept Terms And Login"
+    And I begin rule "data"
+    And I declare parents "auth"
+    When I expand over elements ".widget"
+    Then I extract fields
+    ...    field=metric    extractor=text    locator=".value"
+    And I emit to artifact "${ARTIFACT}"
+```
+
+## Fallback Selectors
+
+Selectors support pipe-delimited fallback chains. The engine tries each selector in order and uses the first that matches:
+
+```robot
+Then I extract fields
+...    field=title    extractor=text    locator="h1.title | h1 | [data-field='title']"
+```
+
+If none match, the first selector is used (preserving error messages). Plain selectors (no `|`) have zero overhead.
+
+## Deferred Execution Model
+
+**All WiseRpaBDD keywords are deferred.** They record instructions during test case definition. The browser only opens when `finalize deployment` runs in Suite Teardown. The ExecutionEngine then walks the rule tree and executes everything.
+
+**Raw Browser library keywords (`Click`, `Fill Text`, `Get Text`, etc.) placed directly in test cases will crash** with "No browser context open" because no browser exists during test definition.
+
+Three ways to run browser actions at the right time:
+
+| Option | Use when | Example |
+|--------|----------|---------|
+| **Action keywords** | Standard interactions (click, type, hover, etc.) | `When I click locator "#btn"` |
+| **`And I browser step`** | One-off Browser method not covered above | `And I browser step "Drag And Drop" ".src" ".dst"` |
+| **`And I call keyword`** | Complex multi-step flows (auth, setup) | `And I call keyword "Login To Site"` |
+
+All three record during definition and execute during the rule walk when the browser is live.
 
 ## Important Constraint
 

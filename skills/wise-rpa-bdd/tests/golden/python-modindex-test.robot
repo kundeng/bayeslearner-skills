@@ -1,51 +1,6 @@
 *** Comments ***
-Requirement    Scrape the Python standard library module index from https://docs.python.org/3/py-modindex.html — extract all module names and their one-line descriptions from the index table. Single page extraction.
-Expected       module_name,description
-Min Records    250
-
-# ── Evidence (live DOM — curl + WebFetch exploration, 2026-04-07) ────────────
-#
-# Fetched: https://docs.python.org/3/py-modindex.html  (single page, no pagination)
-# Method:  curl against live HTML; selectors confirmed from raw HTML source.
-#
-# Page title     : "Python Module Index — Python 3.14.4 documentation"
-# Auth           : none — public page, no login or cookie consent required.
-# Pagination     : none — all modules rendered on a single page.
-#
-# Container      : table.indextable.modindextable
-#   Selector     : "table.modindextable" — single table element, holds entire index.
-#
-# Row structure  : <tr> elements with 3 <td> cells each:
-#   td:nth-child(1) — empty spacer (indent level indicator)
-#   td:nth-child(2) — module name link: <a href="..."><code class="xref">module_name</code></a>
-#   td:nth-child(3) — description: <em>One-line description.</em>
-#                      May also contain <strong>Deprecated:</strong> prefix.
-#
-# Non-data rows  : tr.pcap (padding) and tr.cap (letter headings like "a", "b", etc.)
-#   These rows have no <code class="xref"> element; text extractor on "code.xref"
-#   will yield empty → filtered by required=true on module_name field.
-#
-# Example entries (first 4 data rows):
-#   __future__     | Future statement definitions
-#   __main__       | The environment where top-level code is run. ...
-#   _thread        | Low-level threading API.
-#   _tkinter       | A binary module that contains the low-level interface to Tcl/Tk.
-#
-# Total modules   : ~316 (confirmed via grep count of code.xref elements)
-#
-# Extraction strategy:
-#   Expand over elements "table.modindextable tr" to iterate all table rows.
-#   Extract module_name via text extractor on "code.xref" (present only in data rows).
-#   Extract description via text extractor on "td:nth-child(3)" (captures full cell text
-#   including any "Deprecated:" prefix and the em-wrapped description).
-#   Non-data rows (cap/pcap) lack code.xref → module_name empty → filtered by required=true.
-#
-# Quality gates:
-#   min_records = 250  (conservative; actual count ~316)
-#   module_name  = 100% fill (always present in valid data rows)
-#   description  = 90% fill  (most modules have descriptions; some deprecated stubs may be terse)
-#
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape the Python standard library module index from docs.python.org.
+...            Collect each module name and its one-line description.
 
 *** Settings ***
 Documentation     Scrape all Python standard library module names and one-line

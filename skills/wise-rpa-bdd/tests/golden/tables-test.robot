@@ -1,50 +1,6 @@
 *** Comments ***
-Requirement    Scrape all table rows from https://www.webscraper.io/test-sites/tables — extract row number, first name, last name, and username from both HTML tables on the page.
-Expected       #,First Name,Last Name,Username
-Min Records    6
-
-# ── Evidence (live DOM — /rrpa-explore session) ────────────────────────────────
-#
-# Fetched: https://www.webscraper.io/test-sites/tables  (WebFetch, 2026-04-08)
-# Method:  WebFetch HTML inspection; selectors confirmed from raw page HTML.
-#
-# Page title   : "Table Playground | Web Scraper Test Sites"
-# Auth         : none — public page, no login or cookie consent observed.
-# Pagination   : none — all 6 rows on a single page across two tables.
-#
-# Table count  : 2 plain <table> elements — no class or id attributes on either.
-#   Selector   : "table"  — matches both tables in document order.
-#   Wrapper    : no outer div wrapper with distinctive class; tables sit inside
-#                the main content column directly.
-#
-# Table structure (both tables identical shape):
-#   <table>
-#     <thead>
-#       <tr><th>#</th><th>First Name</th><th>Last Name</th><th>Username</th></tr>
-#     </thead>
-#     <tbody> … </tbody>
-#   </table>
-#
-# Table 1 data (rows 1–3):
-#   1 | Mark   | Otto     | @mdo
-#   2 | Jacob  | Thornton | @fat
-#   3 | Larry  | the Bird | @twitter
-#
-# Table 2 data (rows 4–6):
-#   4 | Harry  | Potter   | @hp
-#   5 | John   | Snow     | @dunno
-#   6 | Tim    | Bean     | @timbean
-#
-# Extraction strategy:
-#   Expand over elements "table" (matches both tables in order).
-#   Use header-mapped table extraction: header_row=0, headers #/First Name/Last Name/Username.
-#   Emit flattened by "rows" for flat output; also emit nested for tree chaining.
-#
-# Quality gates:
-#   min_records = 6  (3 rows × 2 tables)
-#   First Name, Last Name, Username = 100% fill (all cells populated in both tables)
-#
-# ───────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all rows from the HTML tables on the webscraper.io tables test page.
+...            Collect row number, first name, last name, and username.
 
 *** Settings ***
 Documentation     Scrape row number, first name, last name, and username from both

@@ -1,51 +1,7 @@
 *** Comments ***
-Requirement    Scrape Splunk ITSI Entity Integrations and Event Analytics documentation
-...            from help.splunk.com. Discover page URLs from the left-nav TOC, extract
-...            title and body from each page. Use AI to extract code blocks and key
-...            definitions from the HTML body. Output as markdown.
-Expected       title,body,cleaned
-Min Records    20
-
-# -- Evidence (live DOM -- agent-browser session) ------------------------------------------------
-#
-# Fetched: https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/
-#          discover-and-integrate-it-components  (agent-browser, 2026-04-07)
-# Fetched: https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/
-#          detect-and-act-on-notable-events      (agent-browser, 2026-04-07)
-# Method:  agent-browser snapshot -i -c  +  eval inspection.
-#
-# Auth:         none -- public docs, no login required.
-# URL pattern:  /en/splunk-it-service-intelligence/splunk-it-service-intelligence/<manual>/<version>/<section>/<page>
-# Version:      4.21 (latest, selected by default).
-#
-# Left-nav TOC structure:
-#   Container: div.toc  id="navigation-panel"  role="navigation"
-#   Links:     .toc-item a[data-testid="toc-link"]  (72 links per manual)
-#   Each link href is an absolute path, e.g.
-#     /en/splunk-it-service-intelligence/.../4.21/get-started/what-is-an-entity-integration
-#   Section parents have class "has-children expanded"; leaf pages are plain <a> tags.
-#
-# Content area:
-#   Article:  main article              (single element, wraps entire page content; no role attribute)
-#   Title:    h1                        (plain h1, no classes; verified 2026-04-09)
-#
-# Two manuals targeted:
-#   1. Entity Integrations  -- "discover-and-integrate-it-components"  (~60 pages)
-#   2. Event Analytics       -- "detect-and-act-on-notable-events"     (~60 pages)
-#
-# Extraction strategy:
-#   Phase 1 (Discovery): Two resources, one per manual entry URL.
-#     BFS expand over .toc-item a[data-testid="toc-link"] to collect page URLs.
-#   Phase 2 (Detail):    Two resources consuming discovered URLs.
-#     Open each URL, extract h1 title + article body HTML.
-#   Phase 3 (AI):        Extract code blocks and key definitions from body HTML.
-#   Output:              Nested JSON artifact + flat markdown artifact.
-#
-# Quality gates:
-#   min_records = 20 (conservative; expect >100 total across both manuals)
-#   title = 95% fill, body = 90% fill
-#
-# --------------------------------------------------------------------------------------------
+Requirement    Scrape Splunk ITSI documentation from help.splunk.com — extract page
+...            titles and body content from the Entity Integrations and Event Analytics
+...            manuals. Clean up body HTML with AI.
 
 *** Settings ***
 Documentation     Scrape Splunk ITSI Entity Integrations and Event Analytics docs.

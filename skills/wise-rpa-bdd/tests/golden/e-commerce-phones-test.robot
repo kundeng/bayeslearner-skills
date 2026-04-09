@@ -1,37 +1,6 @@
 *** Comments ***
-Requirement    Scrape phone products from webscraper.io test e-commerce site.
-...            Extract title, price, description, and rating from product cards.
-...            Paginated: 6 items on page 1, 3 items on page 2, 9 total.
-Expected       title,price,description,rating
-Min Records    9
-
-# ── Evidence (live DOM — agent-browser session 2026-04-07) ───────────────────
-#
-# Fetched: https://www.webscraper.io/test-sites/e-commerce/static/phones/touch
-#
-# Item count label : p.item-count         — "9 items"
-# Total pages      : 2 (pagination controls present: a.page-link.next)
-# Items per page   : 6 on page 1, 3 on page 2  →  9 total
-#
-# Product card     : div.card.thumbnail   — 6 on page 1, 3 on page 2
-#
-# Title            : a.title              — attr=title
-#                    Sample: "Nokia 123", "LG Optimus", "Samsung Galaxy", "Iphone"
-#
-# Price            : h4.price span        — extractor=text
-#                    Sample: "$24.99", "$57.99", "$899.99"
-#
-# Description      : p.description        — extractor=text
-#                    Always present; short specs string.
-#
-# Rating           : p[data-rating]       — attr=data-rating
-#                    Numeric value 1-5.
-#
-# Pagination       : a.page-link.next     — next-page link; 2 pages total
-#
-# Auth / cookies   : none
-#
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all phone products from the webscraper.io test e-commerce site.
+...            Collect title, price, description, and rating for each phone.
 
 *** Settings ***
 Documentation     Scrape phone products from webscraper.io test e-commerce site.

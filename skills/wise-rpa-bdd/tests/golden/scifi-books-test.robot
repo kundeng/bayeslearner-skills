@@ -1,34 +1,6 @@
 *** Comments ***
-Requirement    Scrape sci-fi books from https://books.toscrape.com/catalogue/category/books/science-fiction_16/index.html
-...            Two-resource chaining pattern: discover book URLs from the category page,
-...            then for each book open the detail page and extract title, price, description,
-...            UPC, availability, and number of reviews.
-Expected       title,price,description,upc,availability,num_reviews
-Min Records    16
-
-# -- Evidence (books.toscrape.com DOM analysis) -----------------------------------------------
-#
-# Category page: https://books.toscrape.com/catalogue/category/books/science-fiction_16/index.html
-#   "16 results" shown; single page (no pagination control observed).
-#
-# Book card        : article.product_pod          -- one per book on category listing
-#   Link to detail : h3 > a                       -- href is relative detail URL
-#                    <h3><a href="../../../mesaerion-the-best-..._983/index.html"
-#                           title="Mesaerion: ...">Mesaerion: The Best Science ...</a></h3>
-#
-# Detail page (e.g. /catalogue/mesaerion-the-best-science-fiction-stories-1800-1849_983/index.html):
-#   Title          : .product_main h1             -- full title text
-#                    <h1>Mesaerion: The Best Science Fiction Stories 1800-1849</h1>
-#   Price          : .product_main p.price_color  -- e.g. "£37.59"
-#   Description    : #product_description ~ p     -- paragraph immediately after description header
-#   Info table     : table.table-striped           -- key-value rows with <th> and <td>
-#     UPC          : th="UPC"                      -- e.g. "e30f54cea9b38190"
-#     Availability : th="Availability"             -- e.g. "In stock (19 available)"
-#     Num reviews  : th="Number of reviews"        -- e.g. "0"
-#
-# Auth / cookies   : none required
-#
-# -------------------------------------------------------------------------------------------------
+Requirement    Scrape all sci-fi books from books.toscrape.com.
+...            Collect title, price, description, UPC, availability, and review count.
 
 *** Settings ***
 Documentation     Scrape sci-fi books using two-resource chaining.

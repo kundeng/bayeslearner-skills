@@ -1,43 +1,6 @@
 *** Comments ***
-Requirement    Scrape all books from https://books.toscrape.com/catalogue/page-1.html
-...            Extract title, price, star rating, and availability across 50 paginated pages.
-...            Site has 50 pages with 20 books each (1000 total). Pagination via next button.
-Expected       title,price,star_rating,availability
-Min Records    1000
-
-# ── Evidence (books.toscrape.com DOM analysis) ────────────────────────────────
-#
-# Fetched: https://books.toscrape.com/catalogue/page-1.html
-#          (50 pages confirmed; "Page 1 of 50" shown in pager)
-#
-# Product card     : article.product_pod   — 20 per page
-#                    <article class="product_pod"> wraps each book listing.
-#
-# Title            : h3 > a               — selector: h3 a, attr=title
-#                    <h3><a href="..." title="A Light in the Attic">A Light in the ...</a></h3>
-#                    Full title is in the `title` attribute (display text is truncated).
-#                    Sample: "A Light in the Attic", "Tipping the Velvet", "Soumission"
-#
-# Price            : p.price_color        — selector: p.price_color, extractor=text
-#                    <p class="price_color">£51.77</p>
-#                    Always present; includes currency symbol. Sample: "£51.77", "£53.74"
-#
-# Star rating      : p.star-rating        — selector: p.star-rating, attr=class
-#                    <p class="star-rating Three"> (One|Two|Three|Four|Five)
-#                    Rating encoded as word in class attribute alongside "star-rating".
-#                    Sample class values: "star-rating Three", "star-rating One"
-#
-# Availability     : p.instock.availability — selector: p.availability, extractor=text
-#                    <p class="instock availability"><i class="icon-ok"></i> In stock</p>
-#                    Text content "In stock" (with leading whitespace trimmed by extractor).
-#
-# Next button      : li.next > a          — selector: li.next a
-#                    <li class="next"><a href="page-2.html">next</a></li>
-#                    Present on pages 1-49; ABSENT on page 50 → engine stops naturally.
-#
-# Auth / cookies   : none — no login prompt, no cookie consent banner observed.
-#
-# ───────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all books from the books.toscrape.com catalogue.
+...            Collect title, price, star rating, and availability for each book.
 
 *** Settings ***
 Documentation     Scrape all books from books.toscrape.com catalogue.

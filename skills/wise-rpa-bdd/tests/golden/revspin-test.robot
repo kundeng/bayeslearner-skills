@@ -1,45 +1,7 @@
 *** Comments ***
-Requirement    Scrape table tennis rubber ratings from https://revspin.net/top-rubber/overall-desc.html — click durability sort, then extract all rubber attributes (rank, name, speed, spin, control, durability, overall, price) from 2 pages of results.
-Expected       rubber,speed,durable,overall
-Min Records    50
-
-# ── Evidence (live DOM — agent-browser session) ──────────────────────────────
-#
-# Fetched: https://revspin.net/top-rubber/overall-desc.html  (agent-browser, 2026-04-07)
-# Method:  agent-browser snapshot + get text/html inspection.
-#
-# Page title   : "Rubbers by Highest Overall Rating"
-# Auth         : none — public page, no login required.
-#
-# Table structure:
-#   Single <table> element with header row class="head".
-#   Header cells use CSS classes matching column names:
-#     td.rank, td.product, td.speed, td.spin, td.control, td.tackiness,
-#     td.weight, td.sponge_hardness, td.gears, td.throw_angle,
-#     td.consistency, td.durability, td.overall, td.ratings, td.price
-#   Data rows: <tr> children of table (no explicit <tbody>), excluding tr.head.
-#
-# Sort link for durability:
-#   Selector: "td.durability a"  (href="top-rubber/durability-desc.html")
-#   After click, URL changes to contain "durability-desc".
-#
-# Pagination:
-#   Numeric page links: <a class="btn btn-default" href="...?p=2">2</a>
-#   Selector: "a.btn.btn-default[href*='p=']"
-#   2 pages of ~40 rows each = ~80 total records.
-#
-# Extraction strategy:
-#   1. Navigate to entry URL, confirm table exists.
-#   2. Click durability sort link (td.durability a), wait for idle.
-#   3. Paginate by numeric control over 2 pages.
-#   4. Expand over "table tr:not(.head)" rows, extract via per-cell CSS locators.
-#   5. Emit to both nested and flat artifacts.
-#
-# Quality gates:
-#   min_records = 50  (2 pages × ~40 rows)
-#   rubber = 90% fill, speed = 80% fill
-#
-# ─────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape table tennis rubber ratings from
+...            https://revspin.net/top-rubber/overall-desc.html — extract all rubber
+...            attributes sorted by durability.
 
 *** Settings ***
 Documentation     Scrape table tennis rubber ratings from revspin.net sorted by

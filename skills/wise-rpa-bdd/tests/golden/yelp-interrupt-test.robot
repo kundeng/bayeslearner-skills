@@ -1,24 +1,11 @@
 *** Comments ***
-Requirement    Scrape top restaurant listings from Yelp search results. Dismiss the OneTrust cookie banner on first load. Extract business name, rating, review count, and price range.
-Expected       name,rating,review_count,price
-Min Records    10
-
-# -- Evidence (live DOM -- playwright-stealth session 2026-04-09) --
-# Yelp uses GeeTest CAPTCHA + DataDome bot detection.
-# Stealth mode (playwright-stealth init scripts) is required to bypass.
-# The datadome cookie from a real browser session seeds trust.
-# Cookie file: tests/fixtures/yelp-cookies.json (extracted from Edge)
-# Listing cards: [data-testid='serp-ia-card'] (13 per page, mix of sponsored + organic)
-# Name: second <a> in card (first is image link)
-# Rating: div[role='img'][aria-label*='star'] → aria-label
-# Reviews: span matching "(N reviews)" pattern
-# Price: span matching "$"+ pattern (sparse — many listings omit it)
-# -----------------------------------------------
+Requirement    Scrape top restaurant listings from Yelp for San Francisco.
+...            Collect business name, rating, review count, and price range.
 
 *** Settings ***
-Documentation     Stealth + cookie auth test: load DataDome session cookies,
-...               auto-dismiss OneTrust cookie banner, then scrape Yelp search results.
-...               Exercises: stealth mode, cookies_file, configure interrupts, element expansion.
+Documentation     Stealth test: auto-dismiss OneTrust cookie banner, then scrape
+...               Yelp search results. Exercises: stealth mode, configure interrupts,
+...               element expansion. Requires TLS fingerprint defeat (spec-07 item 6).
 Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
@@ -53,7 +40,6 @@ Resource search_results
     And I set resource globals
     ...    timeout_ms=30000
     ...    page_load_delay_ms=3000
-    ...    cookies_file=tests/fixtures/yelp-cookies.json
     And I begin rule "root"
     Given url contains "yelp.com/search"
     And selector "[data-testid='serp-ia-card']" exists

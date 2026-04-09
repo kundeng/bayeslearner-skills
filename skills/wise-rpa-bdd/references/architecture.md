@@ -75,10 +75,34 @@ The generator handles:
 
 | Layer | Purpose |
 |-------|---------|
-| `WiseRpaBDD.py` | No-op keyword library for dryrun validation |
-| Future: live runner | Real browser execution via Playwright/agent-browser |
+| `WiseRpaBDD.py` | Deferred keyword library — records during definition, executes during walk |
+| `ExecutionEngine` | Walks the rule tree with a browser adapter (StealthAdapter or RF-Browser) |
+| `_StealthAdapter` | Raw Playwright with patchright + playwright-stealth for bot-detected sites |
 
-The no-op library records all keyword invocations for inspection without executing browser actions.
+### Deferred Execution Model
+
+All WiseRpaBDD keywords **record** instructions during Robot Framework test case execution. No browser exists at this point. The `ExecutionEngine` opens the browser and walks the recorded rule tree during `finalize deployment` (Suite Teardown).
+
+```
+Test Case Execution:   Keywords → Record rules, actions, extractions
+                       (no browser, no pages, no navigation)
+
+Suite Teardown:        finalize_deployment → ExecutionEngine.run()
+                       → open browser → walk rule tree → execute actions
+                       → extract data → emit to artifacts → close browser
+```
+
+**Raw Browser keywords placed directly in test cases will fail** because no browser context exists during recording. Use deferred action keywords, `And I browser step`, or `And I call keyword` instead.
+
+### Browser Actions (16 deferred keywords + 2 passthroughs)
+
+| Category | Keywords |
+|----------|----------|
+| Navigation | `open`, `open bound field` |
+| Interaction | `click`, `double click`, `type`, `type secret`, `select`, `check`, `hover`, `focus`, `press keys`, `upload file` |
+| Timing | `scroll down`, `wait for idle`, `wait N ms` |
+| Debug | `take screenshot` |
+| Passthrough | `browser step` (any adapter method), `call keyword` (any RF keyword) |
 
 ## Hook System
 

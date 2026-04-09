@@ -1,37 +1,6 @@
 *** Comments ***
-Requirement    Scrape all available test pages from https://the-internet.herokuapp.com/ — extract page names and their URLs from the main index. Simple single-page element expansion.
-Expected       page_name,page_url
-Min Records    40
-
-# ── Evidence (live DOM — curl + agent-browser exploration) ──────────────────
-#
-# Fetched: https://the-internet.herokuapp.com/  (single page, no pagination)
-# Method:  curl + grep against live HTML; agent-browser snapshot for interactive confirmation.
-#
-# Page heading     : h1.heading — "Welcome to the-internet"
-# Subheading       : h2 — "Available Examples"
-# Total links      : 44 (confirmed via grep count of <li><a href= in #content ul)
-#
-# Container        : #content ul
-#                    <ul> ... </ul>
-#                    Single unordered list; inline style removes bullets.
-#
-# Item             : #content ul li
-#                    <li><a href='/abtest'>A/B Testing</a></li>
-#                    Each <li> contains one <a> with the page path and display name.
-#                    Some <li> have trailing text after </a> (e.g. " (user and pass: admin)")
-#                    which is NOT part of the link and should be ignored.
-#
-# Page name        : #content ul li a — link text
-#                    Examples: "A/B Testing", "Checkboxes", "Sortable Data Tables"
-#
-# Page URL         : #content ul li a — href attribute (relative paths like /abtest)
-#                    Extractor type=link will resolve to absolute URL automatically.
-#
-# Pagination       : none — all 44 links rendered on a single page.
-# Auth / cookies   : none — no login required, no cookie consent banner observed.
-#
-# ────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape the index of all test pages from the-internet.herokuapp.com.
+...            Collect each page name and its URL.
 
 *** Settings ***
 Documentation     Scrape all available test page names and URLs from
