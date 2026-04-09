@@ -87,6 +87,7 @@ Discover API Listing Links
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=2000
+    And I begin rule "index"
     Given url contains "/docs/Web/API"
     And selector "div.section-content li a" exists
     When I expand over elements "div.section-content li a" with order "bfs"

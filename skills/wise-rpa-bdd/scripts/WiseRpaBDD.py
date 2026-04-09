@@ -722,6 +722,12 @@ class ExecutionEngine:
         records = []
 
         try:
+            # Wait for at least one element — get_element_count is a query,
+            # not an action, so Playwright doesn't auto-wait for it.
+            try:
+                bl.wait_for_elements_state(selector, "attached", timeout="10s")
+            except Exception:
+                pass  # May not appear — count will be 0
             count = bl.get_element_count(selector)
         except Exception as e:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
@@ -1017,7 +1023,13 @@ class ExecutionEngine:
     def _extract_field(self, fs: FieldSpec, scope: str | None) -> Any:
         bl = self._bl()
         try:
-            selector = f"{scope} >> {fs.locator}" if scope else fs.locator
+            # "." means self/current element — use scope directly
+            if fs.locator == "." and scope:
+                selector = scope
+            elif scope:
+                selector = f"{scope} >> {fs.locator}"
+            else:
+                selector = fs.locator
 
             if fs.extractor == "text":
                 count = bl.get_element_count(selector)

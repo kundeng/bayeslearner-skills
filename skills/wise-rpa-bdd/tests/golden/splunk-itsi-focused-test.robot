@@ -113,9 +113,10 @@ Discover Entity Integration Pages
     ...    timeout_ms=15000
     ...    retries=2
     ...    page_load_delay_ms=2000
+    And I begin rule "toc"
     Given url contains "discover-and-integrate-it-components"
-    And selector ".toc-item a[data-testid='toc-link']" exists
-    When I expand over elements ".toc-item a[data-testid='toc-link']" with order "bfs"
+    And selector ".toc-item a" exists
+    When I expand over elements ".toc-item a" with order "bfs"
     Then I extract fields
     ...    field=page_url    extractor=link    locator="."
     And I emit to artifact "${ARTIFACT_ENTITY_URLS}"
@@ -127,9 +128,10 @@ Discover Event Analytics Pages
     ...    timeout_ms=15000
     ...    retries=2
     ...    page_load_delay_ms=2000
+    And I begin rule "toc"
     Given url contains "detect-and-act-on-notable-events"
-    And selector ".toc-item a[data-testid='toc-link']" exists
-    When I expand over elements ".toc-item a[data-testid='toc-link']" with order "bfs"
+    And selector ".toc-item a" exists
+    When I expand over elements ".toc-item a" with order "bfs"
     Then I extract fields
     ...    field=page_url    extractor=link    locator="."
     And I emit to artifact "${ARTIFACT_EVENTS_URLS}"
