@@ -2387,3 +2387,332 @@ class WiseRpaBDD:
             for name, rule in res.rules.items():
                 if not rule.parents:
                     res.root_names.append(name)
+
+
+# ---------------------------------------------------------------------------
+# BDD format validation (standalone, no browser needed)
+# ---------------------------------------------------------------------------
+
+_BDD_PREFIXES = ("Given ", "When ", "Then ", "And ", "But ")
+_SECTION_RE = re.compile(r"^\*\*\* (.+) \*\*\*$")
+_CELL_SPLIT_RE = re.compile(r"\s{2,}|\t+")
+
+
+def _starts_with_bdd(text: str) -> bool:
+    return any(text.startswith(p) for p in _BDD_PREFIXES)
+
+
+def validate_bdd(path: Path) -> list[str]:
+    """Check that every executable step uses Given/When/Then/And/But."""
+    errors: list[str] = []
+    section = ""
+    for lineno, raw_line in enumerate(path.read_text().splitlines(), start=1):
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _SECTION_RE.match(stripped)
+        if match:
+            section = match.group(1).lower()
+            continue
+        if section == "settings":
+            if stripped.startswith(("Suite Setup", "Test Setup",
+                                    "Suite Teardown", "Test Teardown")):
+                parts = [p for p in _CELL_SPLIT_RE.split(stripped) if p]
+                if len(parts) >= 2 and not _starts_with_bdd(parts[1]):
+                    errors.append(f"{path}:{lineno}: setup/teardown must use BDD keyword")
+            continue
+        if section in {"test cases", "keywords"}:
+            if raw_line.startswith("    ..."):
+                continue
+            if not raw_line.startswith(" "):
+                if section == "keywords" and not _starts_with_bdd(stripped):
+                    errors.append(f"{path}:{lineno}: keyword definition must start with BDD prefix")
+                continue
+            parts = [p for p in _CELL_SPLIT_RE.split(stripped) if p]
+            if not parts:
+                continue
+            if parts[0] in {"[Setup]", "[Teardown]"}:
+                if len(parts) < 2 or not _starts_with_bdd(parts[1]):
+                    errors.append(f"{path}:{lineno}: setup/teardown step must use BDD keyword")
+                continue
+            if parts[0].startswith("["):
+                continue
+            if not _starts_with_bdd(parts[0]):
+                errors.append(f"{path}:{lineno}: step must start with BDD prefix")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Test harness RF keyword library (for e2e agent tests)
+# ---------------------------------------------------------------------------
+
+@library(scope="SUITE", auto_keywords=False)
+class WiseRpaBDDTest:
+    """RF keyword library for testing agent-generated .robot suites."""
+
+    ROBOT_LIBRARY_SCOPE = "SUITE"
+
+    def __init__(self, model: str = "sonnet", max_turns: int = 50,
+                 backend: str = "claude"):
+        self._model = model
+        self._max_turns = int(max_turns)
+        self._backend = backend
+        self._generated_path: Path | None = None
+        self._generated_content: str = ""
+
+    def _require_generated(self) -> Path:
+        if not self._generated_path:
+            raise RuntimeError("No generated suite — call 'Generate Suite From Requirement' first")
+        return self._generated_path
+
+    @keyword("Generate Suite From Requirement")
+    def generate_suite_from_requirement(self, requirement: str,
+                                         output_path: str = "") -> str:
+        """Invoke the AI agent with a requirement and capture the .robot output."""
+        import tempfile
+        if output_path:
+            out = Path(output_path)
+        else:
+            fd = tempfile.NamedTemporaryFile(suffix=".robot", delete=False)
+            fd.close()
+            out = Path(fd.name)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Invoking agent: {requirement[:80]}...")
+        _cli_generate_core(requirement, out, model=self._model,
+                           max_turns=self._max_turns, backend=self._backend)
+
+        if out.exists() and out.stat().st_size > 0:
+            self._generated_path = out
+            self._generated_content = out.read_text()
+            logger.info(f"Agent produced: {out} ({out.stat().st_size} bytes)")
+        else:
+            raise RuntimeError(f"Agent did not produce a .robot file at {out}")
+        return str(out)
+
+    @keyword("Generated Suite Should Pass BDD Validation")
+    def generated_suite_should_pass_bdd_validation(self) -> None:
+        path = self._require_generated()
+        errors = validate_bdd(path)
+        if errors:
+            raise AssertionError(
+                "BDD validation failed:\n" + "\n".join(f"  {e}" for e in errors))
+        logger.info("BDD validation: PASS")
+
+    @keyword("Generated Suite Should Pass Dryrun")
+    def generated_suite_should_pass_dryrun(self) -> None:
+        import subprocess
+        path = self._require_generated()
+        script_dir = Path(__file__).resolve().parent
+        result = subprocess.run(
+            ["robot", "--dryrun",
+             "--output", "NONE", "--log", "NONE", "--report", "NONE",
+             "--pythonpath", str(script_dir), str(path)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Dryrun failed (rc={result.returncode}):\n"
+                f"{result.stdout}\n{result.stderr}")
+        logger.info("Dryrun: PASS")
+
+    @keyword("Generated Suite Should Match Golden Baseline")
+    def generated_suite_should_match_golden_baseline(self, golden_path: str) -> None:
+        golden = Path(golden_path)
+        if not golden.exists():
+            raise FileNotFoundError(f"Golden baseline not found: {golden}")
+        golden_kw = set(re.findall(
+            r'(?:Given|When|Then|And|But)\s+(.+?)(?:\s{2,}|$)',
+            golden.read_text(), re.MULTILINE))
+        gen_kw = set(re.findall(
+            r'(?:Given|When|Then|And|But)\s+(.+?)(?:\s{2,}|$)',
+            self._generated_content, re.MULTILINE))
+        missing = golden_kw - gen_kw
+        if missing:
+            raise AssertionError(
+                f"Missing keywords from golden:\n"
+                + "\n".join(f"  - {k}" for k in sorted(missing)))
+        logger.info("Golden baseline: PASS")
+
+
+def _build_generate_prompt(requirement: str, output: Path) -> str:
+    """Build the agent prompt for suite generation."""
+    return (
+        f"{requirement}\n\n"
+        f"Write the generated .robot suite to: {output}\n\n"
+        "Follow the wise-rpa-bdd skill phases:\n"
+        "1. /rrpa-orient — read references/keyword-reference.md "
+        "to understand available WiseRpaBDD keywords\n"
+        "2. /rrpa-explore — use `npx agent-browser` via Bash to explore. "
+        "Do NOT use curl or WebFetch. Do NOT guess selectors. "
+        "Every selector must come from agent-browser inspection.\n"
+        "3. /rrpa-draft — draft the .robot suite using WiseRpaBDD keywords "
+        "grounded in explore evidence. Include quality gates.\n"
+        "4. /rrpa-review — run robot --dryrun --pythonpath scripts/ "
+        "to verify all keywords resolve. Fix and loop until clean.\n"
+        "Do NOT run the suite against a live site for full scraping."
+    )
+
+
+def _run_agent_cli(prompt: str, backend: str = "claude",
+                    model: str = "sonnet", max_turns: int = 50) -> int:
+    """Run an agent CLI with a prompt. All backends are subprocess calls.
+
+    Backends:
+      claude  — claude CLI (honors ~/.claude/ settings and skills)
+      codex   — OpenAI Codex CLI
+      aichat  — aichat CLI
+    """
+    import subprocess
+    import shutil
+
+    skill_dir = Path(__file__).resolve().parent.parent
+
+    if backend == "claude":
+        exe = shutil.which("claude")
+        if not exe:
+            raise FileNotFoundError("claude CLI not found in PATH")
+        cmd = [exe, "--dangerously-skip-permissions",
+               "--model", model, "--max-turns", str(max_turns),
+               "-p", prompt]
+        return subprocess.run(cmd, cwd=str(skill_dir)).returncode
+
+    elif backend == "codex":
+        exe = shutil.which("codex")
+        if not exe:
+            raise FileNotFoundError("codex CLI not found in PATH")
+        cmd = [exe, "exec", "--dangerously-bypass-approvals-and-sandbox",
+               "-C", str(skill_dir), prompt]
+        return subprocess.run(cmd).returncode
+
+    elif backend == "aichat":
+        exe = shutil.which("aichat")
+        if not exe:
+            raise FileNotFoundError("aichat CLI not found in PATH")
+        cmd = [exe, "-r", "coder", prompt]
+        return subprocess.run(cmd, cwd=str(skill_dir)).returncode
+
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
+
+
+def _cli_generate_core(requirement: str, output: Path, model: str = "sonnet",
+                       max_turns: int = 50, backend: str = "claude") -> int:
+    """Core agent generation logic shared by CLI and RF keyword."""
+    prompt = _build_generate_prompt(requirement, output)
+    return _run_agent_cli(prompt, backend=backend, model=model,
+                          max_turns=max_turns)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+def _cli_run(args: list[str]) -> int:
+    """Run a .robot suite live (full browser execution)."""
+    import subprocess
+    script_dir = Path(__file__).resolve().parent
+    cmd = ["robot", "--pythonpath", str(script_dir)]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd).returncode
+
+
+def _cli_dryrun(args: list[str]) -> int:
+    """Run robot --dryrun to verify keyword resolution."""
+    import subprocess
+    script_dir = Path(__file__).resolve().parent
+    cmd = [
+        "robot", "--dryrun", "--pythonpath", str(script_dir),
+        "--output", "NONE", "--log", "NONE", "--report", "NONE",
+    ]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd).returncode
+
+
+def _cli_validate(args: list[str]) -> int:
+    """Validate BDD format of .robot files."""
+    if not args:
+        print("Usage: WiseRpaBDD.py validate <suite.robot> [...]")
+        return 1
+    rc = 0
+    for arg in args:
+        p = Path(arg)
+        if not p.exists():
+            print(f"File not found: {p}")
+            rc = 1
+            continue
+        errors = validate_bdd(p)
+        if errors:
+            for e in errors:
+                print(e)
+            rc = 1
+        else:
+            print(f"BDD format OK: {p}")
+    return rc
+
+
+def _cli_generate(args: list[str]) -> int:
+    """Generate a .robot suite via an AI agent backend."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="WiseRpaBDD.py generate")
+    parser.add_argument("requirement", help="Natural language requirement")
+    parser.add_argument("-o", "--output", required=True, help="Output .robot path")
+    parser.add_argument("--backend", default="claude",
+                        choices=["claude", "codex", "aichat"],
+                        help="Agent backend (default: claude)")
+    parser.add_argument("--model", default="sonnet",
+                        help="Model name (claude backend only)")
+    parser.add_argument("--max-turns", type=int, default=50)
+    parsed = parser.parse_args(args)
+
+    out = Path(parsed.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        _cli_generate_core(parsed.requirement, out,
+                           model=parsed.model, max_turns=parsed.max_turns,
+                           backend=parsed.backend)
+    except ImportError as e:
+        print(f"Error: missing dependency for '{parsed.backend}' backend: {e}")
+        return 1
+
+    if out.exists() and out.stat().st_size > 0:
+        print(f"Generated: {out} ({out.stat().st_size} bytes)")
+        return 0
+    else:
+        print(f"Error: agent did not produce a .robot file at {out}")
+        return 1
+
+
+def main() -> int:
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: WiseRpaBDD.py <command> [args...]")
+        print()
+        print("Commands:")
+        print("  run       <suite.robot> [robot-args...]   Run suite live")
+        print("  dryrun    <suite.robot> [robot-args...]   Verify keyword resolution")
+        print("  validate  <suite.robot> [...]             BDD format lint")
+        print("  generate  <requirement> -o <output.robot> Agent-generate suite")
+        return 1
+
+    cmd = sys.argv[1]
+    rest = sys.argv[2:]
+
+    if cmd == "run":
+        return _cli_run(rest)
+    elif cmd == "dryrun":
+        return _cli_dryrun(rest)
+    elif cmd == "validate":
+        return _cli_validate(rest)
+    elif cmd == "generate":
+        return _cli_generate(rest)
+    else:
+        print(f"Unknown command: {cmd}")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
