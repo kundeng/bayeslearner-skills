@@ -1373,8 +1373,8 @@ class ExecutionEngine:
         if adapter in ("aichat", ""):
             aichat = os.popen("which aichat 2>/dev/null").read().strip()
             if aichat:
-                result = _sp.run([aichat, "-S", prompt],
-                                 capture_output=True, text=True, timeout=60)
+                result = _sp.run([aichat], input=prompt,
+                                 capture_output=True, text=True, timeout=120)
                 if result.returncode == 0:
                     return result.stdout.strip()
                 logger.warn(f"aichat failed: {result.stderr[:200]}")
@@ -1433,6 +1433,11 @@ class ExecutionEngine:
 
         if not input_text:
             return None
+
+        # Truncate large inputs to avoid CLI arg-length and token limits
+        max_input = int(opts.get("max_input_size", "50000"))
+        if len(input_text) > max_input:
+            input_text = input_text[:max_input] + f"\n\n[TRUNCATED at {max_input} chars]"
 
         full_prompt = prompt
         if categories:

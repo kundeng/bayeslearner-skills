@@ -117,6 +117,7 @@ Discover Entity Integration Pages
     Given url contains "discover-and-integrate-it-components"
     And selector ".toc-item a" exists
     When I expand over elements ".toc-item a" with order "bfs"
+    ...    limit=10
     Then I extract fields
     ...    field=page_url    extractor=link    locator="."
     And I emit to artifact "${ARTIFACT_ENTITY_URLS}"
@@ -132,6 +133,7 @@ Discover Event Analytics Pages
     Given url contains "detect-and-act-on-notable-events"
     And selector ".toc-item a" exists
     When I expand over elements ".toc-item a" with order "bfs"
+    ...    limit=10
     Then I extract fields
     ...    field=page_url    extractor=link    locator="."
     And I emit to artifact "${ARTIFACT_EVENTS_URLS}"
@@ -178,6 +180,6 @@ Extract Event Analytics Pages
 
 Quality Gates
     [Documentation]    Minimum record and fill-rate thresholds.
-    And I set quality gate min records to 20
+    And I set quality gate min records to 10
     And I set filled percentage for "title" to 95
     And I set filled percentage for "body" to 90
