@@ -113,7 +113,6 @@ Discover Entity Integration Pages
     And I set resource globals
     ...    timeout_ms=15000
     ...    retries=2
-    ...    page_load_delay_ms=2000
     And I begin rule "toc"
     Given url contains "discover-and-integrate-it-components"
     And selector ".toc-item a" exists
@@ -129,7 +128,6 @@ Discover Event Analytics Pages
     And I set resource globals
     ...    timeout_ms=15000
     ...    retries=2
-    ...    page_load_delay_ms=2000
     And I begin rule "toc"
     Given url contains "detect-and-act-on-notable-events"
     And selector ".toc-item a" exists
@@ -146,7 +144,6 @@ Extract Entity Integration Pages
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
-    ...    page_load_delay_ms=2000
     And I begin rule "page"
     And selector "main article" exists
     Then I extract fields
@@ -168,7 +165,6 @@ Extract Event Analytics Pages
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
-    ...    page_load_delay_ms=2000
     And I begin rule "page"
     And selector "main article" exists
     Then I extract fields
