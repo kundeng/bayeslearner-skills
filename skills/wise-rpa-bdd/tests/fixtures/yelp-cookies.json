@@ -1,0 +1,149 @@
+[
+  {
+    "name": "hl",
+    "value": "en_US",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "zss",
+    "value": "0daA0lcozveusdf9BOccxDbCCxXXaQ",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "__adroll_fpc",
+    "value": "84ae8411aa0163cae12ee34a2cd1d1af-1775703330506",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_fbp",
+    "value": "fb.1.1775703326670.597140384294808510",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_ga",
+    "value": "GA1.2.2F9A8A4882391587",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_gcl_au",
+    "value": "1.1.359153151.1775703326",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_uetsid",
+    "value": "8f899d4033bf11f1879fe5d855d4b260",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_uetvid",
+    "value": "8f89afc033bf11f1935da56397627d1e",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "bsi",
+    "value": "1%7C2b643d4a-ecbd-5818-b409-7f1b1fb9d3d3%7C1775703330065%7C1775703299697%7C1%7Ce527f4e56bd844a0",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "location",
+    "value": "%7B%22min_longitude%22%3A+-83.066145%2C+%22country%22%3A+%22US%22%2C+%22address1%22%3A+%22%22%2C+%22unformatted%22%3A+%22Detroit%2C+MI+48226%22%2C+%22latitude%22%3A+42.331509%2C+%22accuracy%22%3A+5%2C+%22zip%22%3A+%2248226%22%2C+%22provenance%22%3A+%22YELP_GEOCODING_ENGINE%22%2C+%22max_longitude%22%3A+-83.034848%2C+%22max_latitude%22%3A+42.343369%2C+%22display%22%3A+%22Detroit%2C+MI+48226%22%2C+%22address2%22%3A+%22%22%2C+%22state%22%3A+%22MI%22%2C+%22longitude%22%3A+-83.050337%2C+%22location_type%22%3A+%22postal_code%22%2C+%22parent_id%22%3A+%22oUcSEppn7vWLWBNOghx9JA%22%2C+%22place_id%22%3A+%2248095%22%2C+%22city%22%3A+%22Detroit%22%2C+%22min_latitude%22%3A+42.319541%2C+%22address3%22%3A+%22%22%2C+%22borough%22%3A+%22%22%2C+%22confident%22%3A+null%2C+%22county%22%3A+null%2C+%22isGoogleHood%22%3A+false%2C+%22language%22%3A+null%2C+%22neighborhood%22%3A+%22%22%2C+%22polygons%22%3A+null%2C+%22usingDefaultZip%22%3A+false%7D",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "xcj",
+    "value": "1|azhVY71ObAGi839lsLFH4xj7iljOCavYEX4LLL3p0zQ",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "yuc",
+    "value": "BG122,C0003,C0002,C0001,C0004",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "datadome",
+    "value": "oaVGu8bUuDOdi~GNDTTjuLS_Yb_OIGw4eVef2ukZ3yIeBrEYNwghOxKiLmmg6iBVIRA4icWOVF8MRdgBqG0xR_ZmK8KO0_AA9dOyLTZWiMbMdLEVL_Fr1gHHowwPFSUy",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "OptanonConsent",
+    "value": "isGpcEnabled=0&datestamp=Wed+Apr+08+2026+22%3A55%3A59+GMT-0400+(Eastern+Daylight+Time)&version=202601.1.0&browserGpcFlag=0&isIABGlobal=false&consentId=consumer-XR_wtn2PJ43sIirHtGjPug&identifierType=Cookie+Unique+Id&isAnonUser=0&hosts=&interactionCount=1&landingPath=https%3A%2F%2Fwww.yelp.com%2Fsearch&groups=BG122%3A1%2CC0003%3A1%2CC0002%3A1%2CC0001%3A1%2CC0004%3A1&crTime=1775703359545",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "_ga_K9Z2ZEVC8C",
+    "value": "GS2.2.s1775703302$o1$g1$t1775703359$j3$l0$h0",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "spid.5f33",
+    "value": "34a03303-6efb-476a-ae93-6e04bcc08063.1775703302.1.1775703358..a340436e-f5cf-40cd-a268-0b34eb177765..6e19c367-e217-48ed-a0e0-6c1ffc04c27b.1775703302215.12",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "spses.5f33",
+    "value": "*",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "wdi",
+    "value": "2|2F9A8A4882391587|0x1.a75c540ec983dp+30|7a7b768750372b5f",
+    "domain": ".yelp.com",
+    "path": "/",
+    "secure": 1
+  },
+  {
+    "name": "g_state",
+    "value": "{\"i_l\":0,\"i_ll\":1775703302539,\"i_e\":{\"enable_itp_optimization\":0}}",
+    "domain": "www.yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "__ar_v4",
+    "value": "%7CBHPKS4B4ONEJJMGH4QCJZR%3A20260409%3A1%7CQB5JPFIKRZDSBOZSULG4YB%3A20260409%3A1%7C7YX6SJQ4RZAMPB6LZ7CHFF%3A20260409%3A1",
+    "domain": ".www.yelp.com",
+    "path": "/",
+    "secure": 0
+  },
+  {
+    "name": "sp",
+    "value": "1db84eb0-fb4a-4054-b204-32e5b3c5aa25",
+    "domain": "sp.yelp.com",
+    "path": "/",
+    "secure": 1
+  }
+]

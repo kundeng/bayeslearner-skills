@@ -245,33 +245,209 @@ def _parse_table_specs(specs: tuple[str, ...]) -> tuple[int, list[TableFieldSpec
 
 
 # ---------------------------------------------------------------------------
+# Browser adapters — unified interface for RF-Browser and raw Playwright
+# ---------------------------------------------------------------------------
+
+def _get_rf_browser() -> Any:
+    """Return the RF-Browser library instance directly (no wrapper)."""
+    from robot.libraries.BuiltIn import BuiltIn
+    return BuiltIn().get_library_instance('Browser')
+
+
+class _StealthAdapter:
+    """Raw Playwright with playwright-stealth init scripts.
+
+    Why this exists: robotframework-browser doesn't expose Playwright's
+    ``context.addInitScript()``, which playwright-stealth needs to patch
+    ``navigator.webdriver``, WebGL renderer, and other fingerprint vectors
+    *before* page JavaScript runs.  Sites with aggressive bot detection
+    (Yelp/DataDome, Cloudflare) require these patches.
+    """
+
+    _CHANNEL = "msedge"
+    _ARGS = ["--disable-blink-features=AutomationControlled"]
+    _DEFAULTS = {
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+    }
+
+    class load_states:
+        """Enum-like for wait_for_load_state — mirrors RF-Browser's PageLoadStates."""
+        networkidle = "networkidle"
+        domcontentloaded = "domcontentloaded"
+        load = "load"
+
+    def __init__(self) -> None:
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._timeout = 30_000
+
+    # -- lifecycle ----------------------------------------------------------
+
+    def new_browser(self, *, headless: bool = True) -> None:
+        from playwright.sync_api import sync_playwright
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(
+            headless=headless, channel=self._CHANNEL, args=self._ARGS,
+        )
+
+    def new_context(self, **kw: Any) -> None:
+        from playwright_stealth import Stealth
+        # RF-Browser uses camelCase; Playwright uses snake_case
+        _remap = {"userAgent": "user_agent", "timezoneId": "timezone_id"}
+        pw_kw = {_remap.get(k, k): v for k, v in kw.items()}
+        # Apply stealth defaults, let caller override
+        merged = {**self._DEFAULTS, **pw_kw}
+        self._context = self._browser.new_context(**merged)
+        Stealth().apply_stealth_sync(self._context)
+
+    def new_page(self, url: str = "about:blank") -> None:
+        self._page = self._context.new_page()
+        if url != "about:blank":
+            self._page.goto(url, timeout=self._timeout)
+
+    def close_context(self) -> None:
+        if self._context:
+            self._context.close()
+            self._context = None
+            self._page = None
+
+    def close_browser(self, _which: str = "ALL") -> None:
+        if self._browser:
+            self._browser.close()
+            self._browser = None
+        if self._pw:
+            self._pw.stop()
+            self._pw = None
+
+    # -- settings -----------------------------------------------------------
+
+    def set_browser_timeout(self, timeout: str) -> None:
+        self._timeout = int(timeout.replace("ms", "").strip())
+        if self._page:
+            self._page.set_default_timeout(self._timeout)
+
+    # -- cookies ------------------------------------------------------------
+
+    def add_cookie(self, name: str, value: str, *, domain: str | None = None,
+                   path: str | None = None, secure: bool | None = None,
+                   httpOnly: bool | None = None, **_kw: Any) -> None:
+        cookie: dict[str, Any] = {"name": name, "value": value,
+                                  "path": path or "/"}
+        if domain:
+            cookie["domain"] = domain
+        else:
+            cookie["url"] = self._page.url if self._page else "https://example.com"
+        if secure is not None:
+            cookie["secure"] = bool(secure)
+        if httpOnly is not None:
+            cookie["httpOnly"] = bool(httpOnly)
+        self._context.add_cookies([cookie])
+
+    # -- navigation ---------------------------------------------------------
+
+    def go_to(self, url: str, **_kw: Any) -> None:
+        self._page.goto(url, timeout=self._timeout)
+
+    def get_url(self) -> str:
+        return self._page.url
+
+    # -- wait ---------------------------------------------------------------
+
+    def wait_for_load_state(self, state: Any, **_kw: Any) -> None:
+        s = state if isinstance(state, str) else str(state).split(".")[-1]
+        self._page.wait_for_load_state(s, timeout=self._timeout)
+
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: str = "10s", **_kw: Any) -> None:
+        ms = int(timeout.replace("s", "").replace("ms", "").strip())
+        if "s" in timeout and "ms" not in timeout:
+            ms *= 1000
+        self._page.wait_for_selector(selector, state="attached", timeout=ms)
+
+    # -- element queries ----------------------------------------------------
+
+    def get_element_count(self, selector: str) -> int:
+        return self._page.locator(selector).count()
+
+    def get_text(self, selector: str, **_kw: Any) -> str:
+        return self._page.locator(selector).first.inner_text()
+
+    def get_attribute(self, selector: str, attr: str, **_kw: Any) -> str | None:
+        return self._page.locator(selector).first.get_attribute(attr)
+
+    def get_property(self, selector: str, prop: str, **_kw: Any) -> Any:
+        return self._page.locator(selector).first.evaluate(f"el => el.{prop}")
+
+    # -- interactions -------------------------------------------------------
+
+    def click(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.click(timeout=self._timeout)
+
+    def fill_text(self, selector: str, text: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.fill(text, timeout=self._timeout)
+
+    def select_options_by(self, selector: str, _attr: str, value: str,
+                          **_kw: Any) -> None:
+        self._page.locator(selector).first.select_option(value=value)
+
+    # -- JS evaluation ------------------------------------------------------
+
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            arg: Any = None, all_elements: bool = False,
+                            **_kw: Any) -> Any:
+        script = " ".join(function)
+        if selector and all_elements:
+            return self._page.locator(selector).evaluate_all(script)
+        elif selector:
+            return self._page.locator(selector).first.evaluate(script)
+        return self._page.evaluate(script)
+
+
+# ---------------------------------------------------------------------------
 # Execution engine (uses robotframework-browser)
 # ---------------------------------------------------------------------------
 
 class ExecutionEngine:
-    """Walks the rule tree using robotframework-browser keywords."""
+    """Walks the rule tree using a browser adapter.
 
-    def __init__(self, ctx: DeploymentContext, headed: bool = False):
+    The adapter is either ``_RFBrowserAdapter`` (default — wraps
+    robotframework-browser) or ``_StealthAdapter`` (raw Playwright with
+    playwright-stealth init scripts for sites with bot detection).
+    """
+
+    def __init__(self, ctx: DeploymentContext, headed: bool = False,
+                 stealth: bool = False):
         self.ctx = ctx
         self.headed = headed
-        self._browser_lib = None
+        self.stealth = stealth
+        self._adapter: Any = None
 
-    def _bl(self):
-        """Get the Browser library instance from RF."""
-        if self._browser_lib is None:
-            from robot.libraries.BuiltIn import BuiltIn
-            self._browser_lib = BuiltIn().get_library_instance('Browser')
-            # Cache enum for wait_for_load_state
-            from Browser.utils.data_types import PageLoadStates
-            self._PageLoadStates = PageLoadStates
-        return self._browser_lib
+    def _bl(self) -> Any:
+        """Lazy-init the browser backend.
+
+        Returns the RF-Browser library instance directly when stealth is off,
+        or a ``_StealthAdapter`` (raw Playwright + playwright-stealth) when on.
+        """
+        if self._adapter is None:
+            if self.stealth:
+                self._adapter = _StealthAdapter()
+                self._PageLoadStates = self._adapter.load_states
+            else:
+                self._adapter = _get_rf_browser()
+                from Browser.utils.data_types import PageLoadStates
+                self._PageLoadStates = PageLoadStates
+        return self._adapter
 
     def run(self) -> None:
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
 
         bl = self._bl()
-        bl.new_browser(headless=not self.headed)
+        browser_opts: dict[str, Any] = {"headless": not self.headed}
+        bl.new_browser(**browser_opts)
 
         try:
             self._execute_resources()
@@ -340,13 +516,19 @@ class ExecutionEngine:
         timeout = globals_.get("timeout_ms", "30000")
         page_delay = int(globals_.get("page_load_delay_ms", 0))
 
-        ctx_opts = {}
+        ctx_opts: dict[str, Any] = {}
         user_agent = globals_.get("user_agent")
         if user_agent:
             ctx_opts["userAgent"] = user_agent
 
         bl.new_context(**ctx_opts)
         bl.set_browser_timeout(f"{timeout}ms")
+
+        # Load cookies before creating the page (so first navigation has them)
+        cookies_file = globals_.get("cookies_file")
+        if cookies_file:
+            self._load_cookies(bl, cookies_file)
+
         bl.new_page()
 
         try:
@@ -572,6 +754,7 @@ class ExecutionEngine:
                 if state_ok:
                     break
         if not state_ok:
+            logger.warn(f"  State check FAILED for rule '{rule.name}' — skipping")
             return records
 
         self._execute_actions(rule, res, context=ctx)
@@ -613,6 +796,13 @@ class ExecutionEngine:
 
     def _check_state(self, rule: RuleNode, current_url: str) -> bool:
         bl = self._bl()
+        # Use actual browser URL for state checks
+        try:
+            actual_url = bl.get_url()
+            if actual_url:
+                current_url = actual_url
+        except Exception:
+            pass
         for check in rule.state_checks:
             if check.type == "url_matches":
                 if check.pattern not in current_url:
@@ -733,6 +923,7 @@ class ExecutionEngine:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
             return records
 
+        count = count or 0
         if limit and count > limit:
             count = limit
 
@@ -1257,6 +1448,28 @@ class ExecutionEngine:
             return {name: result_text}
             return None
 
+    def _load_cookies(self, bl: Any, cookies_file: str) -> None:
+        """Load cookies from a JSON file into the browser context."""
+        import json as _json
+        path = os.path.expanduser(cookies_file)
+        if not os.path.isabs(path):
+            # Resolve relative to the .robot file's directory
+            path = os.path.join(os.getcwd(), path)
+        with open(path) as f:
+            cookies = _json.load(f)
+        for c in cookies:
+            try:
+                bl.add_cookie(
+                    c["name"], c["value"],
+                    domain=c.get("domain"),
+                    path=c.get("path", "/"),
+                    secure=c.get("secure"),
+                    httpOnly=c.get("httpOnly"),
+                )
+            except Exception as e:
+                logger.debug(f"  Cookie {c['name']} skipped: {e}")
+        logger.info(f"  Loaded {len(cookies)} cookies from {cookies_file}")
+
     def _run_setup(self, bl: Any) -> None:
         """Execute state setup actions (auth, consent)."""
         if not self.ctx.setup_actions:
@@ -1561,8 +1774,12 @@ class WiseRpaBDD:
         # Identify root rules for each resource before execution
         self._finalize_resource_roots()
 
-        headed = os.environ.get("WISE_RPA_HEADED", "").lower() in ("1", "true", "yes")
-        engine = ExecutionEngine(self._deployment, headed=headed)
+        _truthy = ("1", "true", "yes")
+        _falsy = ("0", "false", "no")
+        headed = os.environ.get("WISE_RPA_HEADED", "").lower() in _truthy
+        stealth = os.environ.get("WISE_RPA_STEALTH", "").lower() not in _falsy
+        engine = ExecutionEngine(self._deployment, headed=headed,
+                                 stealth=stealth)
         engine.run()
 
     # -- Artifact registration --
