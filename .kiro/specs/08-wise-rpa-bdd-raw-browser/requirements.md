@@ -112,10 +112,36 @@ modest laptops.
 - Deduplication via indexed field (SQLite UNIQUE constraint)
 - Must remain transparent to .robot suite authors — no syntax changes
 
-### Tasks (design phase only — implementation deferred)
-- [ ] Benchmark current memory usage on splunk-itsi (285KB output, ~50 pages)
-- [ ] Prototype SQLite-backed ArtifactStore with same interface
-- [ ] Determine cutoff: when does file-backed become necessary?
+### Design (approved 2026-04-09)
+
+The problem is not just the artifact store — it's the entire walk state.
+Every `_walk_rule`, `_expand_pages_*`, `_expand_elements` returns `list[dict]`
+up the call stack. At peak, 100K records exist twice: in the walk's return
+values AND in `artifact_store`. With 60KB/record, that's 12GB.
+
+**Approach: write-through to SQLite, return IDs not dicts.**
+
+- `_emit_records` writes directly to SQLite, returns nothing heavy
+- Walk functions return `list[int]` (record IDs) instead of `list[dict]`
+- `_children` nesting reconstructed at `_write_outputs` time via parent_id
+- One SQLite file per deployment (`output/{name}/{name}.db`)
+- Dynamic DDL: one table per artifact, columns from `register artifact` fields
+- Quality gates become SQL: `SELECT COUNT(*) WHERE field IS NOT NULL`
+- BLOB columns for HTML body, screenshots, binary data
+- Keyword change: `Given I start deployment "${DEPLOYMENT}"  backend=sqlite`
+- `backend=memory` (default) preserves current behavior for small jobs
+
+**What doesn't change:** keyword API, .robot syntax, rule tree structure,
+expansion/extraction logic. Only the record storage layer swaps out.
+
+### Tasks
+- [ ] Implement `SQLiteRecordStore` with append/iter/len/filled_pct
+- [ ] Refactor `_walk_rule` to return record IDs when backend=sqlite
+- [ ] Refactor `_emit_records` to write-through
+- [ ] Refactor `_write_outputs` to reconstruct nested trees from parent_id
+- [ ] Add `backend=` option to deployment keyword
+- [ ] Test: run quotes + splunk-itsi with backend=sqlite, compare outputs
+- [ ] Test: verify memory stays flat with 1K+ records
 
 ---
 
