@@ -139,6 +139,7 @@ Discover Event Analytics Pages
 Extract Entity Integration Pages
     [Documentation]    Open each Entity Integration page, extract title, body, and AI-cleaned content.
     [Setup]    Given I start resource "extract_entity" at "{page_url}"
+    Given I consume artifact "${ARTIFACT_ENTITY_URLS}"
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
@@ -158,6 +159,7 @@ Extract Entity Integration Pages
 Extract Event Analytics Pages
     [Documentation]    Open each Event Analytics page, extract title, body, and AI-cleaned content.
     [Setup]    Given I start resource "extract_events" at "{page_url}"
+    Given I consume artifact "${ARTIFACT_EVENTS_URLS}"
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2

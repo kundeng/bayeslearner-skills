@@ -1130,8 +1130,8 @@ class ExecutionEngine:
                 except Exception as e:
                     logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
 
-            # Brief settle — Playwright auto-waits on next interaction
-            time.sleep(0.5)
+            # Wait for AJAX to settle after combo actions (tab clicks etc.)
+            time.sleep(2.0)
 
             # Build per-combo context
             combo_ctx = dict(context or {})
@@ -1217,6 +1217,11 @@ class ExecutionEngine:
             # "." means self/current element — use scope directly
             if fs.locator == "." and scope:
                 selector = scope
+            elif fs.locator == "." and not scope:
+                # No scope + self-selector → page-level; return URL for link, else ""
+                if fs.extractor == "link":
+                    return bl.get_url()
+                return ""
             elif scope:
                 selector = f"{scope} >> {fs.locator}"
             else:

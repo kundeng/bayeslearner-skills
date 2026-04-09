@@ -117,7 +117,7 @@ Extract API Details
     And selector "h1" exists
     Then I extract fields
     ...    field=name           extractor=text    locator="h1"
-    ...    field=description    extractor=text    locator="article p"
+    ...    field=description    extractor=text    locator="main .content-section > p"
     And I emit to artifact "${ARTIFACT_APIS}"
 
 Quality Gates
