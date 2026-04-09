@@ -1,52 +1,45 @@
 *** Comments ***
 Requirement    Scrape phone products from webscraper.io test e-commerce site.
 ...            Extract title, price, description, and rating from product cards.
-...            Single page, no pagination needed.
+...            Paginated: 6 items on page 1, 3 items on page 2, 9 total.
 Expected       title,price,description,rating
 Min Records    9
 
-# ── Evidence (live DOM — agent-browser session) ──────────────────────────────
+# ── Evidence (live DOM — agent-browser session 2026-04-07) ───────────────────
 #
 # Fetched: https://www.webscraper.io/test-sites/e-commerce/static/phones/touch
-#          (Note: /computers/phones shows 0 items; /phones/touch has 9 phone products)
 #
 # Item count label : p.item-count         — "9 items"
-# Total pages      : 1 (no pagination controls present)
-# Items per page   : 9  →  9 total
+# Total pages      : 2 (pagination controls present: a.page-link.next)
+# Items per page   : 6 on page 1, 3 on page 2  →  9 total
 #
-# Product card     : div.card.thumbnail   — 9 on the page
-#                    <div class="card thumbnail" itemscope itemtype="https://schema.org/Product">
+# Product card     : div.card.thumbnail   — 6 on page 1, 3 on page 2
 #
-# Title            : a.title              — selector: a.title, attr=title
-#                    <a href="..." class="title" title="Nokia 123" itemprop="name">
-#                    Full name is in the `title` attribute (clean, no whitespace noise).
-#                    Sample: "Nokia 123", "LG Optimus", "Samsung Galaxy"
+# Title            : a.title              — attr=title
+#                    Sample: "Nokia 123", "LG Optimus", "Samsung Galaxy", "Iphone"
 #
-# Price            : h4.price span        — selector: h4.price span, extractor=text
-#                    <h4 class="price float-end card-title pull-right" itemprop="offers" ...>
-#                      <span itemprop="price">$24.99</span>
-#                    Sample: "$24.99", "$57.99", "$93.99"
+# Price            : h4.price span        — extractor=text
+#                    Sample: "$24.99", "$57.99", "$899.99"
 #
-# Description      : p.description       — selector: p.description, extractor=text
-#                    <p class="description card-text" itemprop="description">
-#                      7 day battery
+# Description      : p.description        — extractor=text
 #                    Always present; short specs string.
 #
-# Rating           : p[data-rating]      — selector: p[data-rating], attr=data-rating
-#                    <p data-rating="3"> (inside div.ratings)
-#                    Numeric value 1–5 stored in data-rating attribute.
-#                    Star spans count equals data-rating value.
+# Rating           : p[data-rating]       — attr=data-rating
+#                    Numeric value 1-5.
 #
-# Auth / cookies   : none — no login prompt, no cookie consent banner observed.
+# Pagination       : a.page-link.next     — next-page link; 2 pages total
+#
+# Auth / cookies   : none
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 *** Settings ***
 Documentation     Scrape phone products from webscraper.io test e-commerce site.
-...               Extracts title, price, description, and rating for each phone
-...               on a single page (9 items, no pagination).
+...               Extracts title, price, description, and rating for each phone.
+...               Paginated across 2 pages (6 + 3 = 9 items).
 ...               Evidence: div.card.thumbnail containers; a.title[title] attr; h4.price span;
-...               p.description text; p[data-rating] attr. No auth required.
+...               p.description text; p[data-rating] attr; a.page-link.next pagination.
+...               No auth required.
 Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
@@ -59,7 +52,6 @@ ${ARTIFACT_PHONES}     phones
 
 *** Test Cases ***
 Artifact Catalog
-    # One artifact: flat list of all phone records (title, price, description, rating)
     Given I register artifact "${ARTIFACT_PHONES}"
     ...    field=title          type=string    required=true
     ...    field=price          type=string    required=true
@@ -71,29 +63,19 @@ Artifact Catalog
     ...    description=Phone listings: title, price, description, rating (9 records expected)
 
 Resource phone_listing
-    # ── Resource: single-page phone listing ──────────────────────────────────
-    # Entry: https://www.webscraper.io/test-sites/e-commerce/static/phones/touch
-    # Two-rule tree: root (state gate) → items (expand + extract)
-    # No pagination — all 9 items on a single page.
     [Documentation]    Produces: phones (9 records: title, price, description, rating)
     [Setup]    Given I start resource "phone_listing" at "${ENTRY_URL}"
     And I set resource globals
     ...    timeout_ms=30000
     ...    retries=2
 
-    # Rule: root — state gate confirming we are on the phones listing
-    # Evidence: URL contains "phones/touch"; div.card.thumbnail present
+    # Rule: root — state gate + pagination across 2 pages
     And I begin rule "root"
     Given url contains "phones/touch"
     And selector "div.card.thumbnail" exists
+    When I paginate by next button "a.page-link.next" up to 2 pages
 
-    # Rule: items — expand over each div.card.thumbnail, then extract fields
-    # Evidence: 9 div.card.thumbnail on the page.
-    # Extractors:
-    #   title       — a.title, attr=title  (full name in title attribute; clean text)
-    #   price       — h4.price span, text  (includes $ sign; e.g. "$24.99")
-    #   description — p.description, text  (short specs string; always present)
-    #   rating      — p[data-rating], attr=data-rating  (numeric 1-5; always present)
+    # Rule: items — expand over each product card, extract fields
     And I begin rule "items"
     And I declare parents "root"
     When I expand over elements "div.card.thumbnail"
@@ -105,7 +87,6 @@ Resource phone_listing
     And I emit to artifact "${ARTIFACT_PHONES}"
 
 Quality Gates
-    # 9 items on a single page — all fields confirmed present on every card
     And I set quality gate min records to 9
     And I set filled percentage for "title" to 100
     And I set filled percentage for "price" to 100
