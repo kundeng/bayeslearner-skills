@@ -26,8 +26,8 @@ Min Records    20
 #   Section parents have class "has-children expanded"; leaf pages are plain <a> tags.
 #
 # Content area:
-#   Article:  article[role="article"]   (single element, wraps entire page content)
-#   Title:    h1.title.topictitle1      (always present inside article, id="ariaid-title1")
+#   Article:  main article              (single element, wraps entire page content; no role attribute)
+#   Title:    h1                        (plain h1, no classes; verified 2026-04-09)
 #
 # Two manuals targeted:
 #   1. Entity Integrations  -- "discover-and-integrate-it-components"  (~60 pages)
@@ -145,11 +145,11 @@ Extract Entity Integration Pages
     ...    retries=2
     ...    page_load_delay_ms=2000
     And I begin rule "page"
-    And selector "article[role='article']" exists
+    And selector "main article" exists
     Then I extract fields
-    ...    field=title    extractor=text    locator="h1.title"
+    ...    field=title    extractor=text    locator="h1"
     ...    field=url      extractor=link    locator="."
-    ...    field=body     extractor=html    locator="article[role='article']"
+    ...    field=body     extractor=html    locator="main article"
     Then I extract with AI "cleaned"
     ...    input=body
     ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format the output as clean markdown with headings for Code Blocks and Key Definitions sections.
@@ -165,11 +165,11 @@ Extract Event Analytics Pages
     ...    retries=2
     ...    page_load_delay_ms=2000
     And I begin rule "page"
-    And selector "article[role='article']" exists
+    And selector "main article" exists
     Then I extract fields
-    ...    field=title    extractor=text    locator="h1.title"
+    ...    field=title    extractor=text    locator="h1"
     ...    field=url      extractor=link    locator="."
-    ...    field=body     extractor=html    locator="article[role='article']"
+    ...    field=body     extractor=html    locator="main article"
     Then I extract with AI "cleaned"
     ...    input=body
     ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format the output as clean markdown with headings for Code Blocks and Key Definitions sections.
