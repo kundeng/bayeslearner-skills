@@ -65,6 +65,7 @@ ${ARTIFACT_ENTITY_URLS}         entity_urls
 ${ARTIFACT_EVENTS_URLS}         events_urls
 ${ARTIFACT_PAGES_NESTED}        pages_nested
 ${ARTIFACT_PAGES_FLAT}          pages_flat
+${AI_CLEANUP_PROMPT}            Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format as markdown with ## Code Blocks and ## Key Definitions sections.
 
 *** Test Cases ***
 Artifact Catalog
@@ -156,7 +157,7 @@ Extract Entity Integration Pages
     ...    input=body
     ...    output=markdown
     ...    max_size=30000
-    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format as markdown with ## Code Blocks and ## Key Definitions sections.
+    ...    prompt=${AI_CLEANUP_PROMPT}
     And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
@@ -178,7 +179,7 @@ Extract Event Analytics Pages
     ...    input=body
     ...    output=markdown
     ...    max_size=30000
-    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format as markdown with ## Code Blocks and ## Key Definitions sections.
+    ...    prompt=${AI_CLEANUP_PROMPT}
     And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
