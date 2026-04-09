@@ -40,7 +40,8 @@ Resource Name             # one test case per resource
 | node | `And I begin rule "name"` block |
 | parent chain | `And I declare parents "a, b"` |
 | state check | `Given url ...` / `And selector ... exists` |
-| action | `When I click ...` / `When I open ...` |
+| action | `When I click/type/hover/focus/press keys/...` |
+| passthrough | `And I browser step ...` / `And I call keyword ...` |
 | expansion | `When I expand ...` / `When I paginate ...` |
 | extraction | `Then I extract fields` / `Then I extract table ...` |
 | emit | `And I emit to artifact ...` |
@@ -63,11 +64,19 @@ expand over combinations (axis values) → extract after each combo → emit
 **AI extraction** (when CSS isn't enough):
 extract raw HTML → pass to `Then I extract with AI` with prompt/schema → emit
 
+**Auth flow** (protected content):
+pure action rule (type creds, click submit) → child rule scrapes after login
+
+**Complex setup via call keyword** (multi-step interactions):
+define RF keyword with raw Browser calls → `And I call keyword` defers it to walk time
+
 ## Setup Placement
 
-- **Suite Setup**: deployment init, auth
+- **Suite Setup**: deployment init
 - **Test Setup** (`[Setup]`): per-resource entry navigation
-- **Keywords section**: reusable multi-step flows (e.g. login)
+- **Pure action rule**: deferred browser actions (login, auth) — runs during walk
+- **`And I call keyword`**: defer a `*** Keywords ***` block with raw Browser calls
+- **Keywords section**: reusable multi-step flows for `And I call keyword`
 
 ## AI Role
 

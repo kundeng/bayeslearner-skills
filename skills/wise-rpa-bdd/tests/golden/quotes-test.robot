@@ -1,38 +1,6 @@
 *** Comments ***
-Requirement    Scrape all quotes from https://quotes.toscrape.com/ — extract quote text, author name, and tags for each quote. The site has pagination (next button). Collect at least 3 pages.
-Expected       quote_text,author,tags
-Min Records    30
-
-# ── Evidence (live DOM — /rrpa-explore session) ────────────────────────────────
-#
-# Fetched: https://quotes.toscrape.com/  (pages 1, 2, 3, 10)
-# Method:  curl + grep against live HTML responses
-#
-# Quote container  : div.quote              — 10 per page on p1/2/3/10 (confirmed)
-#                    <div class="quote" itemscope itemtype="http://schema.org/CreativeWork">
-#
-# Quote text       : span.text              — selector: .text
-#                    <span class="text" itemprop="text">"…"</span>
-#                    Includes curly/typographic quotes. Unique class per container.
-#
-# Author           : small.author           — selector: small.author
-#                    <small class="author" itemprop="author">Albert Einstein</small>
-#                    Always present; nested inside a bare <span>.
-#
-# Tags             : a.tag                  — selector: .tag (grouped extractor)
-#                    <a class="tag" href="/tag/change/page/1/">change</a>
-#                    Multiple per quote, inside <div class="tags">. Zero tags possible.
-#
-# Next button      : li.next a              — selector: li.next a
-#                    <li class="next"><a href="/page/2/">Next <span aria-hidden="true">→</span></a>
-#                    Absent on page 10 (natural stop — no sentinel CSS needed).
-#
-# Prev button      : li.previous a          — present on pages 2–10; not used for navigation.
-#
-# Auth / cookies   : none — no login, no cookie consent banner observed.
-# Total pages      : 10 (100 quotes). Limit set to 3 → 30 records minimum.
-#
-# ───────────────────────────────────────────────────────────────────────────────
+Requirement    Scrape all quotes from https://quotes.toscrape.com/ — extract quote
+...            text, author name, and tags for each quote.
 
 *** Settings ***
 Documentation     Scrape quote text, author, and tags from quotes.toscrape.com

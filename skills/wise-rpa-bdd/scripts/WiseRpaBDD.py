@@ -61,21 +61,31 @@ class StateCheck:
 
 @dataclass
 class Action:
-    type: str  # click, type, select, scroll, wait, wait_ms, open, open_bound
+    type: str  # click, type, select, scroll, wait, wait_ms, open, open_bound,
+    #            browser_step, call_keyword
     locator: str | None = None
     value: str | None = None
     options: dict = field(default_factory=dict)
+    args: tuple = ()
+
+
+@dataclass
+class CombinationAxis:
+    action: str  # type, select, click
+    control: str  # CSS selector
+    values: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Expansion:
-    over: str  # elements, pages_next, pages_numeric
+    over: str  # elements, pages_next, pages_numeric, combinations
     scope: str | None = None
     locator: str | None = None
     limit: int = 100
     start: int = 1
     order: str = "dfs"
     options: dict = field(default_factory=dict)
+    axes: list[CombinationAxis] = field(default_factory=list)
 
 
 @dataclass
@@ -92,6 +102,8 @@ class RuleNode:
     emit_flatten_by: dict[str, str] = field(default_factory=dict)
     emit_merge_on: dict[str, str] = field(default_factory=dict)
     children: list[RuleNode] = field(default_factory=list)
+    retry_max: int = 0
+    retry_delay_ms: int = 1000
 
 
 @dataclass
@@ -99,6 +111,7 @@ class ArtifactSchema:
     name: str
     fields: list[dict] = field(default_factory=list)
     output: bool = False
+    format: str = "json"  # json, jsonl, csv, markdown
     structure: str = "flat"  # nested or flat
     dedupe: str | None = None
     query: str | None = None
@@ -126,6 +139,21 @@ class ResourceContext:
 
 
 @dataclass
+class HookDef:
+    name: str
+    lifecycle_point: str  # post_discover, pre_extract, post_extract, pre_assemble, post_assemble
+    config: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SetupAction:
+    action: str  # open, input, password, click
+    css: str = ""
+    url: str = ""
+    value: str = ""
+
+
+@dataclass
 class DeploymentContext:
     name: str
     artifacts: dict[str, ArtifactSchema] = field(default_factory=dict)
@@ -134,6 +162,11 @@ class DeploymentContext:
     quality_gate: QualityGate = field(default_factory=QualityGate)
     output_dir: str = ""
     write_overrides: dict[str, str] = field(default_factory=dict)
+    ai_adapter: str = ""  # aichat, anthropic, openai, cli:<cmd>
+    hooks: list[HookDef] = field(default_factory=list)
+    setup_actions: list[SetupAction] = field(default_factory=list)
+    setup_skip_when: str = ""
+    interrupt_selectors: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -214,30 +247,217 @@ def _parse_table_specs(specs: tuple[str, ...]) -> tuple[int, list[TableFieldSpec
 
 
 # ---------------------------------------------------------------------------
+# Browser adapters — unified interface for RF-Browser and raw Playwright
+# ---------------------------------------------------------------------------
+
+def _get_rf_browser() -> Any:
+    """Return the RF-Browser library instance directly (no wrapper)."""
+    from robot.libraries.BuiltIn import BuiltIn
+    return BuiltIn().get_library_instance('Browser')
+
+
+class _StealthAdapter:
+    """Raw Playwright with playwright-stealth init scripts.
+
+    Why this exists: robotframework-browser doesn't expose Playwright's
+    ``context.addInitScript()``, which playwright-stealth needs to patch
+    ``navigator.webdriver``, WebGL renderer, and other fingerprint vectors
+    *before* page JavaScript runs.  Sites with aggressive bot detection
+    (Yelp/DataDome, Cloudflare) require these patches.
+    """
+
+    _CHANNEL = "msedge"
+    _ARGS = ["--disable-blink-features=AutomationControlled"]
+    _DEFAULTS = {
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+    }
+
+    class load_states:
+        """Enum-like for wait_for_load_state — mirrors RF-Browser's PageLoadStates."""
+        networkidle = "networkidle"
+        domcontentloaded = "domcontentloaded"
+        load = "load"
+
+    def __init__(self) -> None:
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._timeout = 30_000
+
+    # -- lifecycle ----------------------------------------------------------
+
+    def new_browser(self, *, headless: bool = True) -> None:
+        try:
+            from patchright.sync_api import sync_playwright
+        except ImportError:
+            from playwright.sync_api import sync_playwright
+        self._pw = sync_playwright().start()
+        logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")
+        self._browser = self._pw.chromium.launch(
+            headless=headless, channel=self._CHANNEL, args=self._ARGS,
+        )
+
+    def new_context(self, **kw: Any) -> None:
+        from playwright_stealth import Stealth
+        # RF-Browser uses camelCase; Playwright uses snake_case
+        _remap = {"userAgent": "user_agent", "timezoneId": "timezone_id"}
+        pw_kw = {_remap.get(k, k): v for k, v in kw.items()}
+        # Apply stealth defaults, let caller override
+        merged = {**self._DEFAULTS, **pw_kw}
+        self._context = self._browser.new_context(**merged)
+        Stealth().apply_stealth_sync(self._context)
+
+    def new_page(self, url: str = "about:blank") -> None:
+        self._page = self._context.new_page()
+        if url != "about:blank":
+            self._page.goto(url, timeout=self._timeout)
+
+    def close_context(self) -> None:
+        if self._context:
+            self._context.close()
+            self._context = None
+            self._page = None
+
+    def close_browser(self, _which: str = "ALL") -> None:
+        if self._browser:
+            self._browser.close()
+            self._browser = None
+        if self._pw:
+            self._pw.stop()
+            self._pw = None
+
+    # -- settings -----------------------------------------------------------
+
+    def set_browser_timeout(self, timeout: str) -> None:
+        self._timeout = int(timeout.replace("ms", "").strip())
+        if self._page:
+            self._page.set_default_timeout(self._timeout)
+
+    # -- navigation ---------------------------------------------------------
+
+    def go_to(self, url: str, **_kw: Any) -> None:
+        self._page.goto(url, timeout=self._timeout)
+
+    def get_url(self) -> str:
+        return self._page.url
+
+    # -- wait ---------------------------------------------------------------
+
+    def wait_for_load_state(self, state: Any, **_kw: Any) -> None:
+        s = state if isinstance(state, str) else str(state).split(".")[-1]
+        self._page.wait_for_load_state(s, timeout=self._timeout)
+
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: str = "10s", **_kw: Any) -> None:
+        ms = int(timeout.replace("s", "").replace("ms", "").strip())
+        if "s" in timeout and "ms" not in timeout:
+            ms *= 1000
+        self._page.wait_for_selector(selector, state="attached", timeout=ms)
+
+    # -- element queries ----------------------------------------------------
+
+    def get_element_count(self, selector: str) -> int:
+        return self._page.locator(selector).count()
+
+    def get_text(self, selector: str, **_kw: Any) -> str:
+        return self._page.locator(selector).first.inner_text()
+
+    def get_attribute(self, selector: str, attr: str, **_kw: Any) -> str | None:
+        return self._page.locator(selector).first.get_attribute(attr)
+
+    def get_property(self, selector: str, prop: str, **_kw: Any) -> Any:
+        return self._page.locator(selector).first.evaluate(f"el => el.{prop}")
+
+    # -- interactions -------------------------------------------------------
+
+    def click(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.click(timeout=self._timeout)
+
+    def fill_text(self, selector: str, text: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.fill(text, timeout=self._timeout)
+
+    def select_options_by(self, selector: str, _attr: str, value: str,
+                          **_kw: Any) -> None:
+        self._page.locator(selector).first.select_option(value=value)
+
+    def hover(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.hover(timeout=self._timeout)
+
+    def focus(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.focus(timeout=self._timeout)
+
+    def dblclick(self, selector: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.dblclick(timeout=self._timeout)
+
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None:
+        loc = self._page.locator(selector).first
+        for key in keys:
+            loc.press(key)
+
+    def take_screenshot(self, *, filename: str = "screenshot.png",
+                        **_kw: Any) -> None:
+        self._page.screenshot(path=filename)
+
+    def upload_file(self, selector: str, path: str, **_kw: Any) -> None:
+        self._page.locator(selector).first.set_input_files(path)
+
+    # -- JS evaluation ------------------------------------------------------
+
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            arg: Any = None, all_elements: bool = False,
+                            **_kw: Any) -> Any:
+        script = " ".join(function)
+        if selector and all_elements:
+            return self._page.locator(selector).evaluate_all(script)
+        elif selector:
+            return self._page.locator(selector).first.evaluate(script)
+        return self._page.evaluate(script)
+
+
+# ---------------------------------------------------------------------------
 # Execution engine (uses robotframework-browser)
 # ---------------------------------------------------------------------------
 
 class ExecutionEngine:
-    """Walks the rule tree using robotframework-browser keywords."""
+    """Walks the rule tree using a browser adapter.
 
-    def __init__(self, ctx: DeploymentContext, headed: bool = False):
+    The adapter is either ``_RFBrowserAdapter`` (default — wraps
+    robotframework-browser) or ``_StealthAdapter`` (raw Playwright with
+    playwright-stealth init scripts for sites with bot detection).
+    """
+
+    def __init__(self, ctx: DeploymentContext, headed: bool = False,
+                 stealth: bool = False):
         self.ctx = ctx
         self.headed = headed
-        self._browser_lib = None
+        self.stealth = stealth
+        self._adapter: Any = None
 
-    def _bl(self):
-        """Get the Browser library instance from RF."""
-        if self._browser_lib is None:
-            from robot.libraries.BuiltIn import BuiltIn
-            self._browser_lib = BuiltIn().get_library_instance('Browser')
-        return self._browser_lib
+    def _bl(self) -> Any:
+        """Lazy-init the browser backend.
+
+        Returns the RF-Browser library instance directly when stealth is off,
+        or a ``_StealthAdapter`` (raw Playwright + playwright-stealth) when on.
+        """
+        if self._adapter is None:
+            if self.stealth:
+                self._adapter = _StealthAdapter()
+                self._PageLoadStates = self._adapter.load_states
+            else:
+                self._adapter = _get_rf_browser()
+                from Browser.utils.data_types import PageLoadStates
+                self._PageLoadStates = PageLoadStates
+        return self._adapter
 
     def run(self) -> None:
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
 
         bl = self._bl()
-        bl.new_browser(headless=not self.headed)
+        browser_opts: dict[str, Any] = {"headless": not self.headed}
+        bl.new_browser(**browser_opts)
 
         try:
             self._execute_resources()
@@ -247,28 +467,57 @@ class ExecutionEngine:
             bl.close_browser("ALL")
 
     def _execute_resources(self) -> None:
-        independent = []
-        dependent = []
-        for res in self.ctx.resources:
-            consumes = res.consumes
-            if not consumes:
-                for rname in res.root_names:
-                    rule = res.rules.get(rname)
-                    if rule:
-                        for target in rule.emit_targets:
-                            art = self.ctx.artifacts.get(target)
-                            if art and art.consumes:
-                                consumes = art.consumes
-                                break
-            if consumes or res.entry_template or res.iterates_parent:
-                dependent.append(res)
-            else:
-                independent.append(res)
+        """Execute resources in topological order based on artifact dependencies.
 
-        for res in independent:
-            self._execute_resource(res)
-        for res in dependent:
-            self._execute_resource(res)
+        Ordering is derived from artifact ``consumes`` declarations:
+        if resource B's output artifacts consume artifact X, and resource A
+        emits to X, then A must run before B.
+        """
+        resources = self.ctx.resources
+        if not resources:
+            return
+
+        # Build: artifact_name → resource that emits to it
+        art_producer: dict[str, str] = {}
+        for res in resources:
+            for rule in res.rules.values():
+                for target in rule.emit_targets:
+                    art_producer[target] = res.name
+
+        # Build dependency edges using _find_consumed_artifact
+        in_degree: dict[str, int] = {r.name: 0 for r in resources}
+        dependents: dict[str, list[str]] = {r.name: [] for r in resources}
+
+        for res in resources:
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art:
+                producer = art_producer.get(consumed_art)
+                if producer and producer != res.name:
+                    dependents[producer].append(res.name)
+                    in_degree[res.name] += 1
+
+        # Kahn's algorithm
+        queue = [r.name for r in resources if in_degree[r.name] == 0]
+        ordered: list[str] = []
+
+        while queue:
+            name = queue.pop(0)
+            ordered.append(name)
+            for dep in dependents.get(name, []):
+                in_degree[dep] -= 1
+                if in_degree[dep] == 0:
+                    queue.append(dep)
+
+        if len(ordered) != len(resources):
+            cycle_members = [r.name for r in resources if r.name not in ordered]
+            raise RuntimeError(
+                f"Cycle detected in resource dependencies: {cycle_members}"
+            )
+
+        # Execute in topological order
+        res_by_name = {r.name: r for r in resources}
+        for name in ordered:
+            self._execute_resource(res_by_name[name])
 
     def _execute_resource(self, res: ResourceContext) -> None:
         logger.info(f"Executing resource: {res.name}")
@@ -277,16 +526,20 @@ class ExecutionEngine:
         timeout = globals_.get("timeout_ms", "30000")
         page_delay = int(globals_.get("page_load_delay_ms", 0))
 
-        ctx_opts = {}
+        ctx_opts: dict[str, Any] = {}
         user_agent = globals_.get("user_agent")
         if user_agent:
             ctx_opts["userAgent"] = user_agent
 
         bl.new_context(**ctx_opts)
         bl.set_browser_timeout(f"{timeout}ms")
+
         bl.new_page()
 
         try:
+            # Run state setup (auth, consent) if configured
+            self._run_setup(bl)
+
             entry_urls = self._resolve_entry_urls(res)
 
             for entry_url in entry_urls:
@@ -297,77 +550,240 @@ class ExecutionEngine:
                     logger.warn(f"  Navigation failed: {e}")
                     continue
 
+                self._dismiss_interrupts(bl)
+
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
 
                 root_rules = self._build_rule_tree(res)
+                executed: set[str] = set()
                 for root in root_rules:
-                    self._walk_rule(root, res, None, entry_url)
+                    self._walk_rule(root, res, None, entry_url,
+                                    executed=executed)
         finally:
             bl.close_context()
 
+    def _find_consumed_artifact(self, res: ResourceContext) -> str | None:
+        """Find which artifact this resource consumes.
+
+        The source of truth is the artifact-level ``consumes`` declaration.
+        A resource consumes artifact X if any artifact it emits to declares
+        ``consumes=X``. Falls back to ``res.consumes`` if set explicitly.
+        """
+        # Explicit resource-level consumes (legacy, from 'Given I consume artifact')
+        if res.consumes:
+            return res.consumes
+
+        # Derive from artifact declarations: find artifacts this resource emits to
+        res_emit_targets: set[str] = set()
+        for rule in res.rules.values():
+            res_emit_targets.update(rule.emit_targets)
+
+        # Which of those artifacts declares consumes?
+        for art_name, art in self.ctx.artifacts.items():
+            if art.consumes and art_name in res_emit_targets:
+                return art.consumes
+
+        return None
+
     def _resolve_entry_urls(self, res: ResourceContext) -> list[str]:
+        """Resolve entry URLs.
+
+        Three cases:
+        1. Static URL (no template) → [url]
+        2. Template URL with {field} → expand per consumed artifact record
+        3. No URL but resource consumes → iterate consumed records for URL fields
+        """
         url = res.entry_url
+
+        # Case 3: no entry URL, but consumes an artifact → iterate its records
         if not url:
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art and consumed_art in self.ctx.artifact_store:
+                records = self.ctx.artifact_store[consumed_art]
+                urls = []
+                for record in records:
+                    data = record.get("data", {})
+                    for v in data.values():
+                        if isinstance(v, str) and v.startswith(("http://", "https://")):
+                            urls.append(v)
+                            break
+                return urls
             return []
 
+        # Case 2: template URL with {field} → expand per consumed record
         if "{" in url and "}" in url:
-            consumes = res.consumes
-            if not consumes:
-                for art in self.ctx.artifacts.values():
-                    if art.consumes:
-                        consumes = art.consumes
-                        break
-
-            if consumes and consumes in self.ctx.artifact_store:
-                records = self.ctx.artifact_store[consumes]
+            consumed_art = self._find_consumed_artifact(res)
+            if consumed_art and consumed_art in self.ctx.artifact_store:
+                records = self.ctx.artifact_store[consumed_art]
                 urls = []
                 for record in records:
                     data = record.get("data", record)
                     rendered = url
                     for k, v in data.items():
                         rendered = rendered.replace("{" + k + "}", str(v))
+                    # Also expand {artifacts.name.field} cross-refs
+                    for art_name, art_records in self.ctx.artifact_store.items():
+                        if art_records:
+                            latest = art_records[-1].get("data", {})
+                            for fk, fv in latest.items():
+                                ref = "{artifacts." + art_name + "." + fk + "}"
+                                rendered = rendered.replace(ref, str(fv))
                     if "{" not in rendered:
                         urls.append(rendered)
                 return urls
             return []
 
+        # Case 1: static URL
         return [url]
 
+    @staticmethod
+    def _resolve_node_order(nodes: list[RuleNode]) -> list[str]:
+        """Topologically sort nodes using Kahn's algorithm.
+
+        Edges come from two sources:
+        1. Parent declarations — ``rule.parents`` lists predecessors.
+        2. Artifact dependencies — a node that ``emit_targets`` an artifact
+           must run before any node that consumes it (future: ``consumes``
+           field on RuleNode).
+
+        Raises ``ValueError`` on cycles.
+        """
+        if not nodes:
+            return []
+
+        node_names = {n.name for n in nodes}
+
+        # adjacency list and in-degree map
+        adj: dict[str, list[str]] = {n.name: [] for n in nodes}
+        in_deg: dict[str, int] = {n.name: 0 for n in nodes}
+
+        def _add_edge(src: str, dst: str) -> None:
+            if src not in node_names or dst not in node_names:
+                return
+            if src == dst:
+                raise ValueError(
+                    f"Cycle detected in node dependencies: {src}"
+                )
+            if dst not in adj[src]:
+                adj[src].append(dst)
+                in_deg[dst] += 1
+
+        # 1. Parent edges: parent → child
+        for n in nodes:
+            for parent in n.parents:
+                _add_edge(parent, n.name)
+
+        # 2. Artifact edges: emitter → consumer (placeholder for Task 2)
+        # emitter: dict[str, str] = {}
+        # for n in nodes:
+        #     for target in n.emit_targets:
+        #         emitter[target] = n.name
+
+        # Kahn's algorithm — stable: preserves input order for ties
+        queue = [n.name for n in nodes if in_deg[n.name] == 0]
+        order: list[str] = []
+
+        while queue:
+            name = queue.pop(0)
+            order.append(name)
+            for nxt in adj[name]:
+                in_deg[nxt] -= 1
+                if in_deg[nxt] == 0:
+                    queue.append(nxt)
+
+        if len(order) != len(nodes):
+            missing = [n.name for n in nodes if n.name not in set(order)]
+            raise ValueError(
+                f"Cycle detected in node dependencies: {', '.join(missing)}"
+            )
+
+        return order
+
+    def _find_children(self, parent_name: str,
+                       all_rules: dict[str, RuleNode]) -> list[RuleNode]:
+        """Return children of *parent_name*, topologically sorted."""
+        children = [r for r in all_rules.values()
+                    if parent_name in r.parents]
+        if not children:
+            return []
+        sorted_names = self._resolve_node_order(children)
+        return [all_rules[n] for n in sorted_names]
+
     def _build_rule_tree(self, res: ResourceContext) -> list[RuleNode]:
+        """Return root-level rules in topological order.
+
+        Also populates ``rule.children`` on every node so that expansion
+        methods can walk immediate children per element.
+        """
+        # Populate children on all nodes (topologically sorted)
+        for rule in res.rules.values():
+            rule.children = self._find_children(rule.name, res.rules)
+
+        # Validate: full topo sort over all rules detects cycles early
+        self._resolve_node_order(list(res.rules.values()))
+
+        # Return roots in the order they appear in root_names
         roots = []
         for rname in res.root_names:
             if rname in res.rules:
-                root = res.rules[rname]
-                self._attach_children(root, res.rules)
-                roots.append(root)
+                roots.append(res.rules[rname])
         return roots
 
-    def _attach_children(self, node: RuleNode, all_rules: dict[str, RuleNode]) -> None:
-        node.children = []
-        for name, rule in all_rules.items():
-            if node.name in rule.parents:
-                self._attach_children(rule, all_rules)
-                node.children.append(rule)
-
     def _walk_rule(self, rule: RuleNode, res: ResourceContext,
-                   scope: str | None, current_url: str) -> list[dict]:
-        """Walk a rule node. scope is a CSS selector string or None for page."""
-        records = []
+                   scope: str | None, current_url: str, *,
+                   executed: set[str] | None = None,
+                   context: dict[str, Any] | None = None) -> list[dict]:
+        """Walk a rule node. scope is a CSS selector string or None for page.
 
-        if not self._check_state(rule, current_url):
+        *executed* tracks which nodes have already run so that multi-parent
+        nodes execute only once (after all parents complete).
+        *context* carries parent-extracted fields to children.
+        """
+        if executed is not None:
+            if rule.name in executed:
+                return []
+            executed.add(rule.name)
+
+        ctx = dict(context or {})
+        records: list[dict] = []
+
+        # State check with retry
+        state_ok = self._check_state(rule, current_url)
+        if not state_ok and rule.retry_max > 0:
+            for attempt in range(1, rule.retry_max + 1):
+                logger.info(f"  Retry {attempt}/{rule.retry_max} for rule '{rule.name}'")
+                time.sleep(rule.retry_delay_ms / 1000.0)
+                self._execute_actions(rule, res, context=ctx)
+                state_ok = self._check_state(rule, current_url)
+                if state_ok:
+                    break
+        if not state_ok:
+            logger.warn(f"  State check FAILED for rule '{rule.name}' — skipping")
             return records
 
-        self._execute_actions(rule, res)
+        self._execute_actions(rule, res, context=ctx)
+
+        # Refresh current_url after actions (click may have navigated)
+        try:
+            current_url = self._bl().get_url()
+        except Exception:
+            pass
 
         if rule.expansion:
-            records = self._handle_expansion(rule, res, current_url)
+            records = self._handle_expansion(rule, res, current_url,
+                                             executed=executed, context=ctx)
         else:
             record = self._extract_from_scope(rule, scope, current_url)
 
+            # Merge extracted data into context for children
+            if record and record.get("data"):
+                ctx.update(record["data"])
+
             child_records: dict[str, list] = {}
             for child in rule.children:
-                child_data = self._walk_rule(child, res, scope, current_url)
+                child_data = self._walk_rule(child, res, scope, current_url,
+                                             executed=executed, context=ctx)
                 if child_data:
                     child_records[child.name] = child_data
 
@@ -385,6 +801,13 @@ class ExecutionEngine:
 
     def _check_state(self, rule: RuleNode, current_url: str) -> bool:
         bl = self._bl()
+        # Use actual browser URL for state checks
+        try:
+            actual_url = bl.get_url()
+            if actual_url:
+                current_url = actual_url
+        except Exception:
+            pass
         for check in rule.state_checks:
             if check.type == "url_matches":
                 if check.pattern not in current_url:
@@ -406,14 +829,16 @@ class ExecutionEngine:
                 pass
         return True
 
-    def _execute_actions(self, rule: RuleNode, res: ResourceContext) -> None:
+    def _execute_actions(self, rule: RuleNode, res: ResourceContext,
+                         context: dict[str, Any] | None = None) -> None:
         for action in rule.actions:
             try:
-                self._do_action(action, res)
+                self._do_action(action, res, context=context)
             except Exception as e:
                 logger.warn(f"  Action {action.type} failed: {e}")
 
-    def _do_action(self, action: Action, res: ResourceContext) -> None:
+    def _do_action(self, action: Action, res: ResourceContext,
+                   context: dict[str, Any] | None = None) -> None:
         bl = self._bl()
         delay_ms = int(action.options.get("delay_ms", 0))
 
@@ -431,7 +856,7 @@ class ExecutionEngine:
             bl.evaluate_javascript(None, "window.scrollBy(0, window.innerHeight)")
             time.sleep(0.5)
         elif action.type == "wait":
-            bl.wait_for_load_state("networkidle")
+            bl.wait_for_load_state(self._PageLoadStates.networkidle)
         elif action.type == "wait_ms":
             ms = int(action.value or 0)
             time.sleep(ms / 1000.0)
@@ -441,56 +866,151 @@ class ExecutionEngine:
             if page_delay:
                 time.sleep(page_delay / 1000.0)
         elif action.type == "open_bound":
-            pass
+            # Resolve field value from context or artifact store
+            field_name = action.value or ""
+            url = ""
+            if context and field_name in (context or {}):
+                url = str(context[field_name])
+            elif "." in field_name:
+                # Try artifacts.name.field reference
+                parts = field_name.split(".")
+                if len(parts) >= 2:
+                    art_name = parts[-2]
+                    fld = parts[-1]
+                    records = self.ctx.artifact_store.get(art_name, [])
+                    if records:
+                        url = str(records[-1].get("data", {}).get(fld, ""))
+            if url:
+                bl.go_to(url)
+                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
+                if page_delay:
+                    time.sleep(page_delay / 1000.0)
+        elif action.type == "hover":
+            bl.hover(action.locator)
+        elif action.type == "focus":
+            bl.focus(action.locator)
+        elif action.type == "dblclick":
+            bl.dblclick(action.locator)
+        elif action.type == "press_keys":
+            bl.press_keys(action.locator, *action.args)
+        elif action.type == "screenshot":
+            bl.take_screenshot(filename=action.value or "screenshot.png")
+        elif action.type == "upload":
+            bl.upload_file(action.locator, action.value or "")
+        elif action.type == "browser_step":
+            # Passthrough: call any method on the browser library
+            method_name = action.value or ""
+            method = getattr(bl, method_name, None)
+            if method and callable(method):
+                logger.info(f"  Browser step: {method_name}({', '.join(str(a) for a in action.args)})")
+                method(*action.args)
+            else:
+                logger.warn(f"  Browser step: method '{method_name}' not found")
+        elif action.type == "call_keyword":
+            # Invoke an arbitrary RF keyword by name (browser is live)
+            from robot.libraries.BuiltIn import BuiltIn
+            kw_name = action.value or ""
+            logger.info(f"  Call keyword: {kw_name}({', '.join(str(a) for a in action.args)})")
+            BuiltIn().run_keyword(kw_name, *action.args)
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
-                          current_url: str) -> list[dict]:
+                          current_url: str, *,
+                          executed: set[str] | None = None,
+                          context: dict[str, Any] | None = None) -> list[dict]:
         exp = rule.expansion
         if exp.over == "elements":
-            return self._expand_elements(rule, res, current_url)
+            return self._expand_elements(rule, res, current_url,
+                                         executed=executed, context=context)
         elif exp.over == "pages_next":
-            return self._expand_pages_next(rule, res, current_url)
+            return self._expand_pages_next(rule, res, current_url,
+                                           executed=executed, context=context)
         elif exp.over == "pages_numeric":
-            return self._expand_pages_numeric(rule, res, current_url)
+            return self._expand_pages_numeric(rule, res, current_url,
+                                              executed=executed, context=context)
+        elif exp.over == "combinations":
+            return self._expand_combinations(rule, res, current_url,
+                                             executed=executed, context=context)
         return []
 
     def _expand_elements(self, rule: RuleNode, res: ResourceContext,
-                         current_url: str) -> list[dict]:
+                         current_url: str, *,
+                         executed: set[str] | None = None,
+                         context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         selector = exp.scope
         limit = exp.limit
+        use_bfs = (exp.order == "bfs")
         records = []
 
         try:
+            # Wait for at least one element — get_element_count is a query,
+            # not an action, so Playwright doesn't auto-wait for it.
+            try:
+                bl.wait_for_elements_state(selector, "attached", timeout="10s")
+            except Exception:
+                pass  # May not appear — count will be 0
             count = bl.get_element_count(selector)
         except Exception as e:
             logger.warn(f"  Element expansion failed for '{selector}': {e}")
             return records
 
+        count = count or 0
         if limit and count > limit:
             count = limit
 
-        for i in range(count):
-            # RF Browser uses 1-based nth selector
-            elem_selector = f"{selector} >> nth={i}"
-            record = self._extract_from_element(rule, elem_selector, current_url)
+        if use_bfs:
+            # BFS: extract ALL elements first, then walk children per element
+            extracted: list[tuple[str, dict | None, dict]] = []
+            for i in range(count):
+                elem_selector = f"{selector} >> nth={i}"
+                record = self._extract_from_element(rule, elem_selector, current_url)
+                elem_ctx = dict(context or {})
+                if record and record.get("data"):
+                    elem_ctx.update(record["data"])
+                extracted.append((elem_selector, record, elem_ctx))
 
-            child_records: dict[str, list] = {}
-            for child in rule.children:
-                child_data = self._walk_rule(child, res, elem_selector, current_url)
-                if child_data:
-                    child_records[child.name] = child_data
+            for elem_selector, record, elem_ctx in extracted:
+                child_records: dict[str, list] = {}
+                for child in rule.children:
+                    child_data = self._walk_rule(child, res, elem_selector,
+                                                 current_url, executed=executed,
+                                                 context=elem_ctx)
+                    if child_data:
+                        child_records[child.name] = child_data
+                if record is not None:
+                    if child_records:
+                        record["_children"] = child_records
+                    records.append(record)
+        else:
+            # DFS: process each element fully before next
+            for i in range(count):
+                elem_selector = f"{selector} >> nth={i}"
+                record = self._extract_from_element(rule, elem_selector, current_url)
 
-            if record is not None:
-                if child_records:
-                    record["_children"] = child_records
-                records.append(record)
+                elem_ctx = dict(context or {})
+                if record and record.get("data"):
+                    elem_ctx.update(record["data"])
+
+                child_records: dict[str, list] = {}
+                for child in rule.children:
+                    child_data = self._walk_rule(child, res, elem_selector,
+                                                 current_url, executed=executed,
+                                                 context=elem_ctx)
+                    if child_data:
+                        child_records[child.name] = child_data
+
+                if record is not None:
+                    if child_records:
+                        record["_children"] = child_records
+                    records.append(record)
 
         return records
 
     def _expand_pages_next(self, rule: RuleNode, res: ResourceContext,
-                           current_url: str) -> list[dict]:
+                           current_url: str, *,
+                           executed: set[str] | None = None,
+                           context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         next_selector = exp.locator
@@ -501,8 +1021,11 @@ class ExecutionEngine:
             page_url = bl.get_url()
             logger.info(f"    Page {page_num + 1}: {page_url}")
 
+            # Fresh executed set per page — children must re-run on each page
+            page_executed: set[str] = set()
             for child in rule.children:
-                child_data = self._walk_rule(child, res, None, page_url)
+                child_data = self._walk_rule(child, res, None, page_url,
+                                             executed=page_executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
@@ -512,7 +1035,7 @@ class ExecutionEngine:
                     logger.info("    No next button found, stopping pagination")
                     break
                 bl.click(next_selector)
-                bl.wait_for_load_state("domcontentloaded")
+                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
                 page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                 if page_delay:
                     time.sleep(page_delay / 1000.0)
@@ -524,7 +1047,9 @@ class ExecutionEngine:
         return records
 
     def _expand_pages_numeric(self, rule: RuleNode, res: ResourceContext,
-                              current_url: str) -> list[dict]:
+                              current_url: str, *,
+                              executed: set[str] | None = None,
+                              context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
         control_selector = exp.locator
@@ -536,8 +1061,11 @@ class ExecutionEngine:
             page_url = bl.get_url()
             logger.info(f"    Numeric page {page_num}: {page_url}")
 
+            # Fresh executed set per page — children must re-run on each page
+            page_executed: set[str] = set()
             for child in rule.children:
-                child_data = self._walk_rule(child, res, None, page_url)
+                child_data = self._walk_rule(child, res, None, page_url,
+                                             executed=page_executed, context=context)
                 if child_data:
                     records.extend(child_data)
 
@@ -550,11 +1078,14 @@ class ExecutionEngine:
                 clicked = False
                 for idx in range(count):
                     link_sel = f"{control_selector} >> nth={idx}"
-                    href = bl.get_attribute(link_sel, "href") or ""
+                    try:
+                        href = bl.get_attribute(link_sel, "href") or ""
+                    except Exception:
+                        href = ""
                     text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
                         bl.click(link_sel)
-                        bl.wait_for_load_state("domcontentloaded")
+                        bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
                         page_delay = int(res.globals_.get("page_load_delay_ms", 0))
                         if page_delay:
                             time.sleep(page_delay / 1000.0)
@@ -570,49 +1101,185 @@ class ExecutionEngine:
 
         return records
 
+    def _expand_combinations(self, rule: RuleNode, res: ResourceContext,
+                             current_url: str, *,
+                             executed: set[str] | None = None,
+                             context: dict[str, Any] | None = None) -> list[dict]:
+        """Cartesian product of combination axes."""
+        bl = self._bl()
+        exp = rule.expansion
+        axes = exp.axes
+        if not axes:
+            return []
+
+        # Build value lists per axis (support "auto" discovery)
+        axis_values: list[list[str]] = []
+        for axis in axes:
+            if axis.values == ["auto"]:
+                # Discover values from the control element
+                try:
+                    if axis.action == "select":
+                        vals = bl.evaluate_javascript(
+                            axis.control,
+                            "(el) => Array.from(el.options).map(o => o.value)"
+                        )
+                    else:
+                        count = bl.get_element_count(axis.control)
+                        vals = []
+                        for i in range(count):
+                            text = bl.get_text(f"{axis.control} >> nth={i}").strip()
+                            if text:
+                                vals.append(text)
+                    axis_values.append(vals)
+                except Exception as e:
+                    logger.warn(f"  Auto-discover failed for {axis.control}: {e}")
+                    axis_values.append([])
+            else:
+                axis_values.append(axis.values)
+
+        # Cartesian product
+        import itertools
+        combos = list(itertools.product(*axis_values))
+        records = []
+
+        for combo in combos:
+            # Apply each axis action
+            for axis, value in zip(axes, combo):
+                try:
+                    if axis.action == "type":
+                        bl.fill_text(axis.control, value)
+                    elif axis.action == "select":
+                        bl.select_options_by(axis.control, "value", value)
+                    elif axis.action == "click":
+                        # Find the matching element by text
+                        count = bl.get_element_count(axis.control)
+                        for i in range(count):
+                            sel = f"{axis.control} >> nth={i}"
+                            text = bl.get_text(sel).strip()
+                            if text == value:
+                                bl.click(sel)
+                                break
+                except Exception as e:
+                    logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
+
+            # Wait for AJAX to settle after combo actions (tab clicks etc.)
+            time.sleep(2.0)
+
+            # Build per-combo context
+            combo_ctx = dict(context or {})
+            for axis, value in zip(axes, combo):
+                combo_ctx[f"_combo_{axis.control}"] = value
+
+            # Extract from this rule's own field specs (if any) for each combo
+            if rule.field_specs:
+                record = self._extract_from_scope(rule, None, current_url)
+                if record:
+                    records.append(record)
+
+            # Walk children for this combination
+            combo_executed: set[str] = set()
+            for child in rule.children:
+                child_data = self._walk_rule(child, res, None, current_url,
+                                             executed=combo_executed, context=combo_ctx)
+                if child_data:
+                    records.extend(child_data)
+
+        return records
+
     def _extract_from_scope(self, rule: RuleNode, scope: str | None,
                             current_url: str) -> dict | None:
-        if not rule.field_specs and not rule.table_spec:
+        if not rule.field_specs and not rule.table_spec and not rule.ai_extraction:
             return None
 
+        data = {}
         if rule.field_specs:
-            data = {}
             for fs in rule.field_specs:
                 data[fs.name] = self._extract_field(fs, scope)
-            return {
-                "node": rule.name,
-                "url": current_url,
-                "data": data,
-                "extracted_at": datetime.now(timezone.utc).isoformat(),
-            }
 
         if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, scope, current_url, rule.name)
+            table_result = self._extract_table_data(rule.table_spec, scope, current_url, rule.name)
+            if table_result:
+                data.update(table_result.get("data", {}))
 
-        return None
+        if rule.ai_extraction:
+            ai_result = self._run_ai_extraction(rule.ai_extraction, data)
+            if ai_result:
+                data.update(ai_result)
+
+        if not data:
+            return None
+
+        # Run post_extract hooks
+        data = self._invoke_hooks("post_extract", data)
+
+        return {
+            "node": rule.name,
+            "url": current_url,
+            "data": data,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
+        data = {}
         if rule.field_specs:
-            data = {}
             for fs in rule.field_specs:
                 data[fs.name] = self._extract_field(fs, elem_selector)
-            return {
-                "node": rule.name,
-                "url": current_url,
-                "data": data,
-                "extracted_at": datetime.now(timezone.utc).isoformat(),
-            }
+        elif rule.table_spec:
+            table_result = self._extract_table_data(rule.table_spec, elem_selector, current_url, rule.name)
+            if table_result:
+                data = table_result.get("data", {})
 
-        if rule.table_spec:
-            return self._extract_table_data(rule.table_spec, elem_selector, current_url, rule.name)
+        if not data:
+            return None
 
-        return None
+        # Run post_extract hooks
+        data = self._invoke_hooks("post_extract", data)
+
+        return {
+            "node": rule.name,
+            "url": current_url,
+            "data": data,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _resolve_fallback_selector(self, raw: str, scope: str | None) -> str:
+        """If *raw* contains `` | `` (space-pipe-space), try each candidate
+        in order and return the first one that matches elements on the page.
+        If none match, return the first candidate (preserving error messages).
+        Plain selectors (no pipe) pass through with zero overhead.
+        """
+        if " | " not in raw:
+            return f"{scope} >> {raw}" if scope else raw
+
+        bl = self._bl()
+        candidates = [c.strip() for c in raw.split(" | ")]
+        total = len(candidates)
+        for idx, candidate in enumerate(candidates):
+            sel = f"{scope} >> {candidate}" if scope else candidate
+            try:
+                if bl.get_element_count(sel) > 0:
+                    logger.info(f"  Fallback selector: using '{candidate}' (option {idx+1}/{total})")
+                    return sel
+            except Exception:
+                pass  # candidate may be invalid CSS — skip to next
+        # None matched — fall back to first candidate
+        first = candidates[0]
+        return f"{scope} >> {first}" if scope else first
 
     def _extract_field(self, fs: FieldSpec, scope: str | None) -> Any:
         bl = self._bl()
         try:
-            selector = f"{scope} >> {fs.locator}" if scope else fs.locator
+            # "." means self/current element — use scope directly
+            if fs.locator == "." and scope:
+                selector = scope
+            elif fs.locator == "." and not scope:
+                # No scope + self-selector → page-level; return URL for link, else ""
+                if fs.extractor == "link":
+                    return bl.get_url()
+                return ""
+            else:
+                selector = self._resolve_fallback_selector(fs.locator, scope)
 
             if fs.extractor == "text":
                 count = bl.get_element_count(selector)
@@ -641,12 +1308,32 @@ class ExecutionEngine:
                 count = bl.get_element_count(selector)
                 if count == 0:
                     return ""
-                return bl.get_attribute(selector, "href") or ""
+                href = bl.get_attribute(selector, "href") or ""
+                # Always resolve to absolute URL
+                if href and not href.startswith(("http://", "https://", "javascript:")):
+                    from urllib.parse import urljoin
+                    try:
+                        page_url = bl.get_url()
+                        href = urljoin(page_url, href)
+                    except Exception:
+                        pass
+                return href
             elif fs.extractor == "image":
                 count = bl.get_element_count(selector)
                 if count == 0:
                     return ""
                 return bl.get_attribute(selector, "src") or ""
+            elif fs.extractor == "number":
+                count = bl.get_element_count(selector)
+                if count == 0:
+                    return ""
+                text = bl.get_text(selector).strip()
+                # Extract numeric value, handling commas and whitespace
+                cleaned = re.sub(r"[^\d.\-]", "", text)
+                try:
+                    return float(cleaned) if "." in cleaned else int(cleaned)
+                except (ValueError, TypeError):
+                    return text
         except Exception as e:
             logger.warn(f"    Extract {fs.name} failed: {e}")
         return ""
@@ -707,6 +1394,244 @@ class ExecutionEngine:
         except Exception as e:
             logger.warn(f"    Table extraction failed: {e}")
             return None
+
+    # Built-in AI mode prompts
+    _AI_MODES = {
+        "extract": "Extract structured data from the following content.",
+        "cleanup": "Clean and normalize this content. Remove HTML artifacts, "
+                   "fix formatting, and return well-structured markdown.",
+        "classify": "Classify the following content.",
+        "refine": "Refine and improve the quality of this text. Fix grammar, "
+                  "improve clarity, normalize formatting.",
+    }
+
+    def _call_ai(self, prompt: str) -> str:
+        """Call AI via the configured adapter. Adapters tried in order:
+
+        1. ``cli:<command>`` — arbitrary CLI, prompt on stdin
+        2. ``aichat`` — aichat CLI (default if available)
+        3. ``anthropic`` — Anthropic Python SDK
+        4. ``openai`` — OpenAI Python SDK
+        """
+        import subprocess as _sp
+        adapter = self.ctx.ai_adapter if hasattr(self.ctx, "ai_adapter") else ""
+
+        # Explicit CLI adapter: "cli:my-tool --flag"
+        if adapter.startswith("cli:"):
+            cmd = adapter[4:].strip()
+            result = _sp.run(cmd, shell=True, input=prompt,
+                             capture_output=True, text=True)
+            return result.stdout.strip()
+
+        # aichat (default when available)
+        if adapter in ("aichat", ""):
+            aichat = os.popen("which aichat 2>/dev/null").read().strip()
+            if aichat:
+                result = _sp.run([aichat], input=prompt,
+                                 capture_output=True, text=True, timeout=120)
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                logger.warn(f"aichat failed: {result.stderr[:200]}")
+                if adapter == "aichat":
+                    return ""
+                # Fall through to SDK adapters
+
+        # anthropic SDK
+        if adapter in ("anthropic", ""):
+            try:
+                import anthropic
+                client = anthropic.Anthropic()
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.content[0].text.strip()
+            except Exception as e:
+                logger.warn(f"anthropic adapter failed: {e}")
+                if adapter == "anthropic":
+                    return ""
+
+        # openai SDK
+        if adapter in ("openai", ""):
+            try:
+                import openai
+                client = openai.OpenAI()
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                logger.warn(f"openai adapter failed: {e}")
+
+        return ""
+
+    def _run_ai_extraction(self, config: dict, existing_data: dict) -> dict | None:
+        """Run AI extraction on previously extracted text.
+
+        Parameters (via ``...    key=value`` in .robot):
+            input       — field name to use as input (default: all fields as JSON)
+            prompt      — instruction for the AI
+            mode        — built-in mode: extract, cleanup, classify, refine
+            schema      — JSON schema hint (forces JSON output)
+            categories  — classification categories (forces JSON output)
+            max_size    — max chars before truncation (default 50000, 0=unlimited)
+            chunk_size  — split input into chunks of this size, process each,
+                          concatenate results (default 0=no chunking)
+            output      — response format hint: json, markdown, text (default: json)
+        """
+        opts = _parse_options(tuple(config.get("specs", [])))
+        name = config.get("name", "ai_result")
+        mode = opts.get("mode")
+        prompt = opts.get("prompt") or self._AI_MODES.get(mode or "extract",
+                                                           "Extract structured data from the text.")
+        input_field = opts.get("input")
+        schema = opts.get("schema")
+        categories = opts.get("categories")
+        max_size = int(opts.get("max_size", "50000"))
+        chunk_size = int(opts.get("chunk_size", "0"))
+        output_fmt = opts.get("output", "json")
+
+        input_text = ""
+        if input_field and input_field in existing_data:
+            input_text = str(existing_data[input_field])
+        elif not input_field:
+            input_text = json.dumps(existing_data, ensure_ascii=False)
+
+        if not input_text:
+            return None
+
+        # Reject if over max_size (0 = unlimited) — input is too large, skip AI
+        if max_size and len(input_text) > max_size:
+            logger.warn(f"    AI input too large ({len(input_text)} > {max_size}), skipping")
+            return None
+
+        # Build output instruction based on format and options
+        output_instruction = ""
+        if schema:
+            output_instruction = f"\n\nReturn JSON matching this schema: {schema}"
+            output_instruction += "\n\nRespond with ONLY valid JSON, no explanation."
+        elif categories:
+            output_instruction = f"\n\nClassify into one of: {categories}"
+            output_instruction += "\n\nRespond with ONLY valid JSON, no explanation."
+        elif output_fmt == "json":
+            output_instruction = "\n\nRespond with ONLY valid JSON, no explanation."
+        elif output_fmt == "markdown":
+            output_instruction = "\n\nRespond in clean markdown."
+        # output_fmt == "text" → no instruction, freeform
+
+        # Chunking: split input, process each chunk, concatenate
+        if chunk_size and len(input_text) > chunk_size:
+            chunks = [input_text[i:i + chunk_size]
+                      for i in range(0, len(input_text), chunk_size)]
+            results = []
+            for idx, chunk in enumerate(chunks):
+                chunk_prompt = (f"{prompt}\n\n(Chunk {idx + 1}/{len(chunks)})"
+                                f"\n\nInput:\n{chunk}{output_instruction}")
+                result = self._call_ai(chunk_prompt)
+                if result:
+                    results.append(result)
+            result_text = "\n\n".join(results)
+        else:
+            full_prompt = f"{prompt}\n\nInput:\n{input_text}{output_instruction}"
+            result_text = self._call_ai(full_prompt)
+
+        if not result_text:
+            return None
+
+        # Parse based on output format
+        if output_fmt == "json" or schema or categories:
+            try:
+                parsed = json.loads(result_text)
+                return {name: parsed}
+            except json.JSONDecodeError:
+                return {name: result_text}
+        return {name: result_text}
+
+    def _run_setup(self, bl: Any) -> None:
+        """Execute state setup actions (auth, consent)."""
+        if not self.ctx.setup_actions:
+            return
+        # Check skip condition
+        if self.ctx.setup_skip_when:
+            try:
+                count = bl.get_element_count(self.ctx.setup_skip_when)
+                if count > 0:
+                    logger.info("  Setup skipped — skip_when selector found")
+                    return
+            except Exception:
+                pass
+        for sa in self.ctx.setup_actions:
+            try:
+                if sa.action == "open":
+                    bl.go_to(sa.url)
+                elif sa.action == "input":
+                    bl.fill_text(sa.css, sa.value)
+                elif sa.action == "password":
+                    bl.fill_text(sa.css, sa.value)
+                elif sa.action == "click":
+                    bl.click(sa.css)
+            except Exception as e:
+                logger.warn(f"  Setup action {sa.action} failed: {e}")
+        try:
+            bl.wait_for_load_state(self._PageLoadStates.networkidle)
+        except Exception:
+            pass
+
+    def _dismiss_interrupts(self, bl: Any) -> None:
+        """Auto-dismiss overlay selectors (cookie banners, modals)."""
+        for selector in self.ctx.interrupt_selectors:
+            try:
+                count = bl.get_element_count(selector)
+                if count > 0:
+                    bl.click(selector)
+                    logger.info(f"  Dismissed interrupt: {selector}")
+            except Exception:
+                pass
+
+    def _invoke_hooks(self, lifecycle_point: str, data: dict) -> dict:
+        """Invoke registered hooks at a lifecycle point.
+
+        Hooks can transform data via config-driven rules:
+        - rename=old_field:new_field — rename a field
+        - drop=field_name — remove a field
+        - strip_html=field_name — strip HTML tags from a field
+        - default=field_name:value — set default if field empty
+        - lowercase=field_name — lowercase a field
+        - regex=field_name:pattern:replacement — regex replace
+        """
+        result = dict(data)
+        for hook in self.ctx.hooks:
+            if hook.lifecycle_point != lifecycle_point:
+                continue
+            logger.info(f"  Hook '{hook.name}' at {lifecycle_point}")
+            cfg = hook.config
+            for key, val in cfg.items():
+                try:
+                    if key == "rename" and ":" in val:
+                        old, new = val.split(":", 1)
+                        if old in result:
+                            result[new] = result.pop(old)
+                    elif key == "drop" and val in result:
+                        del result[val]
+                    elif key == "strip_html" and val in result:
+                        result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
+                    elif key == "default" and ":" in val:
+                        field, default_val = val.split(":", 1)
+                        if not result.get(field):
+                            result[field] = default_val
+                    elif key == "lowercase" and val in result:
+                        result[val] = str(result[val]).lower()
+                    elif key == "regex" and val.count(":") >= 2:
+                        parts = val.split(":", 2)
+                        field, pattern, replacement = parts
+                        if field in result:
+                            result[field] = re.sub(pattern, replacement, str(result[field]))
+                except Exception as e:
+                    logger.warn(f"  Hook transform {key}={val} failed: {e}")
+        return result
 
     def _emit_records(self, target: str, rule: RuleNode,
                       records: list[dict], current_url: str) -> None:
@@ -797,15 +1722,59 @@ class ExecutionEngine:
                         flat.append(r)
                 output_data = flat
 
+            # Determine output path and format
+            fmt = art.format or "json"
+            ext = {"json": ".json", "jsonl": ".jsonl", "csv": ".csv",
+                   "markdown": ".md"}.get(fmt, ".json")
+
             override = self.ctx.write_overrides.get(art_name)
             if override:
                 out_path = Path(override)
             else:
-                out_path = Path(output_dir) / f"{self.ctx.name}_{art_name}.json"
+                out_path = Path(output_dir) / f"{self.ctx.name}_{art_name}{ext}"
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_path, "w") as f:
-                json.dump(output_data, f, indent=2, ensure_ascii=False)
+
+            if fmt == "jsonl":
+                with open(out_path, "w") as f:
+                    for item in (output_data if isinstance(output_data, list)
+                                 else [output_data]):
+                        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            elif fmt == "csv":
+                import csv as csv_mod
+                rows = output_data if isinstance(output_data, list) else [output_data]
+                if rows:
+                    # Flatten data dicts for CSV
+                    flat_rows = []
+                    for r in rows:
+                        if isinstance(r, dict) and "data" in r:
+                            flat_rows.append(r["data"])
+                        elif isinstance(r, dict):
+                            flat_rows.append(r)
+                    if flat_rows:
+                        keys = list(flat_rows[0].keys())
+                        with open(out_path, "w", newline="") as f:
+                            writer = csv_mod.DictWriter(f, fieldnames=keys)
+                            writer.writeheader()
+                            writer.writerows(flat_rows)
+            elif fmt == "markdown":
+                with open(out_path, "w") as f:
+                    for item in (output_data if isinstance(output_data, list)
+                                 else [output_data]):
+                        data = item.get("data", item) if isinstance(item, dict) else item
+                        if isinstance(data, dict):
+                            title = data.get("title", "")
+                            body = data.get("body", "")
+                            if title:
+                                f.write(f"# {title}\n\n")
+                            if body:
+                                f.write(f"{body}\n\n")
+                        else:
+                            f.write(f"{data}\n\n")
+            else:  # json
+                with open(out_path, "w") as f:
+                    json.dump(output_data, f, indent=2, ensure_ascii=False)
+
             logger.info(f"  Wrote {len(records)} records to {out_path}")
 
         summary_path = Path(output_dir) / f"{self.ctx.name}.json"
@@ -868,6 +1837,13 @@ class WiseRpaBDD:
         self._record("start_deployment", deployment)
         self._deployment = DeploymentContext(name=deployment)
 
+    @keyword('And I set AI adapter "${adapter}"')
+    def set_ai_adapter(self, adapter: str) -> None:
+        """Set the AI backend: aichat, anthropic, openai, or cli:<command>."""
+        self._record("set_ai_adapter", adapter)
+        if self._deployment:
+            self._deployment.ai_adapter = adapter
+
     @keyword("Then I finalize deployment")
     def finalize_deployment(self) -> None:
         self._record("finalize_deployment")
@@ -878,8 +1854,12 @@ class WiseRpaBDD:
         # Identify root rules for each resource before execution
         self._finalize_resource_roots()
 
-        headed = os.environ.get("WISE_RPA_HEADED", "").lower() in ("1", "true", "yes")
-        engine = ExecutionEngine(self._deployment, headed=headed)
+        _truthy = ("1", "true", "yes")
+        _falsy = ("0", "false", "no")
+        headed = os.environ.get("WISE_RPA_HEADED", "").lower() in _truthy
+        stealth = os.environ.get("WISE_RPA_STEALTH", "").lower() not in _falsy
+        engine = ExecutionEngine(self._deployment, headed=headed,
+                                 stealth=stealth)
         engine.run()
 
     # -- Artifact registration --
@@ -917,6 +1897,7 @@ class WiseRpaBDD:
             return
         opts = _parse_options(options)
         art.output = opts.get("output", "").lower() in ("true", "1", "yes")
+        art.format = opts.get("format", art.format)
         art.structure = opts.get("structure", art.structure)
         art.dedupe = opts.get("dedupe", art.dedupe)
         art.query = opts.get("query", art.query)
@@ -988,6 +1969,13 @@ class WiseRpaBDD:
         if not self._current_rule:
             return
         self._current_rule.parents = [p.strip() for p in parents.split(",")]
+
+    @keyword("And I set retry ${max} times with ${delay} ms delay")
+    def set_retry(self, max: Any, delay: Any) -> None:
+        self._record("set_retry", max, delay)
+        if self._current_rule:
+            self._current_rule.retry_max = int(max)
+            self._current_rule.retry_delay_ms = int(delay)
 
     # -- State checks --
 
@@ -1112,6 +2100,82 @@ class WiseRpaBDD:
                 Action(type="click", locator=locator, options=_parse_options(options))
             )
 
+    @keyword('When I hover locator "${locator}"')
+    def hover_locator(self, locator: str) -> None:
+        self._record("hover_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="hover", locator=locator))
+
+    @keyword('When I focus locator "${locator}"')
+    def focus_locator(self, locator: str) -> None:
+        self._record("focus_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="focus", locator=locator))
+
+    @keyword('When I double click locator "${locator}"')
+    def dblclick_locator(self, locator: str) -> None:
+        self._record("dblclick_locator", locator)
+        if self._current_rule:
+            self._current_rule.actions.append(Action(type="dblclick", locator=locator))
+
+    @keyword('When I press keys "${locator}"')
+    def press_keys_locator(self, locator: str, *keys: str) -> None:
+        """Press keyboard keys on a focused element.
+
+        Example: ``When I press keys "#search"    Enter``
+        """
+        self._record("press_keys", locator, *keys)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="press_keys", locator=locator, args=keys)
+            )
+
+    @keyword("When I take screenshot")
+    def take_screenshot(self, *options: str) -> None:
+        self._record("take_screenshot", *options)
+        opts = _parse_options(options)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
+            )
+
+    @keyword('When I upload file "${path}" to locator "${locator}"')
+    def upload_file_to_locator(self, path: str, locator: str) -> None:
+        self._record("upload_file", path, locator)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="upload", locator=locator, value=path)
+            )
+
+    # -- Browser step & call keyword (deferred passthrough) --
+
+    @keyword('And I browser step "${method}"')
+    def browser_step(self, method: str, *args: str) -> None:
+        """Defer a raw Browser library method call into the current rule.
+
+        Executes during the rule walk when the browser is live.
+        Example: ``And I browser step "Press Keys" "#search" "Enter"``
+        """
+        self._record("browser_step", method, *args)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="browser_step", value=method, args=args)
+            )
+
+    @keyword('And I call keyword "${name}"')
+    def call_keyword(self, name: str, *args: str) -> None:
+        """Defer an arbitrary Robot Framework keyword call into the current rule.
+
+        The keyword runs during the rule walk when the browser is live,
+        so it can use raw Browser library keywords freely.
+        Example: ``And I call keyword "Login To Site"``
+        """
+        self._record("call_keyword", name, *args)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="call_keyword", value=name, args=args)
+            )
+
     # -- Expansion --
 
     @keyword('When I expand over elements "${scope}"')
@@ -1162,8 +2226,32 @@ class WiseRpaBDD:
     @keyword("When I expand over combinations")
     def expand_over_combinations(self, *axes: str) -> None:
         self._record("expand_over_combinations", *axes)
-        # Combination expansion is handled by the generator producing
-        # individual click rules for each combination value
+        if not self._current_rule:
+            return
+        # Parse axis specs: action=type control="#sel" values=a|b|c
+        parsed_axes: list[CombinationAxis] = []
+        current: dict[str, str] = {}
+        for spec in axes:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "action" and current.get("action"):
+                parsed_axes.append(CombinationAxis(
+                    action=current["action"],
+                    control=_strip_quotes(current.get("control", "")),
+                    values=current.get("values", "").split("|"),
+                ))
+                current = {}
+            current[k] = v
+        if current.get("action"):
+            parsed_axes.append(CombinationAxis(
+                action=current["action"],
+                control=_strip_quotes(current.get("control", "")),
+                values=current.get("values", "").split("|"),
+            ))
+        self._current_rule.expansion = Expansion(
+            over="combinations", axes=parsed_axes,
+        )
 
     # -- Extraction --
 
@@ -1239,19 +2327,47 @@ class WiseRpaBDD:
         if self._deployment:
             self._deployment.quality_gate.max_failed_pct = float(percent)
 
-    # -- Hooks and configuration (stubs for now) --
+    # -- Hooks and configuration --
 
     @keyword('And I register hook "${name}" at "${lifecycle_point}"')
     def register_hook(self, name: str, lifecycle_point: str, *config: str) -> None:
         self._record("register_hook", name, lifecycle_point, *config)
+        if self._deployment:
+            self._deployment.hooks.append(HookDef(
+                name=name, lifecycle_point=lifecycle_point,
+                config=_parse_options(config),
+            ))
 
     @keyword("Given I configure state setup")
     def configure_state_setup(self, *actions: str) -> None:
         self._record("configure_state_setup", *actions)
+        if not self._deployment:
+            return
+        for spec in actions:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            v = _strip_quotes(v)
+            if k == "skip_when":
+                self._deployment.setup_skip_when = v
+            elif k == "action":
+                # Parse: action=open url="..." or action=click css="..."
+                # The action type is the value, rest comes in subsequent opts
+                self._deployment.setup_actions.append(SetupAction(action=v))
+            elif k in ("url", "css", "value") and self._deployment.setup_actions:
+                setattr(self._deployment.setup_actions[-1], k, v)
 
     @keyword("And I configure interrupts")
     def configure_interrupts(self, *dismissals: str) -> None:
         self._record("configure_interrupts", *dismissals)
+        if not self._deployment:
+            return
+        for spec in dismissals:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "dismiss":
+                self._deployment.interrupt_selectors.append(_strip_quotes(v))
 
     @keyword("Then I close the browser")
     def close_browser(self) -> None:

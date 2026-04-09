@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Framework &amp; WiseRpaBDD &mdash; A Complete Guide</title>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #ffffff; --bg-alt: #f8f9fa; --bg-code: #f1f3f5;
+  --text: #1a1a2e; --text-muted: #555; --text-code: #d63384;
+  --border: #dee2e6; --accent: #4361ee; --accent-light: #e8ecff;
+  --heading: #16213e; --link: #4361ee;
+  --callout-key-bg: #e8ecff; --callout-key-border: #4361ee;
+  --callout-warn-bg: #fff8e1; --callout-warn-border: #ff9800;
+  --callout-try-bg: #e8f5e9; --callout-try-border: #4caf50;
+  --kw-rf: #0b7285; --kw-py: #7048e8; --kw-str: #2b8a3e;
+  --kw-comment: #868e96; --kw-section: #e67700;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --sidebar-w: 280px;
+  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  --bg: #0f0f1a; --bg-alt: #1a1a2e; --bg-code: #16213e;
+  --text: #e0e0e0; --text-muted: #a0a0a0; --text-code: #f78da7;
+  --border: #2d2d44; --accent: #7b8cff; --accent-light: #1e1e3f;
+  --heading: #c5c8ff; --link: #7b8cff;
+  --callout-key-bg: #1e1e3f; --callout-key-border: #7b8cff;
+  --callout-warn-bg: #2d2200; --callout-warn-border: #ff9800;
+  --callout-try-bg: #0d2818; --callout-try-border: #4caf50;
+  --kw-rf: #63e6be; --kw-py: #b197fc; --kw-str: #69db7c;
+  --kw-comment: #868e96; --kw-section: #ffd43b;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+body {
+  font-family: var(--font-sans); background: var(--bg); color: var(--text);
+  line-height: 1.7; transition: background .3s, color .3s;
+}
+
+/* ── Sidebar Layout ──────────────────────────────────────────────── */
+.layout { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: var(--sidebar-w); background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  overflow-y: auto; z-index: 100;
+  padding: 1.2rem 0; transition: transform .3s;
+}
+.sidebar-brand {
+  padding: 0 1.2rem 1rem; border-bottom: 1px solid var(--border);
+  margin-bottom: .8rem;
+}
+.sidebar-brand h1 { font-size: 1.15rem; color: var(--heading); line-height: 1.3; }
+.sidebar-brand p { font-size: .78rem; color: var(--text-muted); margin-top: .25rem; }
+
+.sidebar-part {
+  font-weight: 700; color: var(--accent); font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .06em;
+  padding: .8rem 1.2rem .3rem; user-select: none;
+}
+.sidebar-link {
+  display: block; padding: .3rem 1.2rem .3rem 1.6rem;
+  font-size: .84rem; color: var(--text); text-decoration: none;
+  border-left: 3px solid transparent; transition: all .15s;
+  line-height: 1.4;
+}
+.sidebar-link:hover { background: var(--accent-light); color: var(--link); }
+.sidebar-link.active {
+  border-left-color: var(--accent); color: var(--accent);
+  background: var(--accent-light); font-weight: 600;
+}
+
+/* ── Main Content ────────────────────────────────────────────────── */
+.main { margin-left: var(--sidebar-w); flex: 1; min-width: 0; }
+.container { max-width: 880px; margin: 0 auto; padding: 2rem 2rem 4rem; }
+
+/* ── Top Bar (mobile toggle + theme) ─────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 90;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  padding: .5rem 1.5rem; display: flex; align-items: center;
+  justify-content: flex-end; gap: .6rem;
+}
+.menu-btn {
+  display: none; background: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: .35rem .6rem; cursor: pointer;
+  font-size: 1.1rem; color: var(--text); margin-right: auto;
+}
+.theme-toggle {
+  background: var(--bg-alt); border: 1px solid var(--border);
+  border-radius: 50%; width: 36px; height: 36px;
+  cursor: pointer; font-size: 1.1rem; display: flex;
+  align-items: center; justify-content: center;
+  box-shadow: var(--shadow); transition: background .3s; color: var(--text);
+}
+.theme-toggle:hover { background: var(--accent-light); }
+
+/* ── Sections ────────────────────────────────────────────────────── */
+.section { margin-bottom: 3rem; scroll-margin-top: 3.5rem; }
+.section h2 {
+  font-size: 1.45rem; color: var(--heading); margin-bottom: 1rem;
+  padding-bottom: .5rem; border-bottom: 2px solid var(--accent);
+  display: flex; align-items: center; gap: .5rem;
+}
+.section h2 .num {
+  background: var(--accent); color: #fff; font-size: .75rem;
+  padding: 2px 8px; border-radius: 12px; flex-shrink: 0;
+}
+.section h3 { font-size: 1.05rem; color: var(--heading); margin: 1.4rem 0 .5rem; }
+.section p { margin: .6rem 0; }
+.section ul, .section ol { margin: .6rem 0 .6rem 1.5rem; }
+.section li { margin: .3rem 0; }
+
+/* ── Code Blocks ──────────────────────────────────────────────────── */
+pre {
+  background: var(--bg-code); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1rem 1.25rem; overflow-x: auto;
+  font-family: var(--font-mono); font-size: .85rem; line-height: 1.6;
+  margin: .8rem 0;
+}
+code {
+  font-family: var(--font-mono); font-size: .88em;
+  background: var(--bg-code); padding: .15em .4em; border-radius: 3px;
+  color: var(--text-code);
+}
+pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+
+.hl-kw { color: var(--kw-rf); font-weight: 600; }
+.hl-py { color: var(--kw-py); font-weight: 600; }
+.hl-str { color: var(--kw-str); }
+.hl-cmt { color: var(--kw-comment); font-style: italic; }
+.hl-sec { color: var(--kw-section); font-weight: 700; }
+.hl-var { color: var(--text-code); }
+.hl-dec { color: #e67700; }
+[data-theme="dark"] .hl-dec { color: #ffd43b; }
+
+/* ── Callout Boxes ────────────────────────────────────────────────── */
+.callout {
+  border-left: 4px solid; border-radius: 4px;
+  padding: .8rem 1rem; margin: 1rem 0; font-size: .95rem;
+}
+.callout-title { font-weight: 700; margin-bottom: .3rem; }
+.callout.key { background: var(--callout-key-bg); border-color: var(--callout-key-border); }
+.callout.warn { background: var(--callout-warn-bg); border-color: var(--callout-warn-border); }
+.callout.try { background: var(--callout-try-bg); border-color: var(--callout-try-border); }
+
+/* ── Explanation tables ───────────────────────────────────────────── */
+table.explain {
+  width: 100%; border-collapse: collapse; margin: .8rem 0; font-size: .92rem;
+}
+table.explain th, table.explain td {
+  border: 1px solid var(--border); padding: .5rem .75rem; text-align: left;
+}
+table.explain th { background: var(--bg-alt); font-weight: 600; }
+table.explain tr:nth-child(even) { background: var(--bg-alt); }
+
+/* ── Line-by-line annotation ──────────────────────────────────────── */
+.annotated { margin: .8rem 0; }
+.annotated .line-group { display: flex; gap: 1rem; align-items: flex-start; margin: .3rem 0; flex-wrap: wrap; }
+.annotated .line-code {
+  flex: 1 1 55%; font-family: var(--font-mono); font-size: .85rem;
+  background: var(--bg-code); padding: .3rem .6rem; border-radius: 4px;
+  white-space: pre; overflow-x: auto; min-width: 280px;
+}
+.annotated .line-note {
+  flex: 1 1 38%; font-size: .88rem; color: var(--text-muted);
+  padding-top: .3rem;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); box-shadow: 4px 0 20px rgba(0,0,0,.2); }
+  .main { margin-left: 0; }
+  .menu-btn { display: block; }
+  .container { padding: 1.5rem 1rem; }
+  pre { font-size: .78rem; padding: .75rem; }
+  .annotated .line-group { flex-direction: column; }
+  .annotated .line-code { min-width: 100%; }
+}
+
+/* ── Backdrop for mobile sidebar ──────────────────────────────────── */
+.sidebar-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 99;
+  background: rgba(0,0,0,.4);
+}
+.sidebar-backdrop.show { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar Navigation ────────────────────────────────────────── -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <h1>Robot Framework &amp; WiseRpaBDD</h1>
+    <p>A complete guide for AI coders</p>
+  </div>
+
+  <div class="sidebar-part">Part 1 &mdash; RF Fundamentals</div>
+  <a class="sidebar-link" href="#t1">1. What is Robot Framework</a>
+  <a class="sidebar-link" href="#t2">2. .robot File Anatomy</a>
+  <a class="sidebar-link" href="#t3">3. Variables</a>
+  <a class="sidebar-link" href="#t4">4. Built-in Keywords</a>
+  <a class="sidebar-link" href="#t5">5. Libraries</a>
+  <a class="sidebar-link" href="#t6">6. Suite Setup / Teardown</a>
+  <a class="sidebar-link" href="#t7">7. Tags &amp; Test Organization</a>
+  <a class="sidebar-link" href="#t8">8. Running Tests</a>
+
+  <div class="sidebar-part">Part 2 &mdash; Browser Automation</div>
+  <a class="sidebar-link" href="#t9">9. RF-Browser Basics</a>
+  <a class="sidebar-link" href="#t10">10. Playwright Selectors</a>
+  <a class="sidebar-link" href="#t11">11. Waiting Strategies</a>
+  <a class="sidebar-link" href="#t12">12. Page Interaction</a>
+
+  <div class="sidebar-part">Part 3 &mdash; Python Libraries</div>
+  <a class="sidebar-link" href="#t13">13. Python Class as RF Library</a>
+  <a class="sidebar-link" href="#t14">14. Python Concepts</a>
+  <a class="sidebar-link" href="#t15">15. Future Annotations</a>
+
+  <div class="sidebar-part">Part 4 &mdash; WiseRpaBDD Engine</div>
+  <a class="sidebar-link" href="#t16">16. Deferred Execution Model</a>
+  <a class="sidebar-link" href="#t17">17. The Data Model</a>
+  <a class="sidebar-link" href="#t18">18. The Rule Tree</a>
+  <a class="sidebar-link" href="#t19">19. Browser Adapter Pattern</a>
+  <a class="sidebar-link" href="#t20">20. Expansion Strategies</a>
+  <a class="sidebar-link" href="#t21">21. AI Extraction</a>
+  <a class="sidebar-link" href="#t22">22. State Setup &amp; Interrupts</a>
+  <a class="sidebar-link" href="#t23">23. Hooks System</a>
+  <a class="sidebar-link" href="#t24">24. Emit Patterns</a>
+  <a class="sidebar-link" href="#t25">25. Multi-Resource Chaining</a>
+  <a class="sidebar-link" href="#t26">26. Quality Gates &amp; Output</a>
+</nav>
+<div class="sidebar-backdrop" id="backdrop"></div>
+
+<!-- ── Main Content ──────────────────────────────────────────────── -->
+<div class="main">
+  <div class="topbar">
+    <button class="menu-btn" id="menuBtn" aria-label="Toggle sidebar">&#9776;</button>
+    <button class="theme-toggle" id="themeBtn" title="Toggle dark/light mode" aria-label="Toggle theme">&#9790;</button>
+  </div>
+
+  <div class="container">
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 1: FUNDAMENTALS                                           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 1 ──────────── -->
+<div class="section" id="t1">
+<h2><span class="num">1</span> What is Robot Framework</h2>
+
+<h3>The short version</h3>
+<p>Robot Framework (RF) is an open-source <strong>keyword-driven</strong> test automation framework written in Python. Instead of writing test logic in raw Python (as you would with <code>pytest</code> or <code>unittest</code>), you write tests in a human-readable tabular syntax inside <code>.robot</code> files.</p>
+
+<h3>How it differs from pytest</h3>
+<table class="explain">
+<tr><th>Aspect</th><th>pytest / unittest</th><th>Robot Framework</th></tr>
+<tr><td>Language</td><td>Pure Python</td><td>Tabular <code>.robot</code> files (calls Python under the hood)</td></tr>
+<tr><td>Abstraction</td><td>Functions / classes</td><td><strong>Keywords</strong> &mdash; named actions that read like English sentences</td></tr>
+<tr><td>Audience</td><td>Developers</td><td>Anyone who can read structured English (QA, analysts, agents)</td></tr>
+<tr><td>Reports</td><td>Terminal + plugins</td><td>Built-in HTML reports (<code>log.html</code>, <code>report.html</code>)</td></tr>
+<tr><td>Libraries</td><td>pip packages</td><td>Keyword libraries (Python classes with <code>@keyword</code> decorators)</td></tr>
+</table>
+
+<h3>Why the wise-rpa-bdd project uses RF</h3>
+<p>The project needs a <strong>declarative scraping language</strong> that an AI agent can both <em>read</em> and <em>generate</em>. RF's keyword syntax is close to natural language, so a Claude agent can produce a valid <code>.robot</code> file without understanding Python internals. The actual browser automation still happens in Python &mdash; RF is the glue layer.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  RF is not a replacement for Python. It is a <em>coordination layer</em> that calls into Python keyword libraries. Think of it as a domain-specific language (DSL) for test/automation plans.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 2 ──────────── -->
+<div class="section" id="t2">
+<h2><span class="num">2</span> .robot File Anatomy</h2>
+
+<p>A <code>.robot</code> file is divided into named <strong>sections</strong>, each starting with three asterisks: <code>*** Section Name ***</code>.</p>
+
+<h3>The four main sections</h3>
+<pre><code><span class="hl-sec">*** Settings ***</span>
+<span class="hl-cmt"># Configuration: which libraries to load, setup/teardown hooks</span>
+<span class="hl-kw">Library</span>           Browser
+<span class="hl-kw">Library</span>           WiseRpaBDD
+<span class="hl-kw">Suite Setup</span>       Given I start deployment "${DEPLOYMENT}"
+<span class="hl-kw">Suite Teardown</span>    Then I finalize deployment
+
+<span class="hl-sec">*** Variables ***</span>
+<span class="hl-cmt"># Named values reused throughout the file</span>
+<span class="hl-var">${DEPLOYMENT}</span>    quotes-toscrape
+<span class="hl-var">${ENTRY_URL}</span>     https://quotes.toscrape.com/
+
+<span class="hl-sec">*** Test Cases ***</span>
+<span class="hl-cmt"># Each test case is a named block of keyword calls</span>
+Artifact Catalog
+    Given I register artifact "${ARTIFACT_QUOTES}"
+    ...    field=quote_text    type=string    required=true
+
+<span class="hl-sec">*** Keywords ***</span>
+<span class="hl-cmt"># User-defined keywords (reusable steps) -- optional section</span></code></pre>
+
+<h3>Line-by-line breakdown (from quotes-test.robot)</h3>
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code"><span class="hl-sec">*** Settings ***</span></div>
+    <div class="line-note">Section header. RF uses this exact format (three stars, name, three stars).</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Library</span>           Browser</div>
+    <div class="line-note">Import the <code>Browser</code> library (Playwright for RF). The spacing is <strong>two or more spaces</strong> &mdash; this is how RF separates columns.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Library</span>           WiseRpaBDD</div>
+    <div class="line-note">Import our custom Python keyword library. RF will look for <code>WiseRpaBDD.py</code> in the Python path.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Suite Setup</span>       Given I start deployment "${DEPLOYMENT}"</div>
+    <div class="line-note">Run this keyword once before all test cases in the file. <code>${DEPLOYMENT}</code> is a variable (see next section).</div>
+  </div>
+</div>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  The separator between columns is <strong>two or more spaces</strong> (or a tab). A single space is part of the keyword name. This is the #1 source of beginner errors &mdash; if your keyword is not recognized, check your spacing.
+</div>
+
+<h3>The <code>...</code> continuation syntax</h3>
+<p>When a keyword call has many arguments, you can spread them across lines using <code>...</code> (three dots) at the start of each continuation line:</p>
+<pre><code>    Given I register artifact "${ARTIFACT_QUOTES}"
+    <span class="hl-kw">...</span>    field=quote_text    type=string    required=true
+    <span class="hl-kw">...</span>    field=author        type=string    required=true
+    <span class="hl-kw">...</span>    field=tags          type=array     required=true</code></pre>
+<p>All four lines are a <em>single</em> keyword call with multiple arguments.</p>
+
+<h3>The optional *** Comments *** section</h3>
+<p>The project's golden tests start with a <code>*** Comments ***</code> section that documents the evidence from the exploration phase &mdash; which selectors exist, how many elements were found, and the pagination structure. RF ignores this section entirely; it is for humans and AI agents.</p>
+</div>
+
+<!-- ──────────── TOPIC 3 ──────────── -->
+<div class="section" id="t3">
+<h2><span class="num">3</span> Variables</h2>
+
+<h3>Variable syntax</h3>
+<table class="explain">
+<tr><th>Syntax</th><th>Type</th><th>Example</th></tr>
+<tr><td><code>${name}</code></td><td>Scalar (single value)</td><td><code>${ENTRY_URL}    https://quotes.toscrape.com/</code></td></tr>
+<tr><td><code>@{name}</code></td><td>List</td><td><code>@{FIELDS}    title    price    rating</code></td></tr>
+<tr><td><code>&amp;{name}</code></td><td>Dictionary</td><td><code>&amp;{OPTS}    timeout=30    retries=2</code></td></tr>
+<tr><td><code>%{name}</code></td><td>Environment variable</td><td><code>%{HOME}</code> reads <code>$HOME</code> from the OS</td></tr>
+</table>
+
+<h3>How variables are used in the project</h3>
+<pre><code><span class="hl-sec">*** Variables ***</span>
+<span class="hl-var">${DEPLOYMENT}</span>              quotes-toscrape
+<span class="hl-var">${ENTRY_URL}</span>               https://quotes.toscrape.com/
+<span class="hl-var">${ARTIFACT_QUOTES}</span>         quotes
+<span class="hl-var">${ARTIFACT_QUOTES_FLAT}</span>    quotes_flat</code></pre>
+
+<p>The <code>${DEPLOYMENT}</code> variable is then referenced in keywords like:</p>
+<pre><code>Suite Setup    Given I start deployment "<span class="hl-var">${DEPLOYMENT}</span>"</code></pre>
+
+<p>RF substitutes <code>${DEPLOYMENT}</code> with <code>quotes-toscrape</code> before calling the Python function.</p>
+
+<h3>Embedded variables in keyword names</h3>
+<p>WiseRpaBDD uses a special RF feature: <strong>embedded arguments</strong>. The keyword is defined with <code>"${...}"</code> placeholders right in its name:</p>
+<pre><code><span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)
+<span class="hl-py">def</span> start_deployment(self, deployment: str) -> <span class="hl-py">None</span>:</code></pre>
+<p>When RF sees <code>Given I start deployment "quotes-toscrape"</code>, it pattern-matches the keyword name, extracts <code>"quotes-toscrape"</code>, and passes it as the <code>deployment</code> parameter.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  In this project, almost all variables are <strong>scalars</strong> (<code>${...}</code>). They are used to avoid hard-coding deployment names, URLs, and artifact names &mdash; making each <code>.robot</code> file easy to parameterize.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 4 ──────────── -->
+<div class="section" id="t4">
+<h2><span class="num">4</span> Built-in Keywords</h2>
+
+<p>RF ships with a <code>BuiltIn</code> library of keywords. While WiseRpaBDD has its own keywords, you should know these standard ones:</p>
+
+<table class="explain">
+<tr><th>Keyword</th><th>What it does</th><th>Example</th></tr>
+<tr><td><code>Log</code></td><td>Print a message to the RF log</td><td><code>Log    Starting scrape...</code></td></tr>
+<tr><td><code>Should Be Equal</code></td><td>Assert two values are equal</td><td><code>Should Be Equal    ${count}    10</code></td></tr>
+<tr><td><code>Should Contain</code></td><td>Assert a string contains a substring</td><td><code>Should Contain    ${url}    /quotes</code></td></tr>
+<tr><td><code>Sleep</code></td><td>Pause execution</td><td><code>Sleep    2s</code></td></tr>
+<tr><td><code>Run Keyword If</code></td><td>Conditional execution</td><td><code>Run Keyword If    '${status}' == 'PASS'    Log    OK</code></td></tr>
+<tr><td><code>Set Variable</code></td><td>Assign a value to a variable</td><td><code>${x}=    Set Variable    hello</code></td></tr>
+<tr><td><code>Get Length</code></td><td>Return length of a list/string</td><td><code>${len}=    Get Length    ${my_list}</code></td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  WiseRpaBDD uses <strong>none</strong> of these built-in keywords directly in <code>.robot</code> files. Instead, all logic is in custom keywords like <code>Given I start deployment</code>, <code>Then I extract fields</code>, etc. The built-in library is used internally in <code>WiseRpaBDD.py</code> to access RF internals (e.g., <code>BuiltIn().get_library_instance('Browser')</code>).
+</div>
+</div>
+
+<!-- ──────────── TOPIC 5 ──────────── -->
+<div class="section" id="t5">
+<h2><span class="num">5</span> Libraries</h2>
+
+<h3>Importing libraries</h3>
+<p>In the <code>*** Settings ***</code> section, the <code>Library</code> keyword tells RF to load a keyword library:</p>
+<pre><code><span class="hl-kw">Library</span>    Browser       <span class="hl-cmt"># robotframework-browser (Playwright wrapper)</span>
+<span class="hl-kw">Library</span>    WiseRpaBDD    <span class="hl-cmt"># our custom Python library</span></code></pre>
+
+<h3>Three types of libraries</h3>
+<ol>
+  <li><strong>Built-in</strong> &mdash; <code>BuiltIn</code>, <code>Collections</code>, <code>String</code>, <code>OperatingSystem</code> (shipped with RF).</li>
+  <li><strong>External</strong> &mdash; installed via pip: <code>robotframework-browser</code> (Playwright), <code>robotframework-requests</code>, etc.</li>
+  <li><strong>Custom</strong> &mdash; Python files you write. RF finds them via <code>PYTHONPATH</code> or the <code>--pythonpath</code> CLI flag.</li>
+</ol>
+
+<h3>How RF finds WiseRpaBDD</h3>
+<p>When you run:</p>
+<pre><code>robot --pythonpath scripts/ tests/golden/quotes-test.robot</code></pre>
+<p>RF adds <code>scripts/</code> to the Python path, sees <code>Library    WiseRpaBDD</code>, and imports <code>scripts/WiseRpaBDD.py</code>. All methods decorated with <code>@keyword</code> become available as RF keywords.</p>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  Run <code>python -c "import WiseRpaBDD; print(dir(WiseRpaBDD.WiseRpaBDD))"</code> from the <code>scripts/</code> directory to see all methods that become RF keywords.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 6 ──────────── -->
+<div class="section" id="t6">
+<h2><span class="num">6</span> Suite Setup / Teardown</h2>
+
+<h3>Lifecycle hooks</h3>
+<p>RF has four hook points:</p>
+<table class="explain">
+<tr><th>Hook</th><th>When it runs</th><th>Usage in WiseRpaBDD</th></tr>
+<tr><td><code>Suite Setup</code></td><td>Once, before <strong>all</strong> test cases in the file</td><td><code>Given I start deployment "${DEPLOYMENT}"</code></td></tr>
+<tr><td><code>Suite Teardown</code></td><td>Once, after <strong>all</strong> test cases finish</td><td><code>Then I finalize deployment</code></td></tr>
+<tr><td><code>Test Setup</code> / <code>[Setup]</code></td><td>Before each individual test case</td><td><code>Given I start resource "..." at "..."</code></td></tr>
+<tr><td><code>Test Teardown</code> / <code>[Teardown]</code></td><td>After each individual test case</td><td>(Not used in this project)</td></tr>
+</table>
+
+<h3>The WiseRpaBDD lifecycle</h3>
+<pre><code><span class="hl-cmt"># This runs FIRST -- creates the DeploymentContext</span>
+<span class="hl-kw">Suite Setup</span>       Given I start deployment "${DEPLOYMENT}"
+
+<span class="hl-cmt"># Test cases run in file order, building the plan:</span>
+<span class="hl-cmt"># - Artifact Catalog  (registers what data we want)</span>
+<span class="hl-cmt"># - Resource cases    (define rules, expansions, extraction)</span>
+<span class="hl-cmt"># - Quality Gates     (set validation thresholds)</span>
+
+<span class="hl-cmt"># This runs LAST -- executes the entire plan via the browser</span>
+<span class="hl-kw">Suite Teardown</span>    Then I finalize deployment</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The Suite Teardown is where <em>all the real work happens</em>. Every keyword before it just builds an in-memory plan. The <code>finalize_deployment</code> keyword creates an <code>ExecutionEngine</code> and launches the browser. This is the <strong>deferred execution model</strong> (covered in depth in Topic 16).
+</div>
+
+<h3>Test-level [Setup]</h3>
+<p>Individual test cases can have their own setup using the <code>[Setup]</code> tag. In WiseRpaBDD, resource test cases use this to initialize a resource context:</p>
+<pre><code>Resource quote_pages
+    <span class="hl-kw">[Setup]</span>    Given I start resource "quote_pages" at "${ENTRY_URL}"</code></pre>
+<p>This creates a new <code>ResourceContext</code> object scoped to that test case. All subsequent keywords in that test case (rules, expansions, extraction) attach to this resource.</p>
+</div>
+
+<!-- ──────────── TOPIC 7 ──────────── -->
+<div class="section" id="t7">
+<h2><span class="num">7</span> Tags, Documentation, and Test Organization</h2>
+
+<h3>Documentation</h3>
+<p>Both the suite (file) level and individual test cases can have documentation:</p>
+<pre><code><span class="hl-sec">*** Settings ***</span>
+<span class="hl-kw">Documentation</span>     Scrape quote text, author, and tags from quotes.toscrape.com
+<span class="hl-kw">...</span>               across paginated pages using the next-button pattern.
+
+<span class="hl-sec">*** Test Cases ***</span>
+Resource quote_pages
+    <span class="hl-kw">[Documentation]</span>    Produces: quotes, quotes_flat</code></pre>
+
+<h3>Tags</h3>
+<p>Tags let you categorize and filter tests. While the golden tests don't use tags heavily, you can add them:</p>
+<pre><code>Resource quote_pages
+    [Tags]    pagination    scraping    smoke</code></pre>
+<p>Then run only tagged tests: <code>robot --include smoke tests/</code></p>
+
+<h3>How the golden tests are organized</h3>
+<p>Each golden test file follows a consistent three-section pattern:</p>
+<ol>
+  <li><strong>Artifact Catalog</strong> &mdash; registers what data fields to collect</li>
+  <li><strong>Resource(s)</strong> &mdash; one or more resource test cases defining rules, pagination, and extraction</li>
+  <li><strong>Quality Gates</strong> &mdash; minimum record counts and field fill percentages</li>
+</ol>
+<p>This pattern is a convention of the project, not an RF requirement.</p>
+</div>
+
+<!-- ──────────── TOPIC 8 ──────────── -->
+<div class="section" id="t8">
+<h2><span class="num">8</span> Running Tests</h2>
+
+<h3>The <code>robot</code> CLI</h3>
+<pre><code><span class="hl-cmt"># Run a single test file</span>
+robot --pythonpath scripts/ tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Run all golden tests</span>
+robot --pythonpath scripts/ tests/golden/
+
+<span class="hl-cmt"># Run with headed browser (see it work)</span>
+WISE_RPA_HEADED=true robot --pythonpath scripts/ tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Run with stealth mode disabled (use RF-Browser directly)</span>
+WISE_RPA_STEALTH=false robot --pythonpath scripts/ tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Dryrun -- validate syntax without launching a browser</span>
+robot --dryrun --pythonpath scripts/ tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Filter by test name pattern</span>
+robot --test "Resource*" --pythonpath scripts/ tests/golden/quotes-test.robot</code></pre>
+
+<h3>Output files</h3>
+<p>After every run, RF produces three files in the current directory (or <code>--outputdir</code>):</p>
+<table class="explain">
+<tr><th>File</th><th>Purpose</th></tr>
+<tr><td><code>output.xml</code></td><td>Machine-readable execution data (timestamps, pass/fail, keyword traces)</td></tr>
+<tr><td><code>log.html</code></td><td>Detailed step-by-step log &mdash; expandable keyword calls, screenshots, messages</td></tr>
+<tr><td><code>report.html</code></td><td>High-level summary &mdash; pass/fail counts, execution time, suite statistics</td></tr>
+</table>
+
+<p>Additionally, WiseRpaBDD writes its own output to <code>output/{deployment_name}/</code>:</p>
+<ul>
+  <li><code>{deployment}_{artifact}.json</code> &mdash; extracted data per artifact</li>
+  <li><code>{deployment}.json</code> &mdash; deployment summary (record counts, timestamps)</li>
+</ul>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  Run a test, then open <code>log.html</code> in your browser. Expand the "Then I finalize deployment" keyword to see every browser action logged by the execution engine.
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 2: BROWSER AUTOMATION                                     -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 9 ──────────── -->
+<div class="section" id="t9">
+<h2><span class="num">9</span> robotframework-browser Basics</h2>
+
+<p><code>robotframework-browser</code> is RF's Playwright wrapper. It provides keywords like <code>New Browser</code>, <code>New Page</code>, <code>Click</code>, and <code>Get Text</code>.</p>
+
+<h3>The browser lifecycle</h3>
+<pre><code><span class="hl-cmt"># 1. Launch a browser instance (Chromium, Firefox, or WebKit)</span>
+New Browser    chromium    headless=true
+
+<span class="hl-cmt"># 2. Create a browser context (like an incognito window -- isolated cookies/storage)</span>
+New Context
+
+<span class="hl-cmt"># 3. Open a page (tab) and navigate</span>
+New Page    https://quotes.toscrape.com/
+
+<span class="hl-cmt"># ... do things ...</span>
+
+<span class="hl-cmt"># 4. Clean up</span>
+Close Context
+Close Browser</code></pre>
+
+<h3>How WiseRpaBDD uses this</h3>
+<p>You never call <code>New Browser</code> directly in a WiseRpaBDD <code>.robot</code> file. The <code>ExecutionEngine</code> calls these keywords programmatically from Python:</p>
+<pre><code><span class="hl-cmt"># From ExecutionEngine.run() in WiseRpaBDD.py:</span>
+bl = self._bl()                       <span class="hl-cmt"># Get the browser adapter</span>
+bl.new_browser(headless=<span class="hl-py">not</span> self.headed)  <span class="hl-cmt"># Launch browser</span>
+<span class="hl-cmt"># ... for each resource:</span>
+bl.new_context(**ctx_opts)            <span class="hl-cmt"># New incognito context</span>
+bl.new_page()                         <span class="hl-cmt"># New tab</span>
+bl.go_to(entry_url)                   <span class="hl-cmt"># Navigate</span>
+<span class="hl-cmt"># ... run rules ...</span>
+bl.close_context()                    <span class="hl-cmt"># Clean up context</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The <code>.robot</code> file declares <em>what</em> to scrape. The <code>ExecutionEngine</code> handles <em>how</em> to drive the browser. You never write <code>New Browser</code> or <code>Click</code> in a golden test &mdash; those are implementation details hidden inside the engine.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 10 ──────────── -->
+<div class="section" id="t10">
+<h2><span class="num">10</span> Playwright Selectors in RF</h2>
+
+<h3>Selector types</h3>
+<table class="explain">
+<tr><th>Type</th><th>Syntax</th><th>Example</th></tr>
+<tr><td>CSS</td><td>Default &mdash; just write the selector</td><td><code>div.quote</code>, <code>a.title</code>, <code>h4.price span</code></td></tr>
+<tr><td>Text</td><td><code>text=...</code></td><td><code>text=Next</code></td></tr>
+<tr><td>Attribute</td><td>CSS attribute selectors</td><td><code>p[data-rating]</code>, <code>input[type='submit']</code></td></tr>
+<tr><td>Nth element</td><td><code>&gt;&gt; nth=N</code> (chained)</td><td><code>div.quote &gt;&gt; nth=0</code> (first quote)</td></tr>
+<tr><td>Chaining</td><td><code>&gt;&gt;</code> chains selectors</td><td><code>.quote &gt;&gt; .text</code> (text inside a quote)</td></tr>
+</table>
+
+<h3>Selectors from real golden tests</h3>
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code">div.quote</div>
+    <div class="line-note">CSS: <code>&lt;div class="quote"&gt;</code> &mdash; the container for each quote on quotes.toscrape.com</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">small.author</div>
+    <div class="line-note">CSS: <code>&lt;small class="author"&gt;</code> &mdash; the author name element</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">li.next a</div>
+    <div class="line-note">CSS: an <code>&lt;a&gt;</code> tag inside an <code>&lt;li class="next"&gt;</code> &mdash; the "Next" pagination button</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">a.page-link.next</div>
+    <div class="line-note">CSS: <code>&lt;a class="page-link next"&gt;</code> &mdash; webscraper.io's next-page link</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">p[data-rating]</div>
+    <div class="line-note">CSS attribute selector: <code>&lt;p data-rating="3"&gt;</code> &mdash; rating stored as an HTML attribute</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">button.swatch</div>
+    <div class="line-note">CSS: <code>&lt;button class="swatch"&gt;</code> &mdash; HDD size variant buttons on product detail pages</div>
+  </div>
+</div>
+
+<h3>The <code>&gt;&gt;</code> chaining operator</h3>
+<p>Playwright's <code>&gt;&gt;</code> chains selectors so each part scopes into the previous match. The execution engine uses this extensively:</p>
+<pre><code><span class="hl-cmt"># In _expand_elements, to select the 3rd quote element:</span>
+elem_selector = f"{selector} >> nth={i}"
+<span class="hl-cmt"># Result: "div.quote >> nth=2"</span>
+
+<span class="hl-cmt"># In _extract_field, to find text INSIDE that element:</span>
+selector = f"{scope} >> {fs.locator}"
+<span class="hl-cmt"># Result: "div.quote >> nth=2 >> .text"</span></code></pre>
+<p>This is how each field is extracted <em>relative to</em> its parent element, not from the entire page.</p>
+</div>
+
+<!-- ──────────── TOPIC 11 ──────────── -->
+<div class="section" id="t11">
+<h2><span class="num">11</span> Waiting Strategies</h2>
+
+<h3>Why waiting matters</h3>
+<p>Web pages load asynchronously. An element might not exist yet when you try to click it. Playwright provides several wait strategies:</p>
+
+<table class="explain">
+<tr><th>Strategy</th><th>RF-Browser Keyword</th><th>When to use</th></tr>
+<tr><td>Load state</td><td><code>Wait For Load State</code></td><td>After navigation &mdash; wait for page to finish loading</td></tr>
+<tr><td>Element state</td><td><code>Wait For Elements State</code></td><td>Wait for a specific element to appear/disappear</td></tr>
+<tr><td>Auto-wait</td><td>(built-in to Click, Fill, etc.)</td><td>Playwright auto-waits for elements before interacting</td></tr>
+<tr><td>Timeout</td><td><code>Set Browser Timeout</code></td><td>Global timeout for all operations</td></tr>
+</table>
+
+<h3>How the engine uses waits</h3>
+<pre><code><span class="hl-cmt"># After clicking the "Next" pagination button:</span>
+bl.click(next_selector)
+bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
+<span class="hl-cmt"># Then an additional delay from resource globals:</span>
+page_delay = int(res.globals_.get(<span class="hl-str">"page_load_delay_ms"</span>, 0))
+<span class="hl-py">if</span> page_delay:
+    time.sleep(page_delay / 1000.0)</code></pre>
+
+<h3>Load states explained</h3>
+<ul>
+  <li><code>domcontentloaded</code> &mdash; HTML has been parsed (fastest, used after pagination clicks)</li>
+  <li><code>load</code> &mdash; all resources (images, stylesheets) loaded</li>
+  <li><code>networkidle</code> &mdash; no network activity for 500ms (slowest, used for AJAX-heavy pages)</li>
+</ul>
+
+<h3>The <code>page_load_delay_ms</code> resource global</h3>
+<p>In the <code>.robot</code> file, you set an additional delay:</p>
+<pre><code>    And I set resource globals
+    ...    timeout_ms=30000           <span class="hl-cmt"># max wait for any operation</span>
+    ...    retries=2                  <span class="hl-cmt"># retry failed operations twice</span>
+    ...    page_load_delay_ms=1000    <span class="hl-cmt"># extra 1-second wait after navigation</span></code></pre>
+<p>This helps with sites that have JavaScript rendering delays beyond what <code>domcontentloaded</code> captures.</p>
+</div>
+
+<!-- ──────────── TOPIC 12 ──────────── -->
+<div class="section" id="t12">
+<h2><span class="num">12</span> Page Interaction</h2>
+
+<h3>Deferred execution model</h3>
+<div class="callout warning">
+<div class="callout-title">Warning</div>
+All WiseRpaBDD keywords are <strong>deferred</strong>. They record instructions during test case definition. No browser exists at this point. The browser opens during <code>finalize deployment</code> in Suite Teardown, when the ExecutionEngine walks the rule tree. <strong>Raw Browser library keywords placed directly in test cases will crash</strong> — use the deferred action keywords below instead.
+</div>
+
+<h3>Deferred action keywords (16 + 2 passthroughs)</h3>
+<table class="explain">
+<tr><th>Keyword</th><th>What it does</th><th>Engine usage</th></tr>
+<tr><td><code>When I click locator</code></td><td>Click an element</td><td>Buttons, links, pagination</td></tr>
+<tr><td><code>When I double click locator</code></td><td>Double-click an element</td><td>Editable fields, tree nodes</td></tr>
+<tr><td><code>When I type ... into locator</code></td><td>Type into an input (clears first)</td><td>Login forms, search fields</td></tr>
+<tr><td><code>When I type secret ... into locator</code></td><td>Type secret (redacted in logs)</td><td>Password fields</td></tr>
+<tr><td><code>When I select ... from locator</code></td><td>Select dropdown option</td><td>Filter controls</td></tr>
+<tr><td><code>When I check locator</code></td><td>Check a checkbox</td><td>Filter toggles</td></tr>
+<tr><td><code>When I hover locator</code></td><td>Hover an element</td><td>Tooltips, dropdown menus</td></tr>
+<tr><td><code>When I focus locator</code></td><td>Focus an element</td><td>Keyboard interaction target</td></tr>
+<tr><td><code>When I press keys</code></td><td>Press keyboard keys</td><td>Submit (Enter), clear (Ctrl+a), tab</td></tr>
+<tr><td><code>When I upload file ... to locator</code></td><td>Upload a file</td><td>File input fields</td></tr>
+<tr><td><code>When I open</code></td><td>Navigate to URL</td><td>Entry URL navigation</td></tr>
+<tr><td><code>When I open the bound field</code></td><td>Navigate to URL from context</td><td>Detail page traversal</td></tr>
+<tr><td><code>When I scroll down</code></td><td>Scroll one viewport</td><td>Lazy-loaded content</td></tr>
+<tr><td><code>When I wait for idle</code></td><td>Wait for network idle</td><td>After navigation/interaction</td></tr>
+<tr><td><code>When I wait N ms</code></td><td>Fixed delay</td><td>Rate limiting, animation wait</td></tr>
+<tr><td><code>When I take screenshot</code></td><td>Capture page</td><td>Debugging</td></tr>
+<tr><td><code>And I browser step</code></td><td>Call any adapter method</td><td>Passthrough for uncovered methods</td></tr>
+<tr><td><code>And I call keyword</code></td><td>Defer any RF keyword</td><td>Complex auth flows with raw Browser calls</td></tr>
+</table>
+
+<h3>The extraction pipeline</h3>
+<p>Here is the chain from <code>.robot</code> declaration to actual data extraction:</p>
+<pre><code><span class="hl-cmt"># In the .robot file you declare:</span>
+Then I extract fields
+...    field=quote_text    extractor=text       locator=".text"
+...    field=author        extractor=text       locator="small.author"
+...    field=tags          extractor=grouped    locator=".tag"
+
+<span class="hl-cmt"># The engine calls _extract_field for each FieldSpec:</span>
+<span class="hl-py">if</span> fs.extractor == <span class="hl-str">"text"</span>:
+    <span class="hl-py">return</span> bl.get_text(selector).strip()    <span class="hl-cmt"># Get visible text</span>
+<span class="hl-py">elif</span> fs.extractor == <span class="hl-str">"attr"</span>:
+    <span class="hl-py">return</span> bl.get_attribute(selector, fs.attr)  <span class="hl-cmt"># Get HTML attribute</span>
+<span class="hl-py">elif</span> fs.extractor == <span class="hl-str">"grouped"</span>:
+    <span class="hl-cmt"># Loop over all matching elements, collect text into a list</span>
+    <span class="hl-py">for</span> i <span class="hl-py">in</span> range(count):
+        text = bl.get_text(f<span class="hl-str">"{selector} >> nth={i}"</span>).strip()
+        results.append(text)
+    <span class="hl-py">return</span> results</code></pre>
+
+<h3>Extractor types</h3>
+<table class="explain">
+<tr><th>Extractor</th><th>Returns</th><th>Use case</th></tr>
+<tr><td><code>text</code></td><td>String</td><td>Visible text content of an element</td></tr>
+<tr><td><code>attr</code></td><td>String</td><td>An HTML attribute value (e.g., <code>href</code>, <code>title</code>, <code>data-rating</code>)</td></tr>
+<tr><td><code>grouped</code></td><td>List of strings</td><td>Text from all matching elements (e.g., multiple tags per quote)</td></tr>
+<tr><td><code>html</code></td><td>String (HTML)</td><td>Raw innerHTML of an element</td></tr>
+<tr><td><code>link</code></td><td>Absolute URL</td><td>The <code>href</code> attribute, resolved to an absolute URL</td></tr>
+<tr><td><code>image</code></td><td>URL string</td><td>The <code>src</code> attribute of an image</td></tr>
+<tr><td><code>number</code></td><td>int or float</td><td>Numeric text cleaned of non-digit characters</td></tr>
+</table>
+
+<h3>The self-selector: <code>locator="."</code></h3>
+<p>The special locator <code>"."</code> means "the element itself" rather than a child. When used with <code>extractor=link</code> it returns the current page URL. When used with <code>extractor=text</code> on a scoped element it returns the element's own text.</p>
+
+<h3>Fallback selectors: <code>selector1 | selector2</code></h3>
+<p>When a site has inconsistent DOM across pages (e.g., <code>.price-new</code> on sale items, <code>.price</code> on regular items), you can provide multiple selectors separated by <code> | </code> (space-pipe-space). The engine tries each in order and uses the first that matches:</p>
+<pre><code>    Then I extract fields
+    ...    field=price    extractor=text    locator=".price-new | .price | .amount"</code></pre>
+<p>The <code>_resolve_fallback_selector</code> method checks each candidate via <code>get_element_count</code> and returns the first with matches. If none match, it falls back to the first candidate (preserving error messages). Plain selectors (no pipe) pass through with zero overhead.</p>
+
+<h3>Passthrough keywords</h3>
+<p>For cases not covered by the built-in action keywords, two escape hatches allow deferring arbitrary calls into the rule walk:</p>
+<pre><code><span class="hl-cmt"># Call any method on the browser adapter directly:</span>
+    And I browser step "Press Keys"    "#search"    "Enter"
+
+<span class="hl-cmt"># Invoke any Robot Framework keyword (browser is live):</span>
+    And I call keyword "Login To Site"</code></pre>
+<p>Both execute during the rule walk when the browser is live. <code>browser step</code> calls a method on the adapter by name. <code>call keyword</code> uses RF's <code>BuiltIn().run_keyword()</code> to invoke any keyword &mdash; useful for complex auth flows that need raw Browser library calls.</p>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  Passthrough keywords bypass the generic keyword contract. Use them sparingly &mdash; they make suites less portable across runtimes and harder for AI agents to reason about.
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 3: PYTHON LIBRARIES                                       -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 13 ──────────── -->
+<div class="section" id="t13">
+<h2><span class="num">13</span> Python Class as RF Library</h2>
+
+<h3>The <code>@library</code> and <code>@keyword</code> decorators</h3>
+<p>A <strong>decorator</strong> is a Python feature that modifies a function or class. It starts with <code>@</code> and sits on the line above the thing it decorates. Here is the WiseRpaBDD class declaration:</p>
+
+<pre><code><span class="hl-py">from</span> robot.api.deco <span class="hl-py">import</span> keyword, library
+
+<span class="hl-dec">@library</span>(scope=<span class="hl-str">"SUITE"</span>, auto_keywords=<span class="hl-py">False</span>)
+<span class="hl-py">class</span> WiseRpaBDD:
+    <span class="hl-py">def</span> __init__(self) -> <span class="hl-py">None</span>:
+        self.events: list[tuple[str, tuple[Any, ...]]] = []
+        self._deployment: DeploymentContext | <span class="hl-py">None</span> = <span class="hl-py">None</span>
+        self._current_resource: ResourceContext | <span class="hl-py">None</span> = <span class="hl-py">None</span>
+        self._current_rule: RuleNode | <span class="hl-py">None</span> = <span class="hl-py">None</span></code></pre>
+
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code"><span class="hl-dec">@library</span>(scope=<span class="hl-str">"SUITE"</span>, auto_keywords=<span class="hl-py">False</span>)</div>
+    <div class="line-note"><strong>@library</strong> tells RF "this class is a keyword library." <code>scope="SUITE"</code> means one instance is created per <code>.robot</code> file (not per test case). <code>auto_keywords=False</code> means only methods with <code>@keyword</code> are exposed &mdash; not every public method.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-py">class</span> WiseRpaBDD:</div>
+    <div class="line-note">A Python class. RF instantiates it automatically when <code>Library    WiseRpaBDD</code> appears in Settings.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">    self._deployment: DeploymentContext | <span class="hl-py">None</span> = <span class="hl-py">None</span></div>
+    <div class="line-note">Instance variable with a <strong>type hint</strong>. <code>DeploymentContext | None</code> means "this can be a DeploymentContext or None." The underscore prefix <code>_</code> is a Python convention meaning "private &mdash; not part of the public API."</div>
+  </div>
+</div>
+
+<h3>The ROBOT_LIBRARY_SCOPE concept</h3>
+<table class="explain">
+<tr><th>Scope</th><th>New instance when?</th><th>Use case</th></tr>
+<tr><td><code>SUITE</code></td><td>Per .robot file</td><td>State accumulates across test cases (WiseRpaBDD needs this)</td></tr>
+<tr><td><code>TEST</code></td><td>Per test case</td><td>Fresh state each test</td></tr>
+<tr><td><code>GLOBAL</code></td><td>Once per entire run</td><td>Shared state across all files</td></tr>
+</table>
+
+<h3>Keyword with embedded arguments</h3>
+<pre><code><span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)
+<span class="hl-py">def</span> start_deployment(self, deployment: str) -> <span class="hl-py">None</span>:
+    self._record(<span class="hl-str">"start_deployment"</span>, deployment)
+    self._deployment = DeploymentContext(name=deployment)</code></pre>
+
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code"><span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)</div>
+    <div class="line-note">The string inside <code>@keyword()</code> is the keyword name as RF sees it. <code>${deployment}</code> is an embedded argument &mdash; RF extracts the value from the test and passes it as a Python parameter.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-py">def</span> start_deployment(self, deployment: str) -> <span class="hl-py">None</span>:</div>
+    <div class="line-note">A regular Python method. <code>self</code> is the library instance. <code>-> None</code> is a return type hint meaning "this function returns nothing."</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code">    self._deployment = DeploymentContext(name=deployment)</div>
+    <div class="line-note">Creates a new <code>DeploymentContext</code> dataclass (see Topic 14) and stores it on the instance. This is the start of the deferred execution plan.</div>
+  </div>
+</div>
+</div>
+
+<!-- ──────────── TOPIC 14 ──────────── -->
+<div class="section" id="t14">
+<h2><span class="num">14</span> Python Concepts Used in the Project</h2>
+
+<h3>Dataclasses</h3>
+<p>A <strong>dataclass</strong> is a Python shortcut for creating classes that mainly hold data:</p>
+
+<pre><code><span class="hl-py">from</span> dataclasses <span class="hl-py">import</span> dataclass, field
+
+<span class="hl-dec">@dataclass</span>
+<span class="hl-py">class</span> FieldSpec:
+    name: str                       <span class="hl-cmt"># Required field, no default</span>
+    extractor: str                  <span class="hl-cmt"># Required: text, attr, grouped, etc.</span>
+    locator: str                    <span class="hl-cmt"># Required: CSS selector</span>
+    attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span>        <span class="hl-cmt"># Optional field, defaults to None</span></code></pre>
+
+<h3>The <code>field()</code> function</h3>
+<pre><code><span class="hl-dec">@dataclass</span>
+<span class="hl-py">class</span> RuleNode:
+    name: str
+    parents: list[str] = field(default_factory=list)
+    state_checks: list[StateCheck] = field(default_factory=list)
+    expansion: Expansion | <span class="hl-py">None</span> = <span class="hl-py">None</span></code></pre>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  You cannot write <code>parents: list[str] = []</code> in a dataclass. Python would share the <em>same</em> list object across all instances. <code>field(default_factory=list)</code> creates a <em>new</em> empty list for each instance.
+</div>
+
+<h3>Type hints</h3>
+<table class="explain">
+<tr><th>Syntax</th><th>Meaning</th></tr>
+<tr><td><code>str</code></td><td>A string</td></tr>
+<tr><td><code>int</code></td><td>An integer</td></tr>
+<tr><td><code>str | None</code></td><td>"Either a string or None" (union type)</td></tr>
+<tr><td><code>list[str]</code></td><td>A list where every element is a string</td></tr>
+<tr><td><code>dict[str, float]</code></td><td>A dictionary with string keys and float values</td></tr>
+<tr><td><code>Any</code></td><td>"Could be anything" &mdash; imported from <code>typing</code></td></tr>
+</table>
+
+<h3>f-strings</h3>
+<pre><code>name = <span class="hl-str">"quotes"</span>
+logger.info(f<span class="hl-str">"Executing resource: {name}"</span>)
+<span class="hl-cmt"># Output: "Executing resource: quotes"</span>
+
+elem_selector = f<span class="hl-str">"{selector} >> nth={i}"</span>
+<span class="hl-cmt"># If selector="div.quote" and i=2, result: "div.quote >> nth=2"</span></code></pre>
+
+<h3>The <code>*args</code> pattern</h3>
+<p>Many WiseRpaBDD keywords accept <code>*specs</code> or <code>*options</code>:</p>
+<pre><code><span class="hl-py">def</span> extract_fields(self, *specs: str) -> <span class="hl-py">None</span>:</code></pre>
+<p>The <code>*</code> means "collect all remaining positional arguments into a tuple." When RF calls this keyword with multiple arguments from the <code>...</code> continuation lines, they all arrive as the <code>specs</code> tuple.</p>
+</div>
+
+<!-- ──────────── TOPIC 15 ──────────── -->
+<div class="section" id="t15">
+<h2><span class="num">15</span> The <code>from __future__ import annotations</code> Pattern</h2>
+
+<h3>What it does</h3>
+<p>The very first non-comment line in WiseRpaBDD.py is:</p>
+<pre><code><span class="hl-py">from</span> __future__ <span class="hl-py">import</span> annotations</code></pre>
+
+<p>This enables <strong>postponed evaluation of annotations</strong> (PEP 563). Without it, Python evaluates type hints <em>at import time</em>. That means this would fail:</p>
+<pre><code><span class="hl-dec">@dataclass</span>
+<span class="hl-py">class</span> RuleNode:
+    children: list[RuleNode] = field(default_factory=list)
+    <span class="hl-cmt"># ERROR without future annotations: RuleNode is not yet defined!</span></code></pre>
+
+<p>With <code>from __future__ import annotations</code>, Python treats all type hints as strings (evaluated lazily), so you can reference the class inside its own definition.</p>
+
+<h3>The <code>str | None</code> syntax</h3>
+<p>This also enables the <code>|</code> union syntax for type hints in Python 3.9/3.10+. Without the import, you would need:</p>
+<pre><code><span class="hl-py">from</span> typing <span class="hl-py">import</span> Optional
+attr: Optional[str] = <span class="hl-py">None</span>   <span class="hl-cmt"># Older style</span>
+
+<span class="hl-cmt"># With future annotations, the cleaner syntax works:</span>
+attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></code></pre>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 4: WISERPABDD ARCHITECTURE                                -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 16 ──────────── -->
+<div class="section" id="t16">
+<h2><span class="num">16</span> The Deferred Execution Model</h2>
+
+<h3>The fundamental insight</h3>
+<p>RF executes keywords <strong>sequentially, one at a time</strong>. But web scraping requires <strong>nested loops</strong>: for each page, for each element on the page, extract multiple fields. You cannot express nested loops in RF's flat keyword sequence.</p>
+
+<p>The solution is a <strong>two-phase architecture</strong>:</p>
+
+<table class="explain">
+<tr><th>Phase</th><th>What happens</th><th>When</th></tr>
+<tr><td><strong>Phase A: Plan</strong></td><td>RF keywords build an in-memory tree of rules, expansions, and field specs</td><td>During test case execution (before Suite Teardown)</td></tr>
+<tr><td><strong>Phase B: Execute</strong></td><td><code>finalize_deployment</code> walks the tree using a real browser</td><td>During Suite Teardown</td></tr>
+</table>
+
+<h3>How keywords build the plan</h3>
+<pre><code><span class="hl-cmt"># Phase A: Each keyword just stores data on the context</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)
+<span class="hl-py">def</span> start_deployment(self, deployment):
+    self._deployment = DeploymentContext(name=deployment)
+    <span class="hl-cmt"># Creates the empty plan object</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I register artifact "${artifact}"'</span>)
+<span class="hl-py">def</span> register_artifact(self, artifact, *fields):
+    self._deployment.artifacts[artifact] = ArtifactSchema(name=artifact, ...)
+    <span class="hl-cmt"># Adds an artifact definition to the plan</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'And I begin rule "${rule}"'</span>)
+<span class="hl-py">def</span> begin_rule(self, rule):
+    node = RuleNode(name=rule)
+    self._current_resource.rules[rule] = node
+    self._current_rule = node
+    <span class="hl-cmt"># Adds a rule to the current resource</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'When I paginate by next button "${locator}" up to ${limit} pages'</span>)
+<span class="hl-py">def</span> paginate_by_next_button(self, locator, limit):
+    self._current_rule.expansion = Expansion(
+        over=<span class="hl-str">"pages_next"</span>, locator=locator, limit=int(limit))
+    <span class="hl-cmt"># Attaches pagination to the current rule -- no browser action yet!</span></code></pre>
+
+<h3>Phase B: finalize_deployment triggers execution</h3>
+<pre><code><span class="hl-dec">@keyword</span>(<span class="hl-str">"Then I finalize deployment"</span>)
+<span class="hl-py">def</span> finalize_deployment(self):
+    self._finalize_resource_roots()
+    headed = os.environ.get(<span class="hl-str">"WISE_RPA_HEADED"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">in</span> (<span class="hl-str">"1"</span>, <span class="hl-str">"true"</span>, <span class="hl-str">"yes"</span>)
+    stealth = os.environ.get(<span class="hl-str">"WISE_RPA_STEALTH"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">not in</span> (<span class="hl-str">"0"</span>, <span class="hl-str">"false"</span>, <span class="hl-str">"no"</span>)
+    engine = ExecutionEngine(self._deployment, headed=headed, stealth=stealth)
+    engine.run()   <span class="hl-cmt"># THIS is where the browser launches and scraping happens</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Every keyword before <code>finalize_deployment</code> is a <strong>no-op at the browser level</strong>. They only build Python dataclass objects. The browser does not even launch until the suite teardown runs <code>engine.run()</code>.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 17 ──────────── -->
+<div class="section" id="t17">
+<h2><span class="num">17</span> The Data Model</h2>
+
+<p>WiseRpaBDD uses a hierarchy of <code>@dataclass</code> objects as the in-memory plan. Understanding them is key to understanding how the engine works.</p>
+
+<h3>Core dataclasses</h3>
+<table class="explain">
+<tr><th>Dataclass</th><th>Purpose</th><th>Key fields</th></tr>
+<tr><td><code>DeploymentContext</code></td><td>Top-level container for the entire scraping plan</td><td><code>name</code>, <code>artifacts</code>, <code>artifact_store</code>, <code>resources</code>, <code>quality_gate</code>, <code>hooks</code>, <code>setup_actions</code>, <code>interrupt_selectors</code>, <code>ai_adapter</code></td></tr>
+<tr><td><code>ResourceContext</code></td><td>A web resource to scrape (one or more per deployment)</td><td><code>name</code>, <code>entry_url</code>, <code>globals_</code>, <code>rules</code>, <code>root_names</code>, <code>consumes</code>, <code>entry_template</code>, <code>iterates_parent</code></td></tr>
+<tr><td><code>RuleNode</code></td><td>A named block within a resource defining state, actions, expansion, extraction</td><td><code>name</code>, <code>parents</code>, <code>children</code>, <code>state_checks</code>, <code>actions</code>, <code>expansion</code>, <code>field_specs</code>, <code>table_spec</code>, <code>ai_extraction</code>, <code>emit_targets</code>, <code>emit_flatten_by</code>, <code>emit_merge_on</code>, <code>retry_max</code>, <code>retry_delay_ms</code></td></tr>
+<tr><td><code>ArtifactSchema</code></td><td>Definition of an output data product</td><td><code>name</code>, <code>fields</code>, <code>output</code>, <code>format</code>, <code>structure</code>, <code>dedupe</code>, <code>query</code>, <code>consumes</code>, <code>description</code></td></tr>
+<tr><td><code>QualityGate</code></td><td>Validation thresholds checked after all extraction</td><td><code>min_records</code>, <code>filled_pcts</code>, <code>max_failed_pct</code></td></tr>
+</table>
+
+<h3>Supporting dataclasses</h3>
+<table class="explain">
+<tr><th>Dataclass</th><th>Used by</th><th>Fields</th></tr>
+<tr><td><code>FieldSpec</code></td><td>RuleNode.field_specs</td><td><code>name</code>, <code>extractor</code>, <code>locator</code>, <code>attr</code></td></tr>
+<tr><td><code>TableSpec</code></td><td>RuleNode.table_spec</td><td><code>name</code>, <code>locator</code>, <code>header_row</code>, <code>fields</code> (list of TableFieldSpec)</td></tr>
+<tr><td><code>StateCheck</code></td><td>RuleNode.state_checks</td><td><code>type</code> (url_matches, url_contains, url_does_not_contain, selector_exists, table_headers), <code>pattern</code></td></tr>
+<tr><td><code>Action</code></td><td>RuleNode.actions</td><td><code>type</code> (click, dblclick, type, select, scroll, wait, wait_ms, open, open_bound, check, hover, focus, press_keys, screenshot, upload, browser_step, call_keyword), <code>locator</code>, <code>value</code>, <code>options</code>, <code>args</code></td></tr>
+<tr><td><code>Expansion</code></td><td>RuleNode.expansion</td><td><code>over</code> (elements, pages_next, pages_numeric, combinations), <code>scope</code>, <code>locator</code>, <code>limit</code>, <code>start</code>, <code>order</code> (dfs/bfs), <code>axes</code></td></tr>
+<tr><td><code>CombinationAxis</code></td><td>Expansion.axes</td><td><code>action</code> (type, select, click), <code>control</code>, <code>values</code></td></tr>
+<tr><td><code>HookDef</code></td><td>DeploymentContext.hooks</td><td><code>name</code>, <code>lifecycle_point</code>, <code>config</code></td></tr>
+<tr><td><code>SetupAction</code></td><td>DeploymentContext.setup_actions</td><td><code>action</code> (open, input, password, click), <code>css</code>, <code>url</code>, <code>value</code></td></tr>
+</table>
+
+<h3>How they connect</h3>
+<pre><code>DeploymentContext
+  |-- artifacts: dict[str, ArtifactSchema]
+  |-- artifact_store: dict[str, list]      <span class="hl-cmt"># filled during execution</span>
+  |-- resources: list[ResourceContext]
+  |     |-- rules: dict[str, RuleNode]
+  |     |     |-- state_checks: list[StateCheck]
+  |     |     |-- actions: list[Action]
+  |     |     |-- expansion: Expansion
+  |     |     |     |-- axes: list[CombinationAxis]
+  |     |     |-- field_specs: list[FieldSpec]
+  |     |     |-- table_spec: TableSpec
+  |     |     |-- ai_extraction: dict
+  |     |     |-- children: list[RuleNode]  <span class="hl-cmt"># populated at execution time</span>
+  |-- quality_gate: QualityGate
+  |-- hooks: list[HookDef]
+  |-- setup_actions: list[SetupAction]
+  |-- interrupt_selectors: list[str]</code></pre>
+</div>
+
+<!-- ──────────── TOPIC 18 ──────────── -->
+<div class="section" id="t18">
+<h2><span class="num">18</span> The Rule Tree</h2>
+
+<h3>What is a rule tree?</h3>
+<p>Each resource has a tree of <strong>RuleNodes</strong>. Rules have parent-child relationships declared via <code>I declare parents</code>. The engine walks this tree top-down, executing state checks, expansions, and extractions at each node.</p>
+
+<h3>Walk through: quotes-by-tag-test.robot</h3>
+<p>This test scrapes love-tagged quotes from <code>quotes.toscrape.com/tag/love/</code>. Here is the rule tree it builds:</p>
+
+<pre><code>root                <span class="hl-cmt"># State gate: URL contains /tag/love, .quote exists</span>
+  |
+  +-- pages         <span class="hl-cmt"># Expansion: pages_next via "li.next a", limit=5</span>
+        |
+        +-- items   <span class="hl-cmt"># Expansion: elements over ".quote"</span>
+                    <span class="hl-cmt"># Extract: quote_text, author, tags</span>
+                    <span class="hl-cmt"># Emit to: love_quotes, love_quotes_flat</span></code></pre>
+
+<h3>The .robot code that builds this tree</h3>
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I begin rule</span> "root"</div>
+    <div class="line-note">Creates a <code>RuleNode(name="root")</code> with no parents &mdash; making it a root rule.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Given url contains</span> "/tag/love"</div>
+    <div class="line-note">Adds <code>StateCheck(type="url_contains", pattern="/tag/love")</code> to the root rule.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And selector</span> ".quote" <span class="hl-kw">exists</span></div>
+    <div class="line-note">Adds <code>StateCheck(type="selector_exists", pattern=".quote")</code>.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I begin rule</span> "pages"</div>
+    <div class="line-note">Creates a new <code>RuleNode(name="pages")</code>. Now <code>_current_rule</code> points to "pages".</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I declare parents</span> "root"</div>
+    <div class="line-note">Sets <code>pages.parents = ["root"]</code>. This establishes the parent-child edge.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I paginate by next button</span> "li.next a" <span class="hl-kw">up to</span> 5 <span class="hl-kw">pages</span></div>
+    <div class="line-note">Sets <code>pages.expansion = Expansion(over="pages_next", locator="li.next a", limit=5)</code>.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I begin rule</span> "items"</div>
+    <div class="line-note">Creates <code>RuleNode(name="items")</code>.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I declare parents</span> "pages"</div>
+    <div class="line-note">Sets <code>items.parents = ["pages"]</code>, making items a child of pages.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I expand over elements</span> ".quote"</div>
+    <div class="line-note">Sets <code>items.expansion = Expansion(over="elements", scope=".quote")</code>.</div>
+  </div>
+</div>
+
+<h3>Topological sort &amp; diamond DAGs</h3>
+<p>Before execution, <code>_build_rule_tree</code> populates each node's <code>children</code> list and runs a <strong>topological sort</strong> (Kahn's algorithm) to determine execution order. This handles:</p>
+<ul>
+  <li><strong>Diamond DAGs</strong> &mdash; a rule with multiple parents executes exactly once, after all parents have run</li>
+  <li><strong>Cycle detection</strong> &mdash; raises <code>ValueError</code> if rules form a cycle</li>
+  <li><strong>Linear chains</strong> &mdash; rules execute in parent-before-child order</li>
+</ul>
+
+<h3>Retry mechanism</h3>
+<p>Rules can declare retry behavior for transient failures:</p>
+<pre><code>    And I set retry 3 times with 500 ms delay</code></pre>
+<p>This sets <code>rule.retry_max = 3</code> and <code>rule.retry_delay_ms = 500</code>. The engine will retry the entire rule walk up to 3 times if extraction fails.</p>
+</div>
+
+<!-- ──────────── TOPIC 19 ──────────── -->
+<div class="section" id="t19">
+<h2><span class="num">19</span> The Browser Adapter Pattern</h2>
+
+<h3>The problem</h3>
+<p>Some websites (Yelp, Cloudflare-protected sites) detect automated browsers and block them. The <code>robotframework-browser</code> library does not support Playwright's <code>context.addInitScript()</code>, which is needed to inject anti-detection patches <em>before</em> page JavaScript runs.</p>
+
+<h3>The solution: two backends</h3>
+
+<table class="explain">
+<tr><th>Backend</th><th>Class</th><th>When used</th></tr>
+<tr><td>RF-Browser (default for non-stealth)</td><td>Direct library instance from <code>_get_rf_browser()</code></td><td><code>WISE_RPA_STEALTH=false</code></td></tr>
+<tr><td>Stealth adapter</td><td><code>_StealthAdapter</code></td><td><code>WISE_RPA_STEALTH=true</code> (default)</td></tr>
+</table>
+
+<h3>How <code>_bl()</code> picks the backend</h3>
+<pre><code><span class="hl-py">def</span> _bl(self) -> Any:
+    <span class="hl-str">"""Lazy-init the browser backend."""</span>
+    <span class="hl-py">if</span> self._adapter <span class="hl-py">is None</span>:
+        <span class="hl-py">if</span> self.stealth:
+            self._adapter = _StealthAdapter()
+        <span class="hl-py">else</span>:
+            self._adapter = _get_rf_browser()
+    <span class="hl-py">return</span> self._adapter</code></pre>
+
+<p>Both backends expose the same method names (<code>click</code>, <code>get_text</code>, <code>get_attribute</code>, <code>get_element_count</code>, <code>go_to</code>, <code>new_browser</code>, <code>new_context</code>, etc.), so the engine does not need to know which one it is talking to.</p>
+
+<h3>_StealthAdapter highlights</h3>
+<pre><code><span class="hl-py">class</span> _StealthAdapter:
+    <span class="hl-py">def</span> new_browser(self, *, headless=<span class="hl-py">True</span>):
+        <span class="hl-py">try</span>:
+            <span class="hl-py">from</span> patchright.sync_api <span class="hl-py">import</span> sync_playwright
+        <span class="hl-py">except</span> ImportError:
+            <span class="hl-py">from</span> playwright.sync_api <span class="hl-py">import</span> sync_playwright
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(
+            headless=headless, channel=<span class="hl-str">"msedge"</span>,
+            args=[<span class="hl-str">"--disable-blink-features=AutomationControlled"</span>])
+
+    <span class="hl-py">def</span> new_context(self, **kw):
+        <span class="hl-py">from</span> playwright_stealth <span class="hl-py">import</span> Stealth
+        self._context = self._browser.new_context(**merged)
+        Stealth().apply_stealth_sync(self._context)
+        <span class="hl-cmt"># ^ THIS is what RF-Browser cannot do</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  This is the <strong>Adapter pattern</strong> from software design. Both backends "adapt" to the same interface. The <code>WISE_RPA_STEALTH</code> environment variable controls which one is used. Default is stealth ON.
+</div>
+
+<h3>Patchright: next-generation stealth</h3>
+<p>The stealth adapter now tries to import <code>patchright</code> before falling back to <code>playwright</code>. Patchright is a Playwright fork that patches Chromium at the binary level for undetectable automation &mdash; it defeats TLS/JA3 fingerprinting and browser-level automation flags that <code>playwright-stealth</code> alone cannot address. The adapter logs which backend is active:</p>
+<pre><code>logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")</code></pre>
+
+<h3>Extended adapter API</h3>
+<p>The stealth adapter mirrors the full set of browser actions the engine can dispatch, including newer interactions:</p>
+<table class="explain">
+<tr><th>Method</th><th>Maps to</th></tr>
+<tr><td><code>hover(selector)</code></td><td><code>locator.first.hover()</code></td></tr>
+<tr><td><code>focus(selector)</code></td><td><code>locator.first.focus()</code></td></tr>
+<tr><td><code>dblclick(selector)</code></td><td><code>locator.first.dblclick()</code></td></tr>
+<tr><td><code>press_keys(selector, *keys)</code></td><td><code>locator.first.press(key)</code> per key</td></tr>
+<tr><td><code>take_screenshot(filename=...)</code></td><td><code>page.screenshot(path=...)</code></td></tr>
+<tr><td><code>upload_file(selector, path)</code></td><td><code>locator.first.set_input_files(path)</code></td></tr>
+</table>
+</div>
+
+<!-- ──────────── TOPIC 20 ──────────── -->
+<div class="section" id="t20">
+<h2><span class="num">20</span> Expansion Strategies</h2>
+
+<p>Expansions are how the engine loops. The <code>.robot</code> file declares <em>what</em> to loop over, and the <code>ExecutionEngine</code> handles the <em>how</em>.</p>
+
+<h3>1. Elements expansion (<code>elements</code>)</h3>
+<p>Loop over N matching CSS elements on the current page. The most common expansion type.</p>
+
+<pre><code><span class="hl-cmt"># .robot declaration:</span>
+When I expand over elements ".quote"
+
+<span class="hl-cmt"># Creates: Expansion(over="elements", scope=".quote")</span></code></pre>
+
+<p><strong>Engine behavior</strong> (<code>_expand_elements</code>):</p>
+<pre><code>count = bl.get_element_count(selector)   <span class="hl-cmt"># How many .quote on page?</span>
+<span class="hl-py">for</span> i <span class="hl-py">in</span> range(count):
+    elem_selector = f<span class="hl-str">"{selector} >> nth={i}"</span>    <span class="hl-cmt"># ".quote >> nth=0", etc.</span>
+    record = self._extract_from_element(rule, elem_selector, ...)
+    <span class="hl-cmt"># Then walk children with this element as scope</span></code></pre>
+
+<p><strong>BFS vs DFS order</strong>:</p>
+<pre><code><span class="hl-cmt"># DFS (default): process each element fully before moving to next</span>
+When I expand over elements ".quote"
+
+<span class="hl-cmt"># BFS: extract ALL elements first, then walk children</span>
+<span class="hl-cmt"># Used when children navigate away (e.g., clicking product links)</span>
+When I expand over elements ".thumbnail" with order "bfs"
+...    limit=6</code></pre>
+
+<p>BFS extracts all 6 product URLs <em>before</em> navigating to any of them. DFS would click the first product, lose the listing page, and fail to extract the remaining 5.</p>
+
+<h3>2. Next-button pagination (<code>pages_next</code>)</h3>
+<p>Click a "Next" button repeatedly until it disappears or the limit is reached.</p>
+
+<pre><code><span class="hl-cmt"># .robot declaration:</span>
+When I paginate by next button "li.next a" up to 3 pages</code></pre>
+
+<p><strong>Engine behavior</strong>:</p>
+<pre><code><span class="hl-py">for</span> page_num <span class="hl-py">in</span> range(limit):
+    <span class="hl-py">for</span> child <span class="hl-py">in</span> rule.children:
+        child_data = self._walk_rule(child, ...)
+    count = bl.get_element_count(next_selector)
+    <span class="hl-py">if</span> count == 0:
+        break       <span class="hl-cmt"># No next button -- pagination ends naturally</span>
+    bl.click(next_selector)
+    bl.wait_for_load_state(domcontentloaded)</code></pre>
+
+<h3>3. Numeric pagination (<code>pages_numeric</code>)</h3>
+<p>Click numbered page links (1, 2, 3...) instead of a "Next" button.</p>
+<pre><code>When I paginate by numeric control "a.page-link" from 1 up to 10 pages</code></pre>
+<p>The engine finds the link whose text matches the target page number and clicks it.</p>
+
+<h3>4. Combinations expansion (<code>combinations</code>)</h3>
+<p>Cartesian product of UI control values. Used for variant extraction (e.g., clicking different HDD size buttons).</p>
+
+<pre><code><span class="hl-cmt"># From variants-test.robot:</span>
+When I expand over combinations
+...    action=click    control="button.swatch"    values=128|256|512|1024</code></pre>
+
+<p>The engine computes the full Cartesian product using <code>itertools.product</code>. With one axis of [128, 256, 512, 1024] it produces 4 iterations. With multiple axes (e.g., color AND size) it produces every combination.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  For each combination, the engine finds the matching UI control by text comparison, clicks it, waits for any AJAX update, then extracts fields from the resulting page state.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 21 ──────────── -->
+<div class="section" id="t21">
+<h2><span class="num">21</span> AI Extraction</h2>
+
+<p>WiseRpaBDD can invoke an AI model to extract structured data from previously captured content. This runs <em>after</em> field/table extraction on the same rule node, operating on the already-extracted data.</p>
+
+<h3>Usage in .robot</h3>
+<pre><code>    Then I extract with AI "itsi_data"
+    ...    input=page_html
+    ...    prompt=${AI_PROMPT}
+    ...    schema={"modules": [{"name": "str", "status": "str"}]}
+    ...    max_size=50000</code></pre>
+
+<h3>AI adapter chain</h3>
+<p>The <code>_call_ai</code> method tries adapters in order until one succeeds:</p>
+<table class="explain">
+<tr><th>Adapter</th><th>How it works</th><th>Model</th></tr>
+<tr><td><code>cli:&lt;command&gt;</code></td><td>Pipes prompt to stdin of an arbitrary CLI tool</td><td>Whatever the CLI uses</td></tr>
+<tr><td><code>aichat</code></td><td>Uses the <code>aichat</code> CLI (default if available on PATH)</td><td>Configured in aichat</td></tr>
+<tr><td><code>anthropic</code></td><td>Anthropic Python SDK</td><td>claude-haiku-4-5-20251001</td></tr>
+<tr><td><code>openai</code></td><td>OpenAI Python SDK</td><td>gpt-4o-mini</td></tr>
+</table>
+
+<p>Set the adapter at deployment level:</p>
+<pre><code>    And I set AI adapter "anthropic"</code></pre>
+<p>If no adapter is set, the engine tries aichat, then anthropic, then openai (first that works).</p>
+
+<h3>AI extraction options</h3>
+<table class="explain">
+<tr><th>Option</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>input</code></td><td>all fields as JSON</td><td>Field name to use as AI input</td></tr>
+<tr><td><code>prompt</code></td><td>mode-based</td><td>Custom instruction for the AI</td></tr>
+<tr><td><code>mode</code></td><td><code>extract</code></td><td>Built-in mode: <code>extract</code>, <code>cleanup</code>, <code>classify</code>, <code>refine</code></td></tr>
+<tr><td><code>schema</code></td><td>&mdash;</td><td>JSON schema hint (forces JSON output)</td></tr>
+<tr><td><code>categories</code></td><td>&mdash;</td><td>Classification categories (forces JSON output)</td></tr>
+<tr><td><code>max_size</code></td><td>50000</td><td>Max input chars before skipping (0 = unlimited)</td></tr>
+<tr><td><code>chunk_size</code></td><td>0</td><td>Split input into chunks, process each, concatenate</td></tr>
+<tr><td><code>output</code></td><td><code>json</code></td><td>Response format: <code>json</code>, <code>markdown</code>, <code>text</code></td></tr>
+</table>
+
+<h3>Flow</h3>
+<pre><code><span class="hl-cmt"># In _extract_from_scope, after field/table extraction:</span>
+<span class="hl-py">if</span> rule.ai_extraction:
+    ai_result = self._run_ai_extraction(rule.ai_extraction, data)
+    <span class="hl-py">if</span> ai_result:
+        data.update(ai_result)
+<span class="hl-cmt"># AI results merge into the same record alongside field-extracted data</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  AI extraction is a <strong>post-processing</strong> step. The browser first extracts raw content (e.g., <code>page_html</code> via the <code>html</code> extractor), then the AI transforms that content into structured data. The AI never drives the browser.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 22 ──────────── -->
+<div class="section" id="t22">
+<h2><span class="num">22</span> State Setup &amp; Interrupts</h2>
+
+<h3>State setup (authentication)</h3>
+<p>Many sites require login before scraping. The <code>configure state setup</code> keyword defines a sequence of pre-scrape actions:</p>
+
+<pre><code>    Given I configure state setup
+    ...    skip_when=.logged-in-indicator
+    ...    action=open     url=https://example.com/login
+    ...    action=input    css=#username    value=myuser
+    ...    action=password css=#password    value=mypass
+    ...    action=click    css=button[type=submit]</code></pre>
+
+<h3>Setup action types</h3>
+<table class="explain">
+<tr><th>Action</th><th>What it does</th></tr>
+<tr><td><code>open</code></td><td>Navigate to a URL (<code>bl.go_to(url)</code>)</td></tr>
+<tr><td><code>input</code></td><td>Type visible text into a field (<code>bl.fill_text(css, value)</code>)</td></tr>
+<tr><td><code>password</code></td><td>Same as input but semantically distinct for passwords</td></tr>
+<tr><td><code>click</code></td><td>Click an element (<code>bl.click(css)</code>)</td></tr>
+</table>
+
+<p>The <code>skip_when</code> option checks for a CSS selector &mdash; if found, setup is skipped (already logged in). After all actions, the engine waits for <code>networkidle</code>.</p>
+
+<h3>Interrupt handling</h3>
+<p>Cookie banners, popup modals, and consent dialogs can block scraping. The <code>configure interrupts</code> keyword registers selectors to auto-dismiss:</p>
+
+<pre><code>    And I configure interrupts
+    ...    dismiss=button#onetrust-accept-btn-handler
+    ...    dismiss=.modal-close-button</code></pre>
+
+<p>The engine calls <code>_dismiss_interrupts</code> which checks each selector and clicks it if found. This runs before rule execution on each page.</p>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  Interrupt selectors use simple <code>get_element_count</code> + <code>click</code>. If a dismiss button triggers a page reload, your extraction timing may be affected. Use <code>page_load_delay_ms</code> as a safety buffer.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 23 ──────────── -->
+<div class="section" id="t23">
+<h2><span class="num">23</span> Hooks System</h2>
+
+<p>Hooks allow you to transform extracted data at specific lifecycle points without modifying the engine. They run as config-driven rules applied to each record.</p>
+
+<h3>Registering a hook</h3>
+<pre><code>    And I register hook "clean_text" at "post_extract"
+    ...    strip_html=description
+    ...    lowercase=category
+    ...    default=status:unknown
+    ...    rename=old_field:new_field</code></pre>
+
+<h3>Lifecycle points</h3>
+<table class="explain">
+<tr><th>Point</th><th>When it fires</th></tr>
+<tr><td><code>post_discover</code></td><td>After initial page discovery</td></tr>
+<tr><td><code>pre_extract</code></td><td>Before field extraction begins</td></tr>
+<tr><td><code>post_extract</code></td><td>After field extraction, before emit</td></tr>
+<tr><td><code>pre_assemble</code></td><td>Before output assembly</td></tr>
+<tr><td><code>post_assemble</code></td><td>After output is assembled</td></tr>
+</table>
+
+<h3>Available transforms</h3>
+<table class="explain">
+<tr><th>Transform</th><th>Syntax</th><th>What it does</th></tr>
+<tr><td><code>rename</code></td><td><code>rename=old:new</code></td><td>Rename a field in the record</td></tr>
+<tr><td><code>drop</code></td><td><code>drop=field_name</code></td><td>Remove a field entirely</td></tr>
+<tr><td><code>strip_html</code></td><td><code>strip_html=field_name</code></td><td>Remove HTML tags from a field's value</td></tr>
+<tr><td><code>default</code></td><td><code>default=field:value</code></td><td>Set a default if the field is empty/missing</td></tr>
+<tr><td><code>lowercase</code></td><td><code>lowercase=field_name</code></td><td>Lowercase a field's value</td></tr>
+<tr><td><code>regex</code></td><td><code>regex=field:pattern:replacement</code></td><td>Regex find-and-replace on a field</td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Hooks are the extensibility mechanism for data cleaning. Instead of adding site-specific logic to the engine, you declare transforms in the <code>.robot</code> file. The engine applies them generically.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 24 ──────────── -->
+<div class="section" id="t24">
+<h2><span class="num">24</span> Emit Patterns</h2>
+
+<p>After extraction, records must be emitted to an artifact store. WiseRpaBDD supports three emit strategies controlled by the keyword used.</p>
+
+<h3>Simple emit</h3>
+<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES}"</code></pre>
+<p>Appends each extracted record directly to the named artifact's store.</p>
+
+<h3>Flattened emit</h3>
+<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES_FLAT}" flattened by "tags"</code></pre>
+<p>If a field contains a list (e.g., <code>tags: ["love", "life", "humor"]</code>), the engine creates one record per list item. A quote with 3 tags becomes 3 flat records. Useful for generating denormalized/tabular output.</p>
+
+<h3>Merge emit</h3>
+<pre><code>    And I merge into artifact "${ARTIFACT_PRODUCTS}" on key "product_id"</code></pre>
+<p>If a record with the same key value already exists in the artifact store, the new data is <strong>merged</strong> into the existing record (via <code>dict.update</code>). If no match is found, the record is appended normally. This is used when multiple rules or expansions contribute fields to the same logical entity.</p>
+
+<h3>Direct write</h3>
+<pre><code>    Then I write artifact "${ARTIFACT}" to "output/my_data.json"</code></pre>
+<p>Writes an artifact's current contents to a specific file path, useful for mid-suite checkpoints or non-standard output locations.</p>
+
+<h3>Artifact options affecting output</h3>
+<pre><code>    And I set artifact options for "${ARTIFACT}"
+    ...    output=true              <span class="hl-cmt"># write to disk (default: false)</span>
+    ...    structure=flat            <span class="hl-cmt"># flat vs nested (default: nested)</span>
+    ...    format=jsonl              <span class="hl-cmt"># json, jsonl, csv, markdown</span>
+    ...    dedupe=product_id         <span class="hl-cmt"># deduplicate on this field</span>
+    ...    query=[].data             <span class="hl-cmt"># JMESPath transform before writing</span>
+    ...    consumes=product_urls     <span class="hl-cmt"># declares dependency on another artifact</span></code></pre>
+</div>
+
+<!-- ──────────── TOPIC 25 ──────────── -->
+<div class="section" id="t25">
+<h2><span class="num">25</span> Multi-Resource Chaining</h2>
+
+<p>A deployment can have multiple resources that form a pipeline. Resources can <strong>consume</strong> artifacts produced by earlier resources, enabling multi-step scraping.</p>
+
+<h3>Example: variants-test.robot</h3>
+<pre><code><span class="hl-cmt"># Resource 1: "discover" -- scrapes product URLs</span>
+Resource discover
+    [Setup]    Given I start resource "discover" at "${ENTRY_DISCOVER}"
+    <span class="hl-cmt"># ... extracts product URLs, emits to "product_urls" artifact</span>
+
+<span class="hl-cmt"># Resource 2: "variants" -- consumes product URLs, visits each one</span>
+Resource variants
+    [Setup]    Given I start resource "variants" at "${ENTRY_VARIANTS}"
+    <span class="hl-cmt"># ${ENTRY_VARIANTS} = "https://www.webscraper.io{url}"</span>
+    <span class="hl-cmt"># The {url} is a template that gets expanded per product_urls record</span></code></pre>
+
+<h3>How the engine resolves execution order</h3>
+<p>The engine uses <strong>Kahn's algorithm</strong> (topological sort) on the artifact dependency graph:</p>
+<ol>
+  <li>Build a directed graph: resource B depends on resource A if B consumes an artifact that A produces</li>
+  <li>Run topological sort to produce an execution order (e.g., <code>["discover", "variants"]</code>)</li>
+  <li>Execute resources in that order</li>
+</ol>
+
+<h3>Template URL expansion</h3>
+<p>When a resource entry URL contains <code>{field}</code>, the engine expands it for each record in the consumed artifact:</p>
+<pre><code><span class="hl-cmt"># Template: "https://www.webscraper.io{url}"</span>
+<span class="hl-cmt"># Consumed artifact records: [{"data": {"url": "/product/60"}}, ...]</span>
+<span class="hl-cmt"># Expanded: "https://www.webscraper.io/product/60"</span>
+<span class="hl-cmt"># The engine visits each expanded URL in sequence</span></code></pre>
+
+<h3>Alternative chaining: iterate over parent records</h3>
+<pre><code>    Given I iterate over parent records from "discover"</code></pre>
+<p>Instead of URL templates, this approach passes each parent record directly to the child resource, which can access parent data during extraction.</p>
+
+<h3>The complete execution flow</h3>
+<pre><code>ExecutionEngine.run()
+    |-- new_browser()
+    |-- _execute_resources()              <span class="hl-cmt"># Topologically sorted</span>
+    |     |-- _execute_resource(discover)
+    |     |     |-- new_context(), new_page()
+    |     |     |-- go_to(entry_url)
+    |     |     |-- _build_rule_tree()    <span class="hl-cmt"># Populate children, topo sort</span>
+    |     |     |-- _walk_rule(root)
+    |     |     |     |-- _check_state()
+    |     |     |     |-- _handle_expansion(elements, bfs)
+    |     |     |     |     |-- _extract_from_element() x N
+    |     |     |     |-- _emit_records("product_urls")
+    |     |     |-- close_context()
+    |     |
+    |     |-- _execute_resource(variants)
+    |           |-- _resolve_entry_urls() <span class="hl-cmt"># Template expansion from product_urls</span>
+    |           |-- For each URL:
+    |                 |-- go_to(url)
+    |                 |-- _walk_rule(detail_root)
+    |                       |-- _handle_expansion(combinations)
+    |                             |-- Click swatch, extract, repeat
+    |
+    |-- _write_outputs()                  <span class="hl-cmt"># JSON/CSV/JSONL files</span>
+    |-- _check_quality_gates()            <span class="hl-cmt"># Advisory checks</span>
+    |-- close_browser()</code></pre>
+</div>
+
+<!-- ──────────── TOPIC 26 ──────────── -->
+<div class="section" id="t26">
+<h2><span class="num">26</span> Quality Gates &amp; Output</h2>
+
+<h3>Quality gates in .robot</h3>
+<p>Every golden test ends with a Quality Gates test case that sets minimum thresholds:</p>
+
+<pre><code>Quality Gates
+    And I set quality gate min records to 30
+    And I set filled percentage for "quote_text" to 100
+    And I set filled percentage for "author" to 100
+    And I set filled percentage for "tags" to 80
+    And I set max failed percentage to 5</code></pre>
+
+<h3>How quality gates are checked</h3>
+<p>After all resources are scraped and output is written, the engine calls <code>_check_quality_gates</code>:</p>
+<ol>
+  <li><strong>Min records</strong> &mdash; total records across all artifacts must meet the threshold</li>
+  <li><strong>Field fill %</strong> &mdash; for each declared field, the percentage of records with a non-empty value must meet the threshold</li>
+  <li><strong>Max failed %</strong> &mdash; the percentage of failed extractions (empty records) must be below the threshold</li>
+</ol>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  Quality gate failures are <strong>warnings</strong>, not errors. The test will still pass in RF terms. The quality gate is an advisory check for the AI agent or operator to review.
+</div>
+
+<h3>Output formats</h3>
+<table class="explain">
+<tr><th>Format</th><th>Extension</th><th>Use case</th></tr>
+<tr><td><code>json</code></td><td><code>.json</code></td><td>Default &mdash; nested or flat JSON array</td></tr>
+<tr><td><code>jsonl</code></td><td><code>.jsonl</code></td><td>One JSON object per line &mdash; good for streaming</td></tr>
+<tr><td><code>csv</code></td><td><code>.csv</code></td><td>Flat tabular data</td></tr>
+<tr><td><code>markdown</code></td><td><code>.md</code></td><td>Human-readable output</td></tr>
+</table>
+
+<p>Output goes to <code>output/{deployment_name}/</code>:</p>
+<pre><code>output/quotes-toscrape/
+    quotes-toscrape_quotes.json          <span class="hl-cmt"># Nested artifact</span>
+    quotes-toscrape_quotes_flat.json     <span class="hl-cmt"># Flat artifact</span>
+    quotes-toscrape.json                 <span class="hl-cmt"># Deployment summary</span></code></pre>
+
+<h3>Artifact post-processing</h3>
+<p>Before writing, the engine can apply two transforms:</p>
+<ul>
+  <li><strong>Dedupe</strong> &mdash; if <code>dedupe=field_name</code> is set, removes duplicate records by that field's value</li>
+  <li><strong>JMESPath query</strong> &mdash; if <code>query=expression</code> is set, transforms the output using JMESPath (requires the <code>jmespath</code> package)</li>
+</ul>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The WiseRpaBDD architecture turns Robot Framework's flat keyword sequence into a powerful scraping engine through four ideas: (1) deferred execution, (2) a rule tree with expansions, (3) artifact chaining with topological sort, and (4) pluggable AI extraction and hook-based transforms.
+</div>
+</div>
+
+  </div><!-- .container -->
+
+  <footer style="text-align:center; padding:2rem; color:var(--text-muted); font-size:.85rem; border-top:1px solid var(--border); margin-top:2rem;">
+    Generated for the wise-rpa-bdd project &mdash; Last updated April 2026
+  </footer>
+</div><!-- .main -->
+
+<script>
+// ── Theme toggle ──
+const themeBtn = document.getElementById('themeBtn');
+const root = document.documentElement;
+const stored = localStorage.getItem('theme');
+if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  root.setAttribute('data-theme', 'dark');
+  themeBtn.textContent = '\u2600';
+} else {
+  themeBtn.textContent = '\u263E';
+}
+themeBtn.addEventListener('click', () => {
+  const isDark = root.getAttribute('data-theme') === 'dark';
+  root.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  themeBtn.textContent = isDark ? '\u263E' : '\u2600';
+  localStorage.setItem('theme', isDark ? 'light' : 'dark');
+});
+
+// ── Mobile sidebar toggle ──
+const menuBtn = document.getElementById('menuBtn');
+const sidebar = document.getElementById('sidebar');
+const backdrop = document.getElementById('backdrop');
+function closeSidebar() { sidebar.classList.remove('open'); backdrop.classList.remove('show'); }
+menuBtn.addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+  backdrop.classList.toggle('show');
+});
+backdrop.addEventListener('click', closeSidebar);
+
+// ── Active link tracking via IntersectionObserver ──
+const sections = document.querySelectorAll('.section');
+const links = document.querySelectorAll('.sidebar-link');
+const linkMap = {};
+links.forEach(l => { linkMap[l.getAttribute('href').slice(1)] = l; });
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const active = linkMap[entry.target.id];
+      if (active) active.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -70% 0px', threshold: 0 });
+
+sections.forEach(s => observer.observe(s));
+
+// ── Smooth scroll for sidebar links ──
+links.forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      closeSidebar();
+    }
+  });
+});
+</script>
+
+</body>
+</html>

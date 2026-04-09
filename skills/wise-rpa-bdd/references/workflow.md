@@ -6,10 +6,20 @@ Read this after `SKILL.md`. This is the operating model for the skill.
 
 You are building a **repeatable exploitation suite** for a browser task. The shipped pieces fit together like this:
 
+```mermaid
+flowchart LR
+    orient[orient] --> explore[explore] --> draft[draft]
+    draft <--> review[review]
+    review --> ship[ship]
 ```
-task brief  ──→  browser exploration  ──→  evidence  ──→  .robot suite  ──→  BDD validator  ──→  robot --dryrun
- (goal)          (discover)               (proof)        (exploit artifact)   (shape gate)        (execution gate)
-```
+
+| Phase | What happens | Output |
+|-------|-------------|--------|
+| **orient** | Read workflow, keyword contract, templates | Understanding of harness |
+| **explore** | Visit live site via Playwright/agent-browser, test selectors | Confirmed selectors, DOM evidence |
+| **draft** | Write .robot suite using WiseRpaBDD keywords | .robot file grounded in evidence |
+| **review** | Run `robot --dryrun`, fix issues, loop back to draft | Clean dryrun pass |
+| **ship** | Package suite + keyword library + docs | Ready-to-run project layout |
 
 Use the mode verbs from `SKILL.md` while you work:
 
