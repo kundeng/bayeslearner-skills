@@ -1415,7 +1415,19 @@ class ExecutionEngine:
         return ""
 
     def _run_ai_extraction(self, config: dict, existing_data: dict) -> dict | None:
-        """Run AI extraction on previously extracted text."""
+        """Run AI extraction on previously extracted text.
+
+        Parameters (via ``...    key=value`` in .robot):
+            input       — field name to use as input (default: all fields as JSON)
+            prompt      — instruction for the AI
+            mode        — built-in mode: extract, cleanup, classify, refine
+            schema      — JSON schema hint (forces JSON output)
+            categories  — classification categories (forces JSON output)
+            max_size    — max chars before truncation (default 50000, 0=unlimited)
+            chunk_size  — split input into chunks of this size, process each,
+                          concatenate results (default 0=no chunking)
+            output      — response format hint: json, markdown, text (default: json)
+        """
         opts = _parse_options(tuple(config.get("specs", [])))
         name = config.get("name", "ai_result")
         mode = opts.get("mode")
@@ -1424,6 +1436,9 @@ class ExecutionEngine:
         input_field = opts.get("input")
         schema = opts.get("schema")
         categories = opts.get("categories")
+        max_size = int(opts.get("max_size", "50000"))
+        chunk_size = int(opts.get("chunk_size", "0"))
+        output_fmt = opts.get("output", "json")
 
         input_text = ""
         if input_field and input_field in existing_data:
@@ -1434,29 +1449,52 @@ class ExecutionEngine:
         if not input_text:
             return None
 
-        # Truncate large inputs to avoid CLI arg-length and token limits
-        max_input = int(opts.get("max_input_size", "50000"))
-        if len(input_text) > max_input:
-            input_text = input_text[:max_input] + f"\n\n[TRUNCATED at {max_input} chars]"
+        # Reject if over max_size (0 = unlimited) — input is too large, skip AI
+        if max_size and len(input_text) > max_size:
+            logger.warn(f"    AI input too large ({len(input_text)} > {max_size}), skipping")
+            return None
 
-        full_prompt = prompt
-        if categories:
-            full_prompt += f"\n\nClassify into one of: {categories}"
+        # Build output instruction based on format and options
+        output_instruction = ""
         if schema:
-            full_prompt += f"\n\nReturn JSON matching this schema: {schema}"
-        full_prompt += f"\n\nInput:\n{input_text}"
-        full_prompt += "\n\nRespond with ONLY valid JSON, no explanation."
+            output_instruction = f"\n\nReturn JSON matching this schema: {schema}"
+            output_instruction += "\n\nRespond with ONLY valid JSON, no explanation."
+        elif categories:
+            output_instruction = f"\n\nClassify into one of: {categories}"
+            output_instruction += "\n\nRespond with ONLY valid JSON, no explanation."
+        elif output_fmt == "json":
+            output_instruction = "\n\nRespond with ONLY valid JSON, no explanation."
+        elif output_fmt == "markdown":
+            output_instruction = "\n\nRespond in clean markdown."
+        # output_fmt == "text" → no instruction, freeform
 
-        result_text = self._call_ai(full_prompt)
+        # Chunking: split input, process each chunk, concatenate
+        if chunk_size and len(input_text) > chunk_size:
+            chunks = [input_text[i:i + chunk_size]
+                      for i in range(0, len(input_text), chunk_size)]
+            results = []
+            for idx, chunk in enumerate(chunks):
+                chunk_prompt = (f"{prompt}\n\n(Chunk {idx + 1}/{len(chunks)})"
+                                f"\n\nInput:\n{chunk}{output_instruction}")
+                result = self._call_ai(chunk_prompt)
+                if result:
+                    results.append(result)
+            result_text = "\n\n".join(results)
+        else:
+            full_prompt = f"{prompt}\n\nInput:\n{input_text}{output_instruction}"
+            result_text = self._call_ai(full_prompt)
+
         if not result_text:
             return None
 
-        try:
-            parsed = json.loads(result_text)
-            return {name: parsed}
-        except json.JSONDecodeError:
-            return {name: result_text}
-            return None
+        # Parse based on output format
+        if output_fmt == "json" or schema or categories:
+            try:
+                parsed = json.loads(result_text)
+                return {name: parsed}
+            except json.JSONDecodeError:
+                return {name: result_text}
+        return {name: result_text}
 
     def _load_cookies(self, bl: Any, cookies_file: str) -> None:
         """Load cookies from a JSON file into the browser context."""

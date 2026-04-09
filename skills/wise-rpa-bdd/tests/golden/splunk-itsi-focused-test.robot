@@ -154,7 +154,9 @@ Extract Entity Integration Pages
     ...    field=body     extractor=html    locator="main article"
     Then I extract with AI "cleaned"
     ...    input=body
-    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format the output as clean markdown with headings for Code Blocks and Key Definitions sections.
+    ...    output=markdown
+    ...    max_size=30000
+    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format as markdown with ## Code Blocks and ## Key Definitions sections.
     And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
@@ -174,7 +176,9 @@ Extract Event Analytics Pages
     ...    field=body     extractor=html    locator="main article"
     Then I extract with AI "cleaned"
     ...    input=body
-    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format the output as clean markdown with headings for Code Blocks and Key Definitions sections.
+    ...    output=markdown
+    ...    max_size=30000
+    ...    prompt=Extract all code blocks (SPL queries, CLI commands, config stanzas) and key definitions or concepts from this Splunk ITSI documentation page. Format as markdown with ## Code Blocks and ## Key Definitions sections.
     And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
     And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
