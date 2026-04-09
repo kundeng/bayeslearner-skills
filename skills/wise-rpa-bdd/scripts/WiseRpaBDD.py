@@ -2535,27 +2535,84 @@ class WiseRpaBDDTest:
         logger.info("Golden baseline: PASS")
 
 
-def _build_generate_prompt(requirement: str, output: Path) -> str:
-    """Build the agent prompt for suite generation."""
+def _load_orient_cache() -> str:
+    """Load pre-baked orient material from skill docs.
+
+    Reads keyword-reference.md and format.md once at generate time so the
+    agent doesn't need to spend LLM turns reading files.
+    """
+    skill_dir = Path(__file__).resolve().parent.parent
+    parts = []
+    for name in ("references/keyword-reference.md", "references/format.md"):
+        p = skill_dir / name
+        if p.exists():
+            parts.append(f"# {name}\n{p.read_text()}")
+    return "\n\n".join(parts)
+
+
+def _build_generate_prompt(requirement: str, output: Path,
+                           fast: bool = False) -> str:
+    """Build the agent prompt for suite generation.
+
+    If fast=True, inlines the keyword reference and format docs into the
+    prompt so the agent skips orient file reads (~6s saving).
+    """
+    skill_dir = Path(__file__).resolve().parent.parent
+
+    header = f"{requirement}\n\nWrite the generated .robot suite to: {output}\n\n"
+
+    if fast:
+        orient_block = (
+            "## Pre-loaded skill reference (no need to read files)\n\n"
+            + _load_orient_cache()
+            + "\n\n"
+            "You already have the full keyword API and format docs above. "
+            "Do NOT read any files from the repo — everything you need is in this prompt. "
+            "Go straight to /rrpa-explore with agent-browser.\n\n"
+            "## agent-browser cheatsheet (use `npx agent-browser` or just `agent-browser`)\n"
+            "```\n"
+            "npx agent-browser open <url>          # navigate (persistent session)\n"
+            "npx agent-browser snapshot -c -d 3    # accessibility tree with classes\n"
+            "npx agent-browser get count '<css>'   # count matching elements\n"
+            "npx agent-browser get text '<css>'    # get text content\n"
+            "npx agent-browser get html '<css>'    # get outer HTML\n"
+            "npx agent-browser eval '<js>'         # run JS expression\n"
+            "npx agent-browser click '<css>'       # click element\n"
+            "```\n"
+            "Chain with && to reuse session.\n\n"
+        )
+    else:
+        orient_block = (
+            "1. /rrpa-orient — read references/keyword-reference.md "
+            "and references/format.md to understand available WiseRpaBDD keywords.\n"
+        )
+
     return (
-        f"{requirement}\n\n"
-        f"Write the generated .robot suite to: {output}\n\n"
-        "Follow the wise-rpa-bdd skill phases:\n"
-        "1. /rrpa-orient — read references/keyword-reference.md "
-        "to understand available WiseRpaBDD keywords\n"
-        "2. /rrpa-explore — use `npx agent-browser` via Bash to explore. "
+        header
+        + "Follow the wise-rpa-bdd skill phases:\n"
+        + orient_block
+        + "2. /rrpa-explore — use `agent-browser` CLI via Bash to explore the live site. "
         "Do NOT use curl or WebFetch. Do NOT guess selectors. "
-        "Every selector must come from agent-browser inspection.\n"
+        "Every selector must come from agent-browser inspection. "
+        "Be efficient — confirm selectors on representative pages, "
+        "do not crawl every page. agent-browser keeps a persistent session.\n"
         "3. /rrpa-draft — draft the .robot suite using WiseRpaBDD keywords "
         "grounded in explore evidence. Include quality gates.\n"
-        "4. /rrpa-review — run robot --dryrun --pythonpath scripts/ "
+        f"4. /rrpa-review — run `robot --dryrun --pythonpath {skill_dir / 'scripts'}` "
         "to verify all keywords resolve. Fix and loop until clean.\n"
         "Do NOT run the suite against a live site for full scraping."
     )
 
 
+_BACKEND_DEFAULTS = {
+    "claude": "sonnet",
+    "codex": "gpt-5.4-mini",
+    "aichat": "",
+}
+
+
 def _run_agent_cli(prompt: str, backend: str = "claude",
-                    model: str = "sonnet", max_turns: int = 50) -> int:
+                    model: str = "", max_turns: int = 50) -> int:
     """Run an agent CLI with a prompt. All backends are subprocess calls.
 
     Backends:
@@ -2566,6 +2623,7 @@ def _run_agent_cli(prompt: str, backend: str = "claude",
     import subprocess
     import shutil
 
+    model = model or _BACKEND_DEFAULTS.get(backend, "")
     skill_dir = Path(__file__).resolve().parent.parent
 
     if backend == "claude":
@@ -2582,6 +2640,7 @@ def _run_agent_cli(prompt: str, backend: str = "claude",
         if not exe:
             raise FileNotFoundError("codex CLI not found in PATH")
         cmd = [exe, "exec", "--dangerously-bypass-approvals-and-sandbox",
+               "-m", model, "-c", "model_reasoning_effort=low",
                "-C", str(skill_dir), prompt]
         return subprocess.run(cmd).returncode
 
@@ -2596,10 +2655,11 @@ def _run_agent_cli(prompt: str, backend: str = "claude",
         raise ValueError(f"Unknown backend: {backend}")
 
 
-def _cli_generate_core(requirement: str, output: Path, model: str = "sonnet",
-                       max_turns: int = 50, backend: str = "claude") -> int:
+def _cli_generate_core(requirement: str, output: Path, model: str = "",
+                       max_turns: int = 50, backend: str = "claude",
+                       fast: bool = False) -> int:
     """Core agent generation logic shared by CLI and RF keyword."""
-    prompt = _build_generate_prompt(requirement, output)
+    prompt = _build_generate_prompt(requirement, output, fast=fast)
     return _run_agent_cli(prompt, backend=backend, model=model,
                           max_turns=max_turns)
 
@@ -2662,9 +2722,11 @@ def _cli_generate(args: list[str]) -> int:
     parser.add_argument("--backend", default="claude",
                         choices=["claude", "codex", "aichat"],
                         help="Agent backend (default: claude)")
-    parser.add_argument("--model", default="sonnet",
-                        help="Model name (claude backend only)")
+    parser.add_argument("--model", default="",
+                        help="Model name (default: per-backend)")
     parser.add_argument("--max-turns", type=int, default=50)
+    parser.add_argument("--fast", action="store_true",
+                        help="Pre-bake keyword docs into prompt (skip orient reads)")
     parsed = parser.parse_args(args)
 
     out = Path(parsed.output)
@@ -2673,7 +2735,7 @@ def _cli_generate(args: list[str]) -> int:
     try:
         _cli_generate_core(parsed.requirement, out,
                            model=parsed.model, max_turns=parsed.max_turns,
-                           backend=parsed.backend)
+                           backend=parsed.backend, fast=parsed.fast)
     except ImportError as e:
         print(f"Error: missing dependency for '{parsed.backend}' backend: {e}")
         return 1

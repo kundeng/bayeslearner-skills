@@ -31,7 +31,23 @@ Do not use when:
 Use these mode verbs in your scratchpad, notes, or progress updates so the current action is obvious:
 
 - `/rrpa-orient` — read the workflow, keyword contract, and templates before touching the target
-- `/rrpa-explore` — use Playwright MCP or agent-browser to visit the live site, test CSS selectors against the real DOM, map auth, pagination, and detail traversal. Every selector in the final suite must come from live exploration. Output: confirmed selectors, DOM notes, sample data.
+- `/rrpa-explore` — use `agent-browser` CLI (via Bash) to visit the live site, test CSS selectors against the real DOM, map auth, pagination, and detail traversal. Every selector in the final suite must come from live exploration. `agent-browser` keeps a persistent browser session across calls — no special flags needed. **Be efficient**: confirm selectors on representative pages — do NOT crawl every page or enumerate all pagination links. Exploration should complete under 1 minute. Output: confirmed selectors, DOM notes, sample data.
+
+### agent-browser quick reference
+
+```bash
+npx agent-browser open <url>          # navigate (persistent session)
+npx agent-browser snapshot -c -d 3    # accessibility tree with CSS classes
+npx agent-browser get count '<css>'   # count matching elements
+npx agent-browser get text '<css>'    # get text content
+npx agent-browser get html '<css>'    # get outer HTML
+npx agent-browser eval '<js>'         # run JS expression
+npx agent-browser click '<css>'       # click element
+npx agent-browser close               # close browser session
+```
+
+Chain commands with `&&` in one Bash call. The browser session persists between calls — no need to reopen.
+
 - `/rrpa-draft` — draft the `.robot` suite using WiseRpaBDD keywords, grounded in explore evidence
 - `/rrpa-review` — run `robot --dryrun` to verify keyword resolution, tighten variables, fix issues. Loops back to `/rrpa-draft` until the suite is clean.
 - `/rrpa-ship` — package the suite, WiseRpaBDD keyword library, and any custom resources into the target project with proper structure, documentation, and a ready-to-run layout
