@@ -217,7 +217,20 @@ class PersistentArtifactStore:
     # --- dict-like interface (engine sees this as dict[str, list]) ----------
 
     def __getitem__(self, key: str) -> list:
-        """Return committed + staging merged for reads."""
+        """Return the mutable list for this key.
+
+        During staging: returns the staging list (so .append() mutates it).
+        Outside staging: returns the committed list.
+        For a merged read-only view, use ``merged(key)`` instead.
+        """
+        if self._staging_active:
+            if key not in self._staging:
+                self._staging[key] = []
+            return self._staging[key]
+        return self._committed.setdefault(key, [])
+
+    def merged(self, key: str) -> list:
+        """Read-only merged view of committed + staging for a key."""
         committed = self._committed.get(key, [])
         staged = self._staging.get(key, []) if self._staging_active else []
         if staged:
@@ -241,14 +254,14 @@ class PersistentArtifactStore:
         return default
 
     def items(self) -> Any:
-        """Merged view of committed + staging."""
+        """Merged read-only view of committed + staging."""
         all_keys = set(self._committed.keys())
         if self._staging_active:
             all_keys |= set(self._staging.keys())
-        return [(k, self[k]) for k in all_keys]
+        return [(k, self.merged(k)) for k in all_keys]
 
     def values(self) -> Any:
-        return [v for _, v in self.items()]
+        return [self.merged(k) for k in self.keys()]
 
     def keys(self) -> Any:
         all_keys = set(self._committed.keys())
@@ -3966,10 +3979,24 @@ def _cli_run(args: list[str]) -> int:
     env = os.environ.copy()
     env["WISE_RPA_RESUME_MODE"] = resume_mode
 
+    # Separate robot options from suite paths (files/dirs come last)
+    robot_opts = []
+    suite_paths = []
+    i = 0
+    while i < len(filtered_args):
+        arg = filtered_args[i]
+        if arg.startswith("--"):
+            robot_opts.append(arg)
+            # Consume the next arg as the option's value if it exists
+            if i + 1 < len(filtered_args) and not filtered_args[i + 1].startswith("--"):
+                robot_opts.append(filtered_args[i + 1])
+                i += 1
+        else:
+            suite_paths.append(arg)
+        i += 1
+
     script_dir = Path(__file__).resolve().parent
-    cmd = ["robot", "--pythonpath", str(script_dir)]
-    if filtered_args:
-        cmd.extend(filtered_args)
+    cmd = ["robot", "--pythonpath", str(script_dir)] + robot_opts + suite_paths
     return subprocess.run(cmd, env=env).returncode
 
 
