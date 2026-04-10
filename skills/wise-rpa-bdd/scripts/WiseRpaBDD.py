@@ -188,6 +188,225 @@ class DeploymentContext:
 
 
 # ---------------------------------------------------------------------------
+# Persistent Artifact Store (staging + committed + checkpoint)
+# ---------------------------------------------------------------------------
+
+class PersistentArtifactStore:
+    """Drop-in replacement for ``dict[str, list]`` with write-ahead staging.
+
+    Records accumulate in a staging buffer per URL.  Only when the URL
+    completes successfully (``commit_url``) do they flush to the committed
+    store.  Timeout or crash → staging discarded, URL retried on resume.
+
+    The committed store is persisted to ``_checkpoint.json`` on every commit
+    so the engine can resume from where it left off.
+    """
+
+    def __init__(self, checkpoint_path: Path | None = None) -> None:
+        self._committed: dict[str, list] = {}
+        self._staging: dict[str, list] = {}
+        self._staging_active = False
+        self._current_resource = ""
+        self._current_url = ""
+        self._completed_resources: set[str] = set()
+        self._processed_urls: dict[str, set[str]] = {}
+        self._cp_path = checkpoint_path
+        if checkpoint_path and checkpoint_path.exists():
+            self._load()
+
+    # --- dict-like interface (engine sees this as dict[str, list]) ----------
+
+    def __getitem__(self, key: str) -> list:
+        """Return committed + staging merged for reads."""
+        committed = self._committed.get(key, [])
+        staged = self._staging.get(key, []) if self._staging_active else []
+        if staged:
+            return committed + staged
+        return committed
+
+    def __setitem__(self, key: str, value: list) -> None:
+        if self._staging_active:
+            self._staging[key] = value
+        else:
+            self._committed[key] = value
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._committed or (
+            self._staging_active and key in self._staging
+        )
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self:
+            return self[key]
+        return default
+
+    def items(self) -> Any:
+        """Merged view of committed + staging."""
+        all_keys = set(self._committed.keys())
+        if self._staging_active:
+            all_keys |= set(self._staging.keys())
+        return [(k, self[k]) for k in all_keys]
+
+    def values(self) -> Any:
+        return [v for _, v in self.items()]
+
+    def keys(self) -> Any:
+        all_keys = set(self._committed.keys())
+        if self._staging_active:
+            all_keys |= set(self._staging.keys())
+        return all_keys
+
+    # --- URL-level staging -------------------------------------------------
+
+    def begin_url(self, resource: str, entry_url: str) -> None:
+        """Start staging buffer for this URL."""
+        self._staging = {}
+        self._staging_active = True
+        self._current_resource = resource
+        self._current_url = entry_url
+
+    def commit_url(self) -> None:
+        """URL completed successfully.  Flush staging → committed + checkpoint."""
+        for k, v in self._staging.items():
+            self._committed.setdefault(k, []).extend(v)
+        self._processed_urls.setdefault(
+            self._current_resource, set()
+        ).add(self._current_url)
+        n_staged = sum(len(v) for v in self._staging.values())
+        self._staging = {}
+        self._staging_active = False
+        self._save()
+        logger.info(f"  [CHECKPOINT] committed {n_staged} records for "
+                    f"{self._current_url[:60]}")
+
+    def rollback_url(self) -> None:
+        """URL failed/timed out.  Discard staging — committed untouched."""
+        n_discarded = sum(len(v) for v in self._staging.values())
+        if n_discarded:
+            logger.info(f"  [CHECKPOINT] rolled back {n_discarded} staged records "
+                        f"for {self._current_url[:60]}")
+        self._staging = {}
+        self._staging_active = False
+
+    # --- Resource-level tracking -------------------------------------------
+
+    def mark_resource_complete(self, resource: str) -> None:
+        self._completed_resources.add(resource)
+        self._save()
+
+    def is_resource_complete(self, resource: str) -> bool:
+        return resource in self._completed_resources
+
+    def is_url_processed(self, resource: str, url: str) -> bool:
+        return url in self._processed_urls.get(resource, set())
+
+    # --- Persistence -------------------------------------------------------
+
+    def _save(self) -> None:
+        if not self._cp_path:
+            return
+        checkpoint = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "completed_resources": sorted(self._completed_resources),
+            "processed_urls": {k: sorted(v) for k, v in self._processed_urls.items()},
+            "artifact_store": self._committed,
+        }
+        tmp = self._cp_path.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(checkpoint, f, ensure_ascii=False)
+        os.replace(tmp, self._cp_path)
+
+    def _load(self) -> None:
+        if not self._cp_path or not self._cp_path.exists():
+            return
+        with open(self._cp_path) as f:
+            cp = json.load(f)
+        if cp.get("version") != 1:
+            logger.warn(f"  Unknown checkpoint version {cp.get('version')}, ignoring")
+            return
+        self._committed = cp.get("artifact_store", {})
+        self._completed_resources = set(cp.get("completed_resources", []))
+        self._processed_urls = {
+            k: set(v) for k, v in cp.get("processed_urls", {}).items()
+        }
+        n = sum(len(v) for v in self._committed.values())
+        n_urls = sum(len(v) for v in self._processed_urls.values())
+        logger.info(f"  [CHECKPOINT] loaded: {len(self._completed_resources)} resources, "
+                    f"{n_urls} URLs, {n} records")
+
+    def delete_checkpoint(self) -> None:
+        if self._cp_path and self._cp_path.exists():
+            self._cp_path.unlink()
+            logger.info("  [CHECKPOINT] removed after successful completion")
+
+
+# ---------------------------------------------------------------------------
+# Aspect-Oriented Programming registry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Aspect:
+    """A cross-cutting concern that hooks into engine lifecycle points.
+
+    Each hook is optional.  ``before_*`` hooks return True to skip the
+    phase (e.g., checkpoint aspect skips completed resources/URLs).
+    """
+    name: str
+    before_action: Callable[..., None] | None = None
+    after_action: Callable[..., None] | None = None
+    before_url: Callable[..., bool] | None = None       # return True = skip
+    after_url: Callable[..., None] | None = None         # (res, url, success)
+    before_resource: Callable[..., bool] | None = None   # return True = skip
+    after_resource: Callable[..., None] | None = None
+
+
+class AspectRegistry:
+    """Manages cross-cutting aspects and fires hooks at lifecycle points."""
+
+    def __init__(self) -> None:
+        self._aspects: list[Aspect] = []
+
+    def register(self, aspect: Aspect) -> None:
+        self._aspects.append(aspect)
+
+    def fire_before_action(self, action: Any, rule: Any, res: Any) -> None:
+        for a in self._aspects:
+            if a.before_action:
+                a.before_action(action, rule, res)
+
+    def fire_after_action(self, action: Any, rule: Any, res: Any,
+                          dt: float) -> None:
+        for a in self._aspects:
+            if a.after_action:
+                a.after_action(action, rule, res, dt)
+
+    def fire_before_url(self, res: Any, url: str) -> bool:
+        """Return True if any aspect says to skip this URL."""
+        for a in self._aspects:
+            if a.before_url and a.before_url(res, url):
+                return True
+        return False
+
+    def fire_after_url(self, res: Any, url: str, success: bool) -> None:
+        for a in self._aspects:
+            if a.after_url:
+                a.after_url(res, url, success)
+
+    def fire_before_resource(self, res: Any) -> bool:
+        """Return True if any aspect says to skip this resource."""
+        for a in self._aspects:
+            if a.before_resource and a.before_resource(res):
+                return True
+        return False
+
+    def fire_after_resource(self, res: Any) -> None:
+        for a in self._aspects:
+            if a.after_resource:
+                a.after_resource(res)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -623,7 +842,9 @@ class ExecutionEngine:
         ).lower() not in ("0", "false", "no")
         self._max_run_time = int(os.environ.get("WISE_RPA_TIMEOUT", "120"))
         self._run_start: float = 0
+        self._timed_out = False
         self._stealth_bridge: _StealthBrowserBridge | None = None
+        self._aspects = AspectRegistry()
         # Slow-motion mode: pause between actions for debugging/demos
         _slow_raw = os.environ.get("WISE_RPA_SLOW", "")
         self._slow_ms = int(_slow_raw) if _slow_raw.isdigit() else 0
@@ -649,9 +870,28 @@ class ExecutionEngine:
                 self._PageLoadStates = PageLoadStates
         return self._adapter
 
-    def run(self) -> None:
+    def run(self, resume_mode: str = "auto") -> None:
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
+
+        # --- Init persistent store + aspects --------------------------------
+        cp_path = Path(output_dir) / "_checkpoint.json"
+        if resume_mode == "fresh" and cp_path.exists():
+            cp_path.unlink()
+            cp_path = None  # type: ignore[assignment]
+        elif resume_mode == "require" and not cp_path.exists():
+            raise RuntimeError(
+                f"--resume specified but no checkpoint found in {output_dir}")
+        elif resume_mode == "auto" and not cp_path.exists():
+            pass  # no checkpoint to load, fresh run
+
+        store = PersistentArtifactStore(
+            cp_path if resume_mode != "fresh" else None
+        )
+        self.ctx.artifact_store = store  # type: ignore[assignment]
+
+        # Register aspects
+        self._setup_aspects(store)
 
         self._run_start = time.time()
 
@@ -663,8 +903,54 @@ class ExecutionEngine:
             self._execute_resources()
             self._write_outputs(output_dir)
             self._check_quality_gates()
+            if not self._timed_out:
+                store.delete_checkpoint()
+            else:
+                logger.info("  [CHECKPOINT] kept — run was cut short by timeout")
         finally:
             bl.close_browser("ALL")
+
+    def _setup_aspects(self, store: PersistentArtifactStore) -> None:
+        """Register all cross-cutting aspects."""
+        # Instrumentation
+        if self._instrument:
+            self._aspects.register(Aspect(
+                name="instrument",
+                after_action=lambda a, r, res, dt: (
+                    logger.warn(f"  [INSTRUMENT] {a.type}"
+                                f"({(a.locator or a.value or '')[:40]}) "
+                                f"SLOW {dt:.2f}s")
+                    if dt > 0.5 else None
+                ),
+            ))
+
+        # Slow-motion
+        if self._slow_ms:
+            slow_ms = self._slow_ms
+            slow_ss = self._slow_screenshot
+            def _slow_after(action: Any, rule: Any, res: Any, dt: float) -> None:
+                time.sleep(slow_ms / 1000.0)
+                if slow_ss:
+                    try:
+                        bl = self._bl()
+                        bl.take_screenshot(
+                            filename=f"slow_{getattr(res, 'name', 'x')}_"
+                                     f"{action.type}.png")
+                    except Exception:
+                        pass
+            self._aspects.register(Aspect(name="slow_motion",
+                                         after_action=_slow_after))
+
+        # Checkpoint
+        self._aspects.register(Aspect(
+            name="checkpoint",
+            before_resource=lambda res: store.is_resource_complete(res.name),
+            after_resource=lambda res: store.mark_resource_complete(res.name),
+            before_url=lambda res, url: store.is_url_processed(res.name, url),
+            after_url=lambda res, url, ok: (
+                store.commit_url() if ok else store.rollback_url()
+            ),
+        ))
 
     def _execute_resources(self) -> None:
         """Execute resources in topological order based on artifact dependencies.
@@ -714,10 +1000,16 @@ class ExecutionEngine:
                 f"Cycle detected in resource dependencies: {cycle_members}"
             )
 
-        # Execute in topological order
+        # Execute in topological order (aspect hooks handle checkpoint skip)
         res_by_name = {r.name: r for r in resources}
         for name in ordered:
-            self._execute_resource(res_by_name[name])
+            res = res_by_name[name]
+            if self._aspects.fire_before_resource(res):
+                logger.info(f"  [RESUME] skipping completed resource: {name}")
+                continue
+            self._execute_resource(res)
+            if not self._timed_out:
+                self._aspects.fire_after_resource(res)
 
     def _execute_resource(self, res: ResourceContext) -> None:
         logger.info(f"Executing resource: {res.name}")
@@ -736,6 +1028,8 @@ class ExecutionEngine:
 
         bl.new_page()
 
+        store = self.ctx.artifact_store
+
         try:
             # Run state setup (auth, consent) if configured
             self._run_setup(bl)
@@ -743,20 +1037,39 @@ class ExecutionEngine:
             entry_urls = self._resolve_entry_urls(res)
 
             for entry_url in entry_urls:
+                # Global timeout guard
+                if self._run_start and (time.time() - self._run_start) > self._max_run_time:
+                    logger.warn(f"  Global timeout ({self._max_run_time}s) — "
+                                "checkpoint preserved for resume")
+                    self._timed_out = True
+                    break
+
+                # Aspect hooks: checkpoint skip if already processed
+                if self._aspects.fire_before_url(res, entry_url):
+                    logger.info(f"  [RESUME] skipping: {entry_url[:80]}")
+                    continue
+
+                # Begin staging — records go to buffer, not committed store
+                if isinstance(store, PersistentArtifactStore):
+                    store.begin_url(res.name, entry_url)
+
+                success = True
                 logger.info(f"  Navigating to: {entry_url}")
                 try:
                     bl.go_to(entry_url)
+                    self._wait_page_ready(bl, page_delay)
+
+                    root_rules = self._build_rule_tree(res)
+                    executed: set[str] = set()
+                    for root in root_rules:
+                        self._walk_rule(root, res, None, entry_url,
+                                        executed=executed)
                 except Exception as e:
-                    logger.warn(f"  Navigation failed: {e}")
-                    continue
+                    logger.warn(f"  URL failed: {e}")
+                    success = False
 
-                self._wait_page_ready(bl, page_delay)
-
-                root_rules = self._build_rule_tree(res)
-                executed: set[str] = set()
-                for root in root_rules:
-                    self._walk_rule(root, res, None, entry_url,
-                                    executed=executed)
+                # Aspect hooks: commit staging on success, rollback on failure
+                self._aspects.fire_after_url(res, entry_url, success)
         finally:
             bl.close_context()
 
@@ -1149,32 +1462,19 @@ class ExecutionEngine:
 
     def _do_action_instrumented(self, action: Action, res: ResourceContext,
                                context: dict[str, Any] | None = None) -> None:
-        """AOP wrapper: instruments _do_action with timing + error context.
-
-        Also handles slow-motion mode (WISE_RPA_SLOW=N) for debugging/demos.
-        """
-        label = f"{action.type}({(action.locator or action.value or '')[:40]})"
+        """AOP wrapper: fires aspect hooks around _do_action."""
+        self._aspects.fire_before_action(action, None, res)
         t0 = time.time()
         try:
             self._do_action(action, res, context=context)
         except Exception:
             dt = time.time() - t0
-            logger.warn(f"  [INSTRUMENT] {label} FAILED {dt:.2f}s")
+            if self._instrument:
+                label = f"{action.type}({(action.locator or action.value or '')[:40]})"
+                logger.warn(f"  [INSTRUMENT] {label} FAILED {dt:.2f}s")
             raise
         dt = time.time() - t0
-        if dt > 0.5:
-            logger.warn(f"  [INSTRUMENT] {label} = {dt:.2f}s")
-        # Slow-motion: pause after each action for debugging/demos
-        if self._slow_ms:
-            time.sleep(self._slow_ms / 1000.0)
-            if self._slow_screenshot:
-                try:
-                    bl = self._bl()
-                    rule_name = getattr(res, 'name', 'unknown')
-                    fname = f"slow_{rule_name}_{label}.png"
-                    bl.take_screenshot(filename=fname)
-                except Exception:
-                    pass
+        self._aspects.fire_after_action(action, None, res, dt)
 
     def _do_action(self, action: Action, res: ResourceContext,
                    context: dict[str, Any] | None = None) -> None:
@@ -2673,9 +2973,10 @@ class WiseRpaBDD:
         _falsy = ("0", "false", "no")
         headed = os.environ.get("WISE_RPA_HEADED", "").lower() in _truthy
         stealth = os.environ.get("WISE_RPA_STEALTH", "").lower() not in _falsy
+        resume_mode = os.environ.get("WISE_RPA_RESUME_MODE", "auto")
         engine = ExecutionEngine(self._deployment, headed=headed,
                                  stealth=stealth)
-        engine.run()
+        engine.run(resume_mode=resume_mode)
 
     # -- Artifact registration --
 
@@ -3643,13 +3944,33 @@ def _cli_generate_core(requirement: str, output: Path, model: str = "",
 # ---------------------------------------------------------------------------
 
 def _cli_run(args: list[str]) -> int:
-    """Run a .robot suite live (full browser execution)."""
+    """Run a .robot suite live (full browser execution).
+
+    Flags consumed before passing to robot:
+      --fresh   Ignore existing checkpoint, start clean
+      --resume  Require checkpoint, error if none exists
+      (default) Auto-resume if checkpoint exists
+    """
     import subprocess
+
+    resume_mode = "auto"
+    filtered_args = []
+    for arg in args:
+        if arg == "--fresh":
+            resume_mode = "fresh"
+        elif arg == "--resume":
+            resume_mode = "require"
+        else:
+            filtered_args.append(arg)
+
+    env = os.environ.copy()
+    env["WISE_RPA_RESUME_MODE"] = resume_mode
+
     script_dir = Path(__file__).resolve().parent
     cmd = ["robot", "--pythonpath", str(script_dir)]
-    if args:
-        cmd.extend(args)
-    return subprocess.run(cmd).returncode
+    if filtered_args:
+        cmd.extend(filtered_args)
+    return subprocess.run(cmd, env=env).returncode
 
 
 def _cli_dryrun(args: list[str]) -> int:
@@ -3737,7 +4058,8 @@ def main() -> int:
         print("Usage: WiseRpaBDD.py <command> [args...]")
         print()
         print("Commands:")
-        print("  run       <suite.robot> [robot-args...]   Run suite live")
+        print("  run       <suite.robot> [--fresh|--resume] [robot-args...]")
+        print("            Run suite live (auto-resumes from checkpoint if exists)")
         print("  dryrun    <suite.robot> [robot-args...]   Verify keyword resolution")
         print("  validate  <suite.robot> [...]             BDD format lint")
         print("  generate  <requirement|prompt.md> -o <output.robot> Agent-generate suite")
