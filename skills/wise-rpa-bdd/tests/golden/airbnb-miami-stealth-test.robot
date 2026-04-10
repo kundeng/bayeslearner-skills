@@ -61,7 +61,7 @@ Resource listing_search
     And I set resource globals
     ...    timeout_ms=30000
     ...    retries=2
-    ...    page_load_delay_ms=2000
+    ...    page_load_delay_ms=500
 
     # ── Action rule: expand the search bar if in compact mode ───────────────
     # Evidence: on some viewports, search bar renders compact with "Anywhere"

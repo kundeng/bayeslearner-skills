@@ -571,6 +571,9 @@ class ExecutionEngine:
         self.headed = headed
         self.stealth = stealth
         self._adapter: Any = None
+        self._instrument = os.environ.get(
+            "WISE_RPA_INSTRUMENT", ""
+        ).lower() in ("1", "true", "yes")
 
     def _bl(self) -> Any:
         """Lazy-init the browser backend.
@@ -689,10 +692,7 @@ class ExecutionEngine:
                     logger.warn(f"  Navigation failed: {e}")
                     continue
 
-                self._dismiss_interrupts(bl)
-
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
+                self._wait_page_ready(bl, page_delay)
 
                 root_rules = self._build_rule_tree(res)
                 executed: set[str] = set()
@@ -884,10 +884,13 @@ class ExecutionEngine:
                 return []
             executed.add(rule.name)
 
+        t_rule = time.time() if self._instrument else 0
+
         ctx = dict(context or {})
         records: list[dict] = []
 
         # State check with retry
+        t0 = time.time() if self._instrument else 0
         state_ok = self._check_state(rule, current_url)
         if not state_ok and rule.retry_max > 0:
             for attempt in range(1, rule.retry_max + 1):
@@ -897,11 +900,18 @@ class ExecutionEngine:
                 state_ok = self._check_state(rule, current_url)
                 if state_ok:
                     break
+        if self._instrument:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {rule.name}: state_check={dt:.2f}s ok={state_ok}")
         if not state_ok:
             logger.warn(f"  State check FAILED for rule '{rule.name}' — skipping")
             return records
 
+        t0 = time.time() if self._instrument else 0
         self._execute_actions(rule, res, context=ctx)
+        if self._instrument:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {rule.name}: actions={dt:.2f}s ({len(rule.actions)} actions)")
 
         # Refresh current_url after actions (click may have navigated)
         try:
@@ -909,6 +919,7 @@ class ExecutionEngine:
         except Exception:
             pass
 
+        t0 = time.time() if self._instrument else 0
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url,
                                              executed=executed, context=ctx)
@@ -932,9 +943,18 @@ class ExecutionEngine:
                 if child_records:
                     record["_children"] = child_records
                 records.append(record)
+        if self._instrument:
+            dt = time.time() - t0
+            phase = "expansion" if rule.expansion else "extract+children"
+            logger.warn(f"  [INSTRUMENT] {rule.name}: {phase}={dt:.2f}s records={len(records)}")
 
         for target in rule.emit_targets:
             self._emit_records(target, rule, records, current_url)
+
+        if self._instrument:
+            dt_total = time.time() - t_rule
+            if dt_total > 0.5:
+                logger.warn(f"  [INSTRUMENT] {rule.name}: TOTAL={dt_total:.2f}s")
 
         return records
 
@@ -964,13 +984,10 @@ class ExecutionEngine:
                     resolved = self._resolve_fallback_selector(check.pattern, None)
                     count = bl.get_element_count(resolved)
                     if count == 0:
-                        # Adaptive wait: page may still be loading (SPA hydration)
-                        for _retry in range(5):
-                            time.sleep(2)
-                            self._dismiss_interrupts(bl)
-                            count = bl.get_element_count(resolved)
-                            if count > 0:
-                                break
+                        # Use Playwright's native wait_for_selector instead of polling
+                        self._dismiss_interrupts(bl)
+                        bl.wait_for_elements_state(resolved, "attached", "10s")
+                        count = bl.get_element_count(resolved)
                     if count == 0:
                         return False
                 except Exception:
@@ -981,9 +998,9 @@ class ExecutionEngine:
 
     def _execute_actions(self, rule: RuleNode, res: ResourceContext,
                          context: dict[str, Any] | None = None) -> None:
+        # Dismiss interrupts once before the rule's actions (not per-action)
+        self._dismiss_interrupts(self._bl())
         for action in rule.actions:
-            # Dismiss any interrupts (popups/overlays) before each action
-            self._dismiss_interrupts(self._bl())
             try:
                 self._do_action(action, res, context=context)
             except Exception as e:
@@ -1014,9 +1031,7 @@ class ExecutionEngine:
             time.sleep(ms / 1000.0)
         elif action.type == "open":
             bl.go_to(action.value or "")
-            page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-            if page_delay:
-                time.sleep(page_delay / 1000.0)
+            self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
         elif action.type == "open_bound":
             # Resolve field value from context or artifact store
             field_name = action.value or ""
@@ -1034,9 +1049,7 @@ class ExecutionEngine:
                         url = str(records[-1].get("data", {}).get(fld, ""))
             if url:
                 bl.go_to(url)
-                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
+                self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
         elif action.type == "hover":
             bl.hover(action.locator)
         elif action.type == "focus":
@@ -1078,7 +1091,7 @@ class ExecutionEngine:
                 bl.evaluate_javascript(None, script)
             except Exception:
                 pass  # navigation may destroy context
-            self._settle_after_navigation(bl)
+            self._wait_page_ready(bl)
         elif action.type == "set_stepper":
             # Click a stepper button N times
             count = int(action.value or 0)
@@ -1123,7 +1136,7 @@ class ExecutionEngine:
                 navigated = any(h in script.lower() for h in nav_hints)
             if navigated:
                 logger.info("  Waiting for page load after navigation...")
-                self._settle_after_navigation(bl)
+                self._wait_page_ready(bl)
         elif action.type == "call_keyword":
             # Invoke an arbitrary RF keyword by name (browser is live)
             kw_name = action.value or ""
@@ -1208,10 +1221,11 @@ class ExecutionEngine:
         exclude_if = exp.options.get("exclude_if")
 
         try:
-            # Wait for at least one element — get_element_count is a query,
-            # not an action, so Playwright doesn't auto-wait for it.
+            # Wait for at least one element to appear (Playwright native wait)
             try:
-                bl.wait_for_elements_state(selector, "attached", timeout="10s")
+                timeout_ms = int(res.globals_.get("timeout_ms", "30000"))
+                bl.wait_for_elements_state(selector, "attached",
+                                           timeout=f"{timeout_ms}ms")
             except Exception:
                 pass  # May not appear — count will be 0
             count = bl.get_element_count(selector)
@@ -1232,6 +1246,22 @@ class ExecutionEngine:
                 return bl.get_element_count(child_sel) > 0
             except Exception:
                 return False
+
+        # Fast path: batch extraction in a single JS call when possible
+        # (leaf rule with field specs, no children, no exclude_if, no table)
+        can_batch = (
+            rule.field_specs
+            and not rule.children
+            and not exclude_if
+            and not rule.table_spec
+            and not rule.ai_extraction
+        )
+        if can_batch:
+            records = self._batch_extract_from_elements(
+                rule, selector, count, current_url
+            )
+            logger.info(f"    Batch extracted {len(records)} records")
+            return records
 
         if use_bfs:
             # BFS: extract ALL elements first, then walk children per element
@@ -1315,11 +1345,9 @@ class ExecutionEngine:
                     logger.info("    No next button found, stopping pagination")
                     break
                 bl.click(next_selector)
-                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
-                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
-                time.sleep(0.5)
+                page_delay = int(res.globals_.get("page_load_delay_ms", 500))
+                time.sleep(page_delay / 1000.0)
+                self._dismiss_interrupts(bl)
             except Exception as e:
                 logger.info(f"    Pagination ended: {e}")
                 break
@@ -1365,11 +1393,7 @@ class ExecutionEngine:
                     text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
                         bl.click(link_sel)
-                        bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
-                        page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                        if page_delay:
-                            time.sleep(page_delay / 1000.0)
-                        time.sleep(0.5)
+                        self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
                         clicked = True
                         break
                 if not clicked:
@@ -1532,6 +1556,107 @@ class ExecutionEngine:
             "data": data,
             "extracted_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _batch_extract_from_elements(self, rule: RuleNode, scope_selector: str,
+                                    count: int, current_url: str) -> list[dict]:
+        """Extract all fields from all scope elements in ONE browser call.
+
+        Builds a JS script that iterates over scope elements and extracts
+        each field, returning the full data array. This replaces N×M
+        individual browser round-trips with a single evaluate call.
+        """
+        if not rule.field_specs:
+            return []
+
+        bl = self._bl()
+
+        # Build JS extraction logic for each field
+        field_extractors = []
+        for fs in rule.field_specs:
+            loc = fs.locator
+            if loc == ".":
+                loc_js = "el"
+            else:
+                # Handle fallback selectors — pick first that resolves
+                candidates = [c.strip() for c in loc.split(" | ")] if " | " in loc else [loc]
+                loc_parts = " || ".join(
+                    f"el.querySelector({json.dumps(c)})" for c in candidates
+                )
+                loc_js = f"({loc_parts})"
+
+            if fs.extractor == "text":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? t.textContent.trim() : ''; }})()"
+            elif fs.extractor == "attr":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? (t.getAttribute({json.dumps(fs.attr or '')}) || '') : ''; }})()"
+            elif fs.extractor == "link":
+                extract_js = (
+                    f"(() => {{ const t = {loc_js}; if (!t) return ''; "
+                    f"const h = t.getAttribute('href') || ''; "
+                    f"if (!h || h.startsWith('http') || h.startsWith('javascript:')) return h; "
+                    f"try {{ return new URL(h, window.location.href).href; }} catch {{ return h; }} }})()"
+                )
+            elif fs.extractor == "html":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? t.innerHTML : ''; }})()"
+            elif fs.extractor == "image":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? (t.getAttribute('src') || '') : ''; }})()"
+            elif fs.extractor == "number":
+                extract_js = (
+                    f"(() => {{ const t = {loc_js}; if (!t) return ''; "
+                    f"const m = t.textContent.match(/[\\d.,]+/); return m ? m[0] : ''; }})()"
+                )
+            elif fs.extractor == "grouped":
+                if loc == ".":
+                    extract_js = "[el.textContent.trim()]"
+                else:
+                    first_candidate = candidates[0] if " | " in fs.locator else fs.locator
+                    extract_js = (
+                        f"Array.from(el.querySelectorAll({json.dumps(first_candidate)}))"
+                        f".map(e => e.textContent.trim()).filter(Boolean)"
+                    )
+            else:
+                extract_js = "''"
+
+            field_extractors.append((fs.name, extract_js))
+
+        # Build the batch script
+        field_lines = ",\n".join(
+            f"        {json.dumps(name)}: {expr}" for name, expr in field_extractors
+        )
+        script = (
+            f"() => {{\n"
+            f"  const els = document.querySelectorAll({json.dumps(scope_selector)});\n"
+            f"  const results = [];\n"
+            f"  const limit = {count};\n"
+            f"  for (let i = 0; i < Math.min(els.length, limit); i++) {{\n"
+            f"    const el = els[i];\n"
+            f"    results.push({{\n{field_lines}\n    }});\n"
+            f"  }}\n"
+            f"  return results;\n"
+            f"}}"
+        )
+
+        try:
+            raw_data = bl.evaluate_javascript(None, script)
+        except Exception as e:
+            logger.warn(f"  Batch extraction failed: {e}")
+            return []
+
+        if not raw_data or not isinstance(raw_data, list):
+            return []
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        records = []
+        for item in raw_data:
+            if not item:
+                continue
+            data = self._invoke_hooks("post_extract", item)
+            records.append({
+                "node": rule.name,
+                "url": current_url,
+                "data": data,
+                "extracted_at": now_iso,
+            })
+        return records
 
     def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
@@ -1950,38 +2075,19 @@ class ExecutionEngine:
             logger.warn(f"  Could not find day button for {date_str}")
         time.sleep(0.3)
 
-    def _settle_after_navigation(self, bl: Any,
-                                max_wait: float = 15.0) -> None:
-        """Wait for a page to settle after navigation.
+    def _wait_page_ready(self, bl: Any, page_delay_ms: int = 0) -> None:
+        """Wait for page to be ready after navigation.
 
-        Waits for load state, then polls for real DOM content (not just
-        skeleton loaders). Dismisses interrupts between polls.
-        Breaks early once content is detected.
+        Uses domcontentloaded (fast — DOM structure ready) then dismisses
+        interrupts.  Content readiness is handled downstream by each
+        rule's state check or expansion wait_for_elements_state.
         """
         try:
-            bl.wait_for_load_state(self._PageLoadStates.load)
+            bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
         except Exception:
-            pass
-
-        poll_interval = 1.5
-        elapsed = 0.0
-        while elapsed < max_wait:
-            self._dismiss_interrupts(bl)
-            # Check if the page has real content (not just skeletons)
-            try:
-                has_content = bl.evaluate_javascript(
-                    None,
-                    "() => document.querySelectorAll("
-                    "'a[href], [data-testid], table, article, "
-                    ".card, .listing, .result, .item').length > 3"
-                )
-                if has_content:
-                    logger.info("  Page content detected, settle complete")
-                    break
-            except Exception:
-                pass
-            time.sleep(poll_interval)
-            elapsed += poll_interval
+            if page_delay_ms:
+                time.sleep(page_delay_ms / 1000.0)
+        self._dismiss_interrupts(bl)
 
     def _dismiss_interrupts(self, bl: Any) -> None:
         """Auto-dismiss overlay selectors (cookie banners, modals)."""
