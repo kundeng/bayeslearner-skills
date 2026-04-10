@@ -2078,23 +2078,39 @@ class ExecutionEngine:
         month_year = d.strftime("%B %Y")  # e.g. "November 2026"
         day_str = str(day)  # no leading zero
 
+        # Wait for the calendar to be mounted (forward button visible)
+        try:
+            bl.wait_for_elements_state(forward_sel, "attached", "5s")
+        except Exception:
+            logger.warn(f"  Calendar forward button not found: {forward_sel}")
+            return
+
         # Navigate forward until target month heading is visible
-        for _ in range(max_clicks):
+        for click_i in range(max_clicks):
             # Check if target month heading is visible
             check_script = (
                 f"(() => {{ "
+                f"const headings = []; "
                 f"for (const h of document.querySelectorAll({json.dumps(heading_sel)})) "
-                f"{{ if (h.textContent.trim() === {json.dumps(month_year)}) return true; }} "
-                f"return false; }})()"
+                f"{{ const t = h.textContent.trim(); headings.push(t); "
+                f"if (t === {json.dumps(month_year)}) return {{found: true, headings}}; }} "
+                f"return {{found: false, headings}}; }})()"
             )
-            found = bl.evaluate_javascript(None, check_script)
-            if found:
+            result = bl.evaluate_javascript(None, check_script)
+            if result and result.get("found"):
                 break
-            try:
-                bl.click(forward_sel)
-            except Exception:
+            if self._instrument and click_i == 0:
+                logger.warn(f"  [INSTRUMENT] select_date: looking for {month_year}, visible: {result}")
+            # Use JS click for the forward button to avoid Playwright's
+            # actionability checks which may interfere with calendar panels
+            fwd_script = (
+                f"(() => {{ const btn = document.querySelector({json.dumps(forward_sel)}); "
+                f"if (btn) {{ btn.click(); return true; }} return false; }})()"
+            )
+            clicked_fwd = bl.evaluate_javascript(None, fwd_script)
+            if not clicked_fwd:
                 break
-            time.sleep(0.4)
+            time.sleep(0.3)
 
         # Click the day button
         # ARIA pattern: aria-label starts with "DAY, " and contains "MONTH YEAR"
