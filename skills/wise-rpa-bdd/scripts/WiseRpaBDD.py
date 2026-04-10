@@ -964,6 +964,14 @@ class ExecutionEngine:
                     resolved = self._resolve_fallback_selector(check.pattern, None)
                     count = bl.get_element_count(resolved)
                     if count == 0:
+                        # Adaptive wait: page may still be loading (SPA hydration)
+                        for _retry in range(5):
+                            time.sleep(2)
+                            self._dismiss_interrupts(bl)
+                            count = bl.get_element_count(resolved)
+                            if count > 0:
+                                break
+                    if count == 0:
                         return False
                 except Exception:
                     return False

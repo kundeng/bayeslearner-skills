@@ -112,9 +112,14 @@ Resource listing_search
     # ── Action rule: apply filters via URL params ─────────────────────────────
     # Evidence: price_max, min_bedrooms, superhost work as URL query params.
     # Adding superhost=true narrowed Miami results from 1000+ to 533.
-    I define rule "apply_filters"
+    # ── State gate: wait for initial search results before applying filters ──
+    I define rule "search_loaded"
         And I declare parents "submit_search"
-        When I wait 5000 ms
+        Given url contains "airbnb.com/s/"
+        And selector "[data-testid='card-container']" exists
+
+    I define rule "apply_filters"
+        And I declare parents "search_loaded"
         When I add url params "price_max=${PRICE_MAX}&min_bedrooms=${MIN_BEDROOMS}&superhost=${SUPERHOST}"
 
     # ── State gate: confirm search results loaded ─────────────────────────────
