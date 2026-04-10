@@ -148,3 +148,19 @@ Current order is mostly logical. Changes needed:
 - **Statement**: When WISE_RPA_SLOW is unset, the slow-motion check adds <1ms per action.
 - **Validates**: Requirement 4.3
 - **Test approach**: Benchmark quotes-test with and without slow mode env var.
+
+## Future: Recovery Rules (from escape-mdp-spec, not yet implemented)
+
+User-defined escape transitions when state checks fail:
+
+```robot
+And I set recovery for "root"
+...    when=state_check_fail
+...    action=dismiss_all
+...    action=wait_3000
+...    retry=3
+```
+
+The engine would attach recovery behaviors to rules and invoke them
+automatically on failure before giving up. Deferred — current retry
+mechanism (`retry_max`, `retry_delay_ms`) covers simple cases.

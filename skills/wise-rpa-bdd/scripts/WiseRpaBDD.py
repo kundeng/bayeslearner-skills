@@ -3482,18 +3482,16 @@ class WiseRpaBDDTest:
 
 
 def _load_orient_cache() -> str:
-    """Load pre-baked orient material from skill docs.
+    """Load pre-baked orient material from SKILL.md.
 
-    Reads keyword-reference.md and format.md once at generate time so the
-    agent doesn't need to spend LLM turns reading files.
+    Reads the all-in-one SKILL.md once at generate time so the agent
+    doesn't need to spend LLM turns reading files.
     """
     skill_dir = Path(__file__).resolve().parent.parent
-    parts = []
-    for name in ("references/keyword-reference.md", "references/format.md"):
-        p = skill_dir / name
-        if p.exists():
-            parts.append(f"# {name}\n{p.read_text()}")
-    return "\n\n".join(parts)
+    p = skill_dir / "SKILL.md"
+    if p.exists():
+        return p.read_text()
+    return ""
 
 
 def _build_generate_prompt(requirement: str, output: Path,
@@ -3529,8 +3527,8 @@ def _build_generate_prompt(requirement: str, output: Path,
         )
     else:
         orient_block = (
-            "1. /rrpa-orient — read references/keyword-reference.md "
-            "and references/format.md to understand available WiseRpaBDD keywords.\n"
+            "1. /rrpa-orient — read SKILL.md to understand available "
+            "WiseRpaBDD keywords, patterns, and validation.\n"
         )
 
     return (
