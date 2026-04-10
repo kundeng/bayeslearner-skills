@@ -74,6 +74,9 @@ class CombinationAxis:
     action: str  # type, select, click
     control: str  # CSS selector
     values: list[str] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)  # patterns to drop from auto-discovered values
+    skip: int = 0  # skip first N values (e.g. placeholder "Select...")
+    emit: str = ""  # artifact name to emit discovered values to
 
 
 @dataclass
@@ -801,6 +804,8 @@ class ExecutionEngine:
 
     def _check_state(self, rule: RuleNode, current_url: str) -> bool:
         bl = self._bl()
+        # Dismiss any interrupts before checking state
+        self._dismiss_interrupts(bl)
         # Use actual browser URL for state checks
         try:
             actual_url = bl.get_url()
@@ -820,7 +825,8 @@ class ExecutionEngine:
                     return False
             elif check.type == "selector_exists":
                 try:
-                    count = bl.get_element_count(check.pattern)
+                    resolved = self._resolve_fallback_selector(check.pattern, None)
+                    count = bl.get_element_count(resolved)
                     if count == 0:
                         return False
                 except Exception:
@@ -832,6 +838,8 @@ class ExecutionEngine:
     def _execute_actions(self, rule: RuleNode, res: ResourceContext,
                          context: dict[str, Any] | None = None) -> None:
         for action in rule.actions:
+            # Dismiss any interrupts (popups/overlays) before each action
+            self._dismiss_interrupts(self._bl())
             try:
                 self._do_action(action, res, context=context)
             except Exception as e:
@@ -906,6 +914,40 @@ class ExecutionEngine:
                 method(*action.args)
             else:
                 logger.warn(f"  Browser step: method '{method_name}' not found")
+        elif action.type == "evaluate_js":
+            # Run JavaScript on the live page via the adapter
+            script = action.value or ""
+            logger.info(f"  Evaluate JS: {script[:80]}{'...' if len(script) > 80 else ''}")
+            url_before = bl.get_url()
+            try:
+                bl.evaluate_javascript(None, script)
+            except Exception as e:
+                err = str(e).lower()
+                if "navigation" in err or "context" in err or "destroyed" in err or "detached" in err:
+                    logger.info("  Evaluate JS triggered navigation")
+                else:
+                    raise
+            # Detect if JS triggered a page navigation
+            time.sleep(1)
+            try:
+                url_after = bl.get_url()
+            except Exception:
+                url_after = ""
+            navigated = url_after != url_before
+            if not navigated:
+                # Also heuristic-detect navigation intent from script content
+                nav_hints = ("location", "navigate", "href", "assign", "replace")
+                navigated = any(h in script.lower() for h in nav_hints)
+            if navigated:
+                logger.info("  Waiting for page load after navigation...")
+                try:
+                    bl.wait_for_load_state(self._PageLoadStates.load)
+                except Exception:
+                    pass
+                # Settle: wait for SPA hydration, dismiss popups between waits
+                for _ in range(3):
+                    time.sleep(3)
+                    self._dismiss_interrupts(bl)
         elif action.type == "call_keyword":
             # Invoke an arbitrary RF keyword by name (browser is live)
             from robot.libraries.BuiltIn import BuiltIn
@@ -943,6 +985,9 @@ class ExecutionEngine:
         use_bfs = (exp.order == "bfs")
         records = []
 
+        # exclude_if: skip elements where a child selector matches (e.g. sponsored items)
+        exclude_if = exp.options.get("exclude_if")
+
         try:
             # Wait for at least one element — get_element_count is a query,
             # not an action, so Playwright doesn't auto-wait for it.
@@ -959,11 +1004,24 @@ class ExecutionEngine:
         if limit and count > limit:
             count = limit
 
+        def _should_exclude(elem_sel: str) -> bool:
+            """Check if element should be excluded based on exclude_if selector."""
+            if not exclude_if:
+                return False
+            try:
+                child_sel = f"{elem_sel} >> {exclude_if}"
+                return bl.get_element_count(child_sel) > 0
+            except Exception:
+                return False
+
         if use_bfs:
             # BFS: extract ALL elements first, then walk children per element
             extracted: list[tuple[str, dict | None, dict]] = []
             for i in range(count):
                 elem_selector = f"{selector} >> nth={i}"
+                if _should_exclude(elem_selector):
+                    logger.info(f"  Excluded element {i} by exclude_if='{exclude_if}'")
+                    continue
                 record = self._extract_from_element(rule, elem_selector, current_url)
                 elem_ctx = dict(context or {})
                 if record and record.get("data"):
@@ -986,6 +1044,9 @@ class ExecutionEngine:
             # DFS: process each element fully before next
             for i in range(count):
                 elem_selector = f"{selector} >> nth={i}"
+                if _should_exclude(elem_selector):
+                    logger.info(f"  Excluded element {i} by exclude_if='{exclude_if}'")
+                    continue
                 record = self._extract_from_element(rule, elem_selector, current_url)
 
                 elem_ctx = dict(context or {})
@@ -1130,12 +1191,46 @@ class ExecutionEngine:
                             text = bl.get_text(f"{axis.control} >> nth={i}").strip()
                             if text:
                                 vals.append(text)
-                    axis_values.append(vals)
                 except Exception as e:
                     logger.warn(f"  Auto-discover failed for {axis.control}: {e}")
-                    axis_values.append([])
+                    vals = []
             else:
-                axis_values.append(axis.values)
+                vals = list(axis.values)
+
+            # Apply skip (drop first N values, e.g. placeholder "Select...")
+            if axis.skip > 0:
+                vals = vals[axis.skip:]
+
+            # Apply exclude (drop values matching any exclude pattern)
+            if axis.exclude:
+                vals = [v for v in vals if v not in axis.exclude]
+
+            # Auto-exclude empty strings for select dropdowns
+            if axis.action == "select":
+                vals = [v for v in vals if v]
+
+            logger.info(f"  Axis {axis.control}: {len(vals)} values → {vals}")
+            axis_values.append(vals)
+
+            # Emit discovered values to artifact if configured
+            if axis.emit and axis.emit in self.ctx.artifact_store:
+                for v in vals:
+                    self.ctx.artifact_store[axis.emit].append({
+                        "node": rule.name,
+                        "url": current_url,
+                        "data": {"control": axis.control, "value": v},
+                        "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    })
+            elif axis.emit:
+                # Auto-initialize if artifact was registered but store not yet created
+                self.ctx.artifact_store[axis.emit] = []
+                for v in vals:
+                    self.ctx.artifact_store[axis.emit].append({
+                        "node": rule.name,
+                        "url": current_url,
+                        "data": {"control": axis.control, "value": v},
+                        "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    })
 
         # Cartesian product
         import itertools
@@ -1953,7 +2048,7 @@ class WiseRpaBDD:
 
     # -- Rule management --
 
-    @keyword('And I begin rule "${rule}"')
+    @keyword('I define rule "${rule}"')
     def begin_rule(self, rule: str) -> None:
         self._record("begin_rule", rule)
         if not self._current_resource:
@@ -2162,6 +2257,20 @@ class WiseRpaBDD:
                 Action(type="browser_step", value=method, args=args)
             )
 
+    @keyword('And I evaluate js "${script}"')
+    def evaluate_js(self, script: str) -> None:
+        """Defer a JavaScript expression to run on the live page.
+
+        Works with both the RF-Browser adapter and the stealth adapter.
+        Supports async scripts (async () => { ... }).
+        Example: ``And I evaluate js "document.querySelector('#btn').click()"``
+        """
+        self._record("evaluate_js", script)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="evaluate_js", value=script, args=())
+            )
+
     @keyword('And I call keyword "${name}"')
     def call_keyword(self, name: str, *args: str) -> None:
         """Defer an arbitrary Robot Framework keyword call into the current rule.
@@ -2228,27 +2337,28 @@ class WiseRpaBDD:
         self._record("expand_over_combinations", *axes)
         if not self._current_rule:
             return
-        # Parse axis specs: action=type control="#sel" values=a|b|c
+        # Parse axis specs: action=type control="#sel" values=a|b|c exclude=X|Y skip=1
         parsed_axes: list[CombinationAxis] = []
         current: dict[str, str] = {}
+        def _flush_axis(cur: dict[str, str]) -> CombinationAxis:
+            return CombinationAxis(
+                action=cur["action"],
+                control=_strip_quotes(cur.get("control", "")),
+                values=cur.get("values", "").split("|"),
+                exclude=cur.get("exclude", "").split("|") if cur.get("exclude") else [],
+                skip=int(cur.get("skip", 0)),
+                emit=cur.get("emit", ""),
+            )
         for spec in axes:
             if "=" not in spec:
                 continue
             k, v = spec.split("=", 1)
             if k == "action" and current.get("action"):
-                parsed_axes.append(CombinationAxis(
-                    action=current["action"],
-                    control=_strip_quotes(current.get("control", "")),
-                    values=current.get("values", "").split("|"),
-                ))
+                parsed_axes.append(_flush_axis(current))
                 current = {}
             current[k] = v
         if current.get("action"):
-            parsed_axes.append(CombinationAxis(
-                action=current["action"],
-                control=_strip_quotes(current.get("control", "")),
-                values=current.get("values", "").split("|"),
-            ))
+            parsed_axes.append(_flush_axis(current))
         self._current_rule.expansion = Expansion(
             over="combinations", axes=parsed_axes,
         )
@@ -2717,7 +2827,9 @@ def _cli_generate(args: list[str]) -> int:
     """Generate a .robot suite via an AI agent backend."""
     import argparse
     parser = argparse.ArgumentParser(prog="WiseRpaBDD.py generate")
-    parser.add_argument("requirement", help="Natural language requirement")
+    parser.add_argument("requirement",
+                        help="Natural language requirement string, or path "
+                             "to a .txt/.md prompt file")
     parser.add_argument("-o", "--output", required=True, help="Output .robot path")
     parser.add_argument("--backend", default="claude",
                         choices=["claude", "codex", "aichat"],
@@ -2729,11 +2841,18 @@ def _cli_generate(args: list[str]) -> int:
                         help="Pre-bake keyword docs into prompt (skip orient reads)")
     parsed = parser.parse_args(args)
 
+    # Accept requirement as file path or inline string
+    req = parsed.requirement
+    req_path = Path(req)
+    if req_path.is_file():
+        req = req_path.read_text().strip()
+        print(f"Read requirement from: {req_path}")
+
     out = Path(parsed.output)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        _cli_generate_core(parsed.requirement, out,
+        _cli_generate_core(req, out,
                            model=parsed.model, max_turns=parsed.max_turns,
                            backend=parsed.backend, fast=parsed.fast)
     except ImportError as e:
@@ -2757,7 +2876,7 @@ def main() -> int:
         print("  run       <suite.robot> [robot-args...]   Run suite live")
         print("  dryrun    <suite.robot> [robot-args...]   Verify keyword resolution")
         print("  validate  <suite.robot> [...]             BDD format lint")
-        print("  generate  <requirement> -o <output.robot> Agent-generate suite")
+        print("  generate  <requirement|prompt.md> -o <output.robot> Agent-generate suite")
         return 1
 
     cmd = sys.argv[1]
