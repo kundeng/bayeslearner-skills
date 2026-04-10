@@ -959,6 +959,8 @@ class ExecutionEngine:
         return records
 
     def _check_state(self, rule: RuleNode, current_url: str) -> bool:
+        if not rule.state_checks:
+            return True
         bl = self._bl()
         # Dismiss any interrupts before checking state
         self._dismiss_interrupts(bl)
@@ -998,7 +1000,9 @@ class ExecutionEngine:
 
     def _execute_actions(self, rule: RuleNode, res: ResourceContext,
                          context: dict[str, Any] | None = None) -> None:
-        # Dismiss interrupts once before the rule's actions (not per-action)
+        if not rule.actions:
+            return
+        # Dismiss interrupts once before the rule's actions
         self._dismiss_interrupts(self._bl())
         for action in rule.actions:
             try:

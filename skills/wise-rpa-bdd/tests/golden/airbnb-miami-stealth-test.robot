@@ -77,7 +77,6 @@ Resource listing_search
         When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
         When I wait 2000 ms
         When I click locator "[data-testid='option-0']"
-        When I wait 1000 ms
 
     # ── Action rule: navigate calendar and select dates ───────────────────────
     # Evidence: calendar auto-opens after city selection.
