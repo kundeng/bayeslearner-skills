@@ -419,6 +419,140 @@ class _StealthAdapter:
         return self._page.evaluate(script)
 
 
+class _StealthBrowserBridge:
+    """Dynamic RF library that delegates Browser-compatible keywords to the
+    stealth adapter.  Registered at runtime so that ``call_keyword`` blocks
+    containing raw Browser calls (Click, Fill Text, …) resolve against the
+    stealth adapter's live page instead of the RF-Browser library (which has
+    no open page in stealth mode).
+
+    Only the most commonly used Browser keywords are bridged.  Add more as
+    needed.
+    """
+
+    ROBOT_LIBRARY_SCOPE = "GLOBAL"
+
+    def __init__(self, adapter: _StealthAdapter) -> None:
+        self._a = adapter
+
+    # -- Navigation --
+    def go_to(self, url: str, *_a: Any, **_kw: Any) -> None:
+        self._a.go_to(url)
+
+    def get_url(self, *_a: Any, **_kw: Any) -> str:
+        return self._a.get_url()
+
+    # -- Interaction --
+    def click(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.click(selector)
+
+    def fill_text(self, selector: str, text: str, *_a: Any, **_kw: Any) -> None:
+        self._a.fill_text(selector, text)
+
+    def type_text(self, selector: str, text: str, *_a: Any, **_kw: Any) -> None:
+        self._a.fill_text(selector, text)
+
+    def hover(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.hover(selector)
+
+    def focus(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.focus(selector)
+
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None:
+        self._a.press_keys(selector, *keys)
+
+    def check_checkbox(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.click(selector)
+
+    def select_options_by(self, selector: str, attr: str, *values: str,
+                          **_kw: Any) -> None:
+        self._a.select_options_by(selector, attr, values[0] if values else "")
+
+    # -- Queries --
+    def get_text(self, selector: str, *_a: Any, **_kw: Any) -> str:
+        return self._a.get_text(selector)
+
+    def get_attribute(self, selector: str, attr: str, *_a: Any,
+                      **_kw: Any) -> str | None:
+        return self._a.get_attribute(selector, attr)
+
+    def get_element_count(self, selector: str, *_a: Any, **_kw: Any) -> int:
+        return self._a.get_element_count(selector)
+
+    # -- Wait --
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: str = "10s", **_kw: Any) -> None:
+        self._a.wait_for_elements_state(selector, state, timeout)
+
+    # -- Screenshot --
+    def take_screenshot(self, *_a: Any, filename: str = "screenshot.png",
+                        **_kw: Any) -> None:
+        self._a.take_screenshot(filename=filename)
+
+    # -- JS --
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            **_kw: Any) -> Any:
+        return self._a.evaluate_javascript(selector, *function, **_kw)
+
+    def get_keyword_names(self) -> list[str]:
+        """Dynamic library interface — return all bridged keywords."""
+        return [
+            "Go To", "Get Url",
+            "Click", "Fill Text", "Type Text", "Hover", "Focus",
+            "Press Keys", "Check Checkbox", "Select Options By",
+            "Get Text", "Get Attribute", "Get Element Count",
+            "Wait For Elements State",
+            "Take Screenshot", "Evaluate JavaScript",
+        ]
+
+    def run_keyword(self, name: str, args: list, kwargs: dict | None = None) -> Any:
+        """Dynamic library interface — dispatch keyword by name."""
+        method_map = {
+            "Go To": self.go_to,
+            "Get Url": self.get_url,
+            "Click": self.click,
+            "Fill Text": self.fill_text,
+            "Type Text": self.type_text,
+            "Hover": self.hover,
+            "Focus": self.focus,
+            "Press Keys": self.press_keys,
+            "Check Checkbox": self.check_checkbox,
+            "Select Options By": self.select_options_by,
+            "Get Text": self.get_text,
+            "Get Attribute": self.get_attribute,
+            "Get Element Count": self.get_element_count,
+            "Wait For Elements State": self.wait_for_elements_state,
+            "Take Screenshot": self.take_screenshot,
+            "Evaluate JavaScript": self.evaluate_javascript,
+        }
+        method = method_map.get(name)
+        if method:
+            return method(*args, **(kwargs or {}))
+        raise RuntimeError(f"StealthBrowserBridge: keyword '{name}' not bridged")
+
+    def get_keyword_arguments(self, name: str) -> list[str]:
+        """Return argument spec for each keyword (required for RF dynamic API)."""
+        specs: dict[str, list[str]] = {
+            "Go To": ["url", "*args", "**kwargs"],
+            "Get Url": [],
+            "Click": ["selector", "*args", "**kwargs"],
+            "Fill Text": ["selector", "text", "*args", "**kwargs"],
+            "Type Text": ["selector", "text", "*args", "**kwargs"],
+            "Hover": ["selector", "*args", "**kwargs"],
+            "Focus": ["selector", "*args", "**kwargs"],
+            "Press Keys": ["selector", "*keys"],
+            "Check Checkbox": ["selector", "*args", "**kwargs"],
+            "Select Options By": ["selector", "attr", "*values", "**kwargs"],
+            "Get Text": ["selector", "*args", "**kwargs"],
+            "Get Attribute": ["selector", "attr", "*args", "**kwargs"],
+            "Get Element Count": ["selector", "*args", "**kwargs"],
+            "Wait For Elements State": ["selector", "state=attached", "timeout=10s", "**kwargs"],
+            "Take Screenshot": ["*args", "filename=screenshot.png", "**kwargs"],
+            "Evaluate JavaScript": ["selector", "*function", "**kwargs"],
+        }
+        return specs.get(name, ["*args", "**kwargs"])
+
+
 # ---------------------------------------------------------------------------
 # Execution engine (uses robotframework-browser)
 # ---------------------------------------------------------------------------
@@ -448,7 +582,9 @@ class ExecutionEngine:
             if self.stealth:
                 self._adapter = _StealthAdapter()
                 self._PageLoadStates = self._adapter.load_states
+                self._stealth_bridge = _StealthBrowserBridge(self._adapter)
             else:
+                self._stealth_bridge = None
                 self._adapter = _get_rf_browser()
                 from Browser.utils.data_types import PageLoadStates
                 self._PageLoadStates = PageLoadStates
@@ -906,20 +1042,24 @@ class ExecutionEngine:
         elif action.type == "upload":
             bl.upload_file(action.locator, action.value or "")
         elif action.type == "click_text":
-            # Click first visible element matching text
+            # Click first visible element matching text (exact, then substring)
             text = action.value or ""
             script = (
-                f"() => {{ for (const el of document.querySelectorAll("
-                f"'button, a, [role=button], div[tabindex]')) {{ "
-                f"if (el.offsetParent !== null && "
-                f"el.textContent.trim() === {json.dumps(text)}) "
-                f"{{ el.click(); return true; }} }} return false; }}"
+                f"() => {{ const t = {json.dumps(text)}; "
+                f"const els = document.querySelectorAll("
+                f"'button, a, [role=button], div[tabindex]'); "
+                f"for (const el of els) {{ "
+                f"if (el.offsetParent !== null && el.textContent.trim() === t) "
+                f"{{ el.click(); return 'exact'; }} }} "
+                f"for (const el of els) {{ "
+                f"if (el.offsetParent !== null && el.textContent.includes(t)) "
+                f"{{ el.click(); return 'contains'; }} }} "
+                f"return false; }}"
             )
             bl.evaluate_javascript(None, script)
         elif action.type == "add_url_params":
             # Add query params to current URL and navigate
             params = action.value or ""
-            url_before = bl.get_url()
             script = (
                 f"() => {{ const u = new URL(window.location.href); "
                 f"new URLSearchParams('{params}').forEach((v, k) => "
@@ -930,14 +1070,7 @@ class ExecutionEngine:
                 bl.evaluate_javascript(None, script)
             except Exception:
                 pass  # navigation may destroy context
-            # Wait for page load + SPA settle with interrupt dismiss
-            try:
-                bl.wait_for_load_state(self._PageLoadStates.load)
-            except Exception:
-                pass
-            for _ in range(3):
-                time.sleep(3)
-                self._dismiss_interrupts(bl)
+            self._settle_after_navigation(bl)
         elif action.type == "set_stepper":
             # Click a stepper button N times
             count = int(action.value or 0)
@@ -945,6 +1078,8 @@ class ExecutionEngine:
             for _ in range(count):
                 bl.click(locator)
                 time.sleep(0.2)
+        elif action.type == "select_date":
+            self._do_select_date(bl, action)
         elif action.type == "browser_step":
             # Passthrough: call any method on the browser library
             method_name = action.value or ""
@@ -980,20 +1115,56 @@ class ExecutionEngine:
                 navigated = any(h in script.lower() for h in nav_hints)
             if navigated:
                 logger.info("  Waiting for page load after navigation...")
-                try:
-                    bl.wait_for_load_state(self._PageLoadStates.load)
-                except Exception:
-                    pass
-                # Settle: wait for SPA hydration, dismiss popups between waits
-                for _ in range(3):
-                    time.sleep(3)
-                    self._dismiss_interrupts(bl)
+                self._settle_after_navigation(bl)
         elif action.type == "call_keyword":
             # Invoke an arbitrary RF keyword by name (browser is live)
-            from robot.libraries.BuiltIn import BuiltIn
             kw_name = action.value or ""
             logger.info(f"  Call keyword: {kw_name}({', '.join(str(a) for a in action.args)})")
-            BuiltIn().run_keyword(kw_name, *action.args)
+            if self.stealth and self._stealth_bridge:
+                # In stealth mode, run the keyword through the bridge which
+                # intercepts Browser library calls and routes them to the
+                # stealth adapter's live page.
+                self._run_keyword_with_bridge(kw_name, action.args)
+            else:
+                from robot.libraries.BuiltIn import BuiltIn
+                BuiltIn().run_keyword(kw_name, *action.args)
+
+    def _run_keyword_with_bridge(self, kw_name: str, args: tuple) -> None:
+        """Run an RF keyword in stealth mode.
+
+        Temporarily swaps the Browser library instance with the stealth
+        bridge so that raw Browser calls (Click, Fill Text, etc.) inside
+        the keyword resolve against the stealth adapter's live page.
+        """
+        from robot.libraries.BuiltIn import BuiltIn
+        bi = BuiltIn()
+        bridge = self._stealth_bridge
+        swapped = False
+
+        # Swap the Browser library's internal instance with our bridge
+        try:
+            ns = bi._namespace
+            for lib in ns._kw_store._libraries:
+                if getattr(lib, 'name', '') == 'Browser':
+                    self._original_browser_instance = lib._instance
+                    lib._instance = bridge
+                    swapped = True
+                    break
+        except Exception as e:
+            logger.warn(f"  Could not swap Browser instance for stealth: {e}")
+
+        try:
+            bi.run_keyword(kw_name, *args)
+        finally:
+            if swapped:
+                try:
+                    ns = bi._namespace
+                    for lib in ns._kw_store._libraries:
+                        if getattr(lib, 'name', '') == 'Browser':
+                            lib._instance = self._original_browser_instance
+                            break
+                except Exception:
+                    pass
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
@@ -1715,6 +1886,95 @@ class ExecutionEngine:
         except Exception:
             pass
 
+    def _do_select_date(self, bl: Any, action: Action) -> None:
+        """Navigate a datepicker to the target month, then click the day.
+
+        Works with ARIA-compliant datepickers where:
+        - Month headings are visible as h2/h3 elements
+        - A forward button advances the calendar
+        - Day buttons have aria-labels containing the date info
+        """
+        from datetime import date as dt_date
+
+        date_str = action.value or ""
+        opts = action.options
+        forward_sel = opts.get("forward", 'button[aria-label*="Move forward"]')
+        heading_sel = opts.get("heading", "h2")
+        max_clicks = int(opts.get("max_clicks", "15"))
+
+        # Parse date
+        parts = date_str.split("-")
+        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+        d = dt_date(year, month, day)
+        month_year = d.strftime("%B %Y")  # e.g. "November 2026"
+        day_str = str(day)  # no leading zero
+
+        # Navigate forward until target month heading is visible
+        for _ in range(max_clicks):
+            # Check if target month heading is visible
+            check_script = (
+                f"(() => {{ "
+                f"for (const h of document.querySelectorAll({json.dumps(heading_sel)})) "
+                f"{{ if (h.textContent.trim() === {json.dumps(month_year)}) return true; }} "
+                f"return false; }})()"
+            )
+            found = bl.evaluate_javascript(None, check_script)
+            if found:
+                break
+            try:
+                bl.click(forward_sel)
+            except Exception:
+                break
+            time.sleep(0.4)
+
+        # Click the day button
+        # ARIA pattern: aria-label starts with "DAY, " and contains "MONTH YEAR"
+        click_script = (
+            f"(() => {{ "
+            f"for (const b of document.querySelectorAll('button')) {{ "
+            f"const l = b.getAttribute('aria-label') || ''; "
+            f"if (l.startsWith({json.dumps(day_str + ', ')}) && "
+            f"l.includes({json.dumps(month_year)})) "
+            f"{{ b.click(); return true; }} }} return false; }})()"
+        )
+        clicked = bl.evaluate_javascript(None, click_script)
+        if not clicked:
+            logger.warn(f"  Could not find day button for {date_str}")
+        time.sleep(0.3)
+
+    def _settle_after_navigation(self, bl: Any,
+                                max_wait: float = 15.0) -> None:
+        """Wait for a page to settle after navigation.
+
+        Waits for load state, then polls for real DOM content (not just
+        skeleton loaders). Dismisses interrupts between polls.
+        Breaks early once content is detected.
+        """
+        try:
+            bl.wait_for_load_state(self._PageLoadStates.load)
+        except Exception:
+            pass
+
+        poll_interval = 1.5
+        elapsed = 0.0
+        while elapsed < max_wait:
+            self._dismiss_interrupts(bl)
+            # Check if the page has real content (not just skeletons)
+            try:
+                has_content = bl.evaluate_javascript(
+                    None,
+                    "() => document.querySelectorAll("
+                    "'a[href], [data-testid], table, article, "
+                    ".card, .listing, .result, .item').length > 3"
+                )
+                if has_content:
+                    logger.info("  Page content detected, settle complete")
+                    break
+            except Exception:
+                pass
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
     def _dismiss_interrupts(self, bl: Any) -> None:
         """Auto-dismiss overlay selectors (cookie banners, modals)."""
         for selector in self.ctx.interrupt_selectors:
@@ -2320,6 +2580,34 @@ class WiseRpaBDD:
         if self._current_rule:
             self._current_rule.actions.append(
                 Action(type="set_stepper", value=count, locator=locator, args=())
+            )
+
+    @keyword('When I select date "${date}" from datepicker')
+    def select_date_from_datepicker(self, date: str, *options: str) -> None:
+        """Navigate a datepicker forward to the target month and click the day.
+
+        The date is in YYYY-MM-DD format. The engine navigates the calendar
+        forward (clicking a forward button) until the target month heading
+        is visible, then clicks the day button matching the date.
+
+        Options (continuation rows):
+        - ``forward=<css>`` — forward navigation button (default: ``button[aria-label*="Move forward"]``)
+        - ``heading=<css>`` — month heading selector (default: ``h2``)
+        - ``back=<css>`` — backward button (not used by default)
+        - ``max_clicks=<N>`` — max forward clicks before giving up (default: 15)
+
+        Example::
+
+            When I select date "${CHECKIN}" from datepicker
+            ...    forward=button[aria-label*="Move forward"]
+            ...    heading=h2
+        """
+        opts = _parse_options(options)
+        self._record("select_date", date, *options)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="select_date", value=date,
+                       args=(), options=opts)
             )
 
     # -- Browser step & call keyword (deferred passthrough) --

@@ -49,7 +49,7 @@ Artifact Catalog
 
 Interrupt Setup
     [Documentation]    Auto-dismiss Airbnb overlays throughout the rule walk.
-    ...                Evidence: "Got it" pricing modal appears intermittently and blocks clicks.
+    ...                Evidence: "Got it" pricing modal and hotel promo popup appear intermittently.
     And I configure interrupts
     ...    dismiss=text="Got it"
     ...    dismiss=[role="dialog"] button[aria-label="Close"]
@@ -64,10 +64,9 @@ Resource listing_search
     ...    page_load_delay_ms=2000
 
     # ── Action rule: expand the search bar if in compact mode ───────────────
-    # Evidence: on some viewports/loads, the search bar renders compact with
-    # "Anywhere | Anytime | Add guests" buttons. Clicking expands it.
+    # Evidence: on some viewports, search bar renders compact with "Anywhere"
     I define rule "expand_search"
-        And I evaluate js "() => { for (const b of document.querySelectorAll('button, div[role=button]')) { const t = b.textContent.trim(); if (t === 'Anywhere' || t.startsWith('Anywhere')) { b.click(); return; } } }"
+        When I click text "Anywhere"
         When I wait 2000 ms
 
     # ── Action rule: type city and select autocomplete ────────────────────────
@@ -82,37 +81,41 @@ Resource listing_search
 
     # ── Action rule: navigate calendar and select dates ───────────────────────
     # Evidence: calendar auto-opens after city selection.
-    # Forward: button[aria-label*="Move forward"], month headings: h2 "November 2026"
+    # Forward: button[aria-label*="Move forward"], month headings: h2
     # Day buttons: aria-label="1, Sunday, November 2026. Available..."
     I define rule "set_dates"
         And I declare parents "enter_city"
-        And I evaluate js "async () => { const sleep = ms => new Promise(r => setTimeout(r, ms)); const checkin = '${CHECKIN}'; const checkout = '${CHECKOUT}'; function monthYear(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', {month:'long', year:'numeric'}); } async function navTo(my) { while (true) { let found = false; for (const h of document.querySelectorAll('h2')) { if (h.textContent.trim() === my) { found = true; break; } } if (found) break; const fwd = document.querySelector('button[aria-label*=\"Move forward\"]'); if (!fwd) break; fwd.click(); await sleep(400); } } function clickDay(day, my) { for (const b of document.querySelectorAll('button')) { const l = b.getAttribute('aria-label') || ''; if (l.startsWith(day + ', ') && l.includes(my)) { b.click(); return; } } } const ciMY = monthYear(checkin); const coMY = monthYear(checkout); const ciDay = String(parseInt(checkin.split('-')[2])); const coDay = String(parseInt(checkout.split('-')[2])); await navTo(ciMY); clickDay(ciDay, ciMY); await sleep(300); if (coMY !== ciMY) await navTo(coMY); clickDay(coDay, coMY); await sleep(300); }"
+        When I select date "${CHECKIN}" from datepicker
+        ...    forward=button[aria-label*="Move forward"]
+        ...    heading=h2
+        When I select date "${CHECKOUT}" from datepicker
+        ...    forward=button[aria-label*="Move forward"]
+        ...    heading=h2
 
     # ── Action rule: set guest count ──────────────────────────────────────────
-    # Evidence: div[tabindex="0"] containing "guest" opens guest panel.
+    # Evidence: div[tabindex] containing "guest" opens panel.
     # Adults stepper: [data-testid="stepper-adults-increase-button"]
     I define rule "set_guests"
         And I declare parents "set_dates"
-        And I evaluate js "() => { for (const d of document.querySelectorAll('div[tabindex]')) { if (d.textContent.includes('guest')) { d.click(); return; } } }"
+        When I click text "Add guests"
         When I wait 500 ms
-        And I evaluate js "() => { const n = ${ADULTS}; const btn = document.querySelector('[data-testid=\"stepper-adults-increase-button\"]'); for (let i = 0; i < n; i++) { btn.click(); } }"
+        When I set stepper "[data-testid='stepper-adults-increase-button']" to ${ADULTS}
         When I wait 500 ms
 
     # ── Action rule: submit search ────────────────────────────────────────────
     # Evidence: button[data-testid="structured-search-input-search-button"]
-    # The "Got it" popup is handled by configure interrupts (runs before each action).
+    # Popups handled by configure interrupts (periodic dismiss).
     I define rule "submit_search"
         And I declare parents "set_guests"
         When I click locator "[data-testid='structured-search-input-search-button']"
 
     # ── Action rule: apply filters via URL params ─────────────────────────────
-    # Evidence: price_max, min_bedrooms, superhost all work as URL query params.
+    # Evidence: price_max, min_bedrooms, superhost work as URL query params.
     # Adding superhost=true narrowed Miami results from 1000+ to 533.
     I define rule "apply_filters"
         And I declare parents "submit_search"
-        When I wait 3000 ms
-        And I evaluate js "() => { const u = new URL(window.location.href); u.searchParams.set('price_max', '${PRICE_MAX}'); u.searchParams.set('min_bedrooms', '${MIN_BEDROOMS}'); u.searchParams.set('superhost', '${SUPERHOST}'); window.location.href = u.toString(); }"
         When I wait 5000 ms
+        When I add url params "price_max=${PRICE_MAX}&min_bedrooms=${MIN_BEDROOMS}&superhost=${SUPERHOST}"
 
     # ── State gate: confirm search results loaded ─────────────────────────────
     I define rule "root"
