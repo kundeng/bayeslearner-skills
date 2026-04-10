@@ -13,7 +13,7 @@ WISE RPA BDD teaches an AI coding agent **structured, repeatable browser extract
 > **Rule 0 — Orient before acting.** Before opening a browser or drafting a suite, read `references/workflow.md § Big Picture` so you understand the shipped harness, keyword library, and what evidence you need to gather.
 
 ```
-/rrpa-orient → /rrpa-explore → /rrpa-draft ⇄ /rrpa-review → /rrpa-ship
+/rrpa-orient → /rrpa-explore → /rrpa-draft ⇄ /rrpa-review → /rrpa-re-explore? → /rrpa-ship
 ```
 
 Use when:
@@ -50,6 +50,7 @@ Chain commands with `&&` in one Bash call. The browser session persists between 
 
 - `/rrpa-draft` — draft the `.robot` suite using WiseRpaBDD keywords, grounded in explore evidence
 - `/rrpa-review` — run `robot --dryrun` to verify keyword resolution, tighten variables, fix issues. Loops back to `/rrpa-draft` until the suite is clean.
+- `/rrpa-re-explore` — after dryrun passes, go back to `agent-browser` to verify uncertain selectors, check for popups/overlays needing interrupts, or confirm pagination. Then revise and re-review. Important for complex sites with auth, overlays, or dynamic content.
 - `/rrpa-ship` — package the suite, WiseRpaBDD keyword library, and any custom resources into the target project with proper structure, documentation, and a ready-to-run layout
 
 ## Non-Negotiables

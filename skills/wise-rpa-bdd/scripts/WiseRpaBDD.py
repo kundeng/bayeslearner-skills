@@ -905,6 +905,46 @@ class ExecutionEngine:
             bl.take_screenshot(filename=action.value or "screenshot.png")
         elif action.type == "upload":
             bl.upload_file(action.locator, action.value or "")
+        elif action.type == "click_text":
+            # Click first visible element matching text
+            text = action.value or ""
+            script = (
+                f"() => {{ for (const el of document.querySelectorAll("
+                f"'button, a, [role=button], div[tabindex]')) {{ "
+                f"if (el.offsetParent !== null && "
+                f"el.textContent.trim() === {json.dumps(text)}) "
+                f"{{ el.click(); return true; }} }} return false; }}"
+            )
+            bl.evaluate_javascript(None, script)
+        elif action.type == "add_url_params":
+            # Add query params to current URL and navigate
+            params = action.value or ""
+            url_before = bl.get_url()
+            script = (
+                f"() => {{ const u = new URL(window.location.href); "
+                f"new URLSearchParams('{params}').forEach((v, k) => "
+                f"u.searchParams.set(k, v)); "
+                f"window.location.href = u.toString(); }}"
+            )
+            try:
+                bl.evaluate_javascript(None, script)
+            except Exception:
+                pass  # navigation may destroy context
+            # Wait for page load + SPA settle with interrupt dismiss
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.load)
+            except Exception:
+                pass
+            for _ in range(3):
+                time.sleep(3)
+                self._dismiss_interrupts(bl)
+        elif action.type == "set_stepper":
+            # Click a stepper button N times
+            count = int(action.value or 0)
+            locator = action.locator
+            for _ in range(count):
+                bl.click(locator)
+                time.sleep(0.2)
         elif action.type == "browser_step":
             # Passthrough: call any method on the browser library
             method_name = action.value or ""
@@ -2242,6 +2282,46 @@ class WiseRpaBDD:
                 Action(type="upload", locator=locator, value=path)
             )
 
+    # -- High-level interaction keywords (reduce need for evaluate_js) --
+
+    @keyword('When I click text "${text}"')
+    def click_text(self, text: str) -> None:
+        """Click the first visible element whose text content matches.
+
+        Uses JS to find by text, avoiding CSS limitations.
+        Example: ``When I click text "Got it"``
+        """
+        self._record("click_text", text)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="click_text", value=text, args=())
+            )
+
+    @keyword('When I add url params "${params}"')
+    def add_url_params(self, params: str) -> None:
+        """Add query parameters to the current URL and navigate.
+
+        The engine handles navigation wait and SPA hydration automatically.
+        Example: ``When I add url params "price_max=3000&superhost=true"``
+        """
+        self._record("add_url_params", params)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="add_url_params", value=params, args=())
+            )
+
+    @keyword('When I set stepper "${locator}" to ${count}')
+    def set_stepper(self, locator: str, count: str) -> None:
+        """Click a stepper/increment button N times.
+
+        Example: ``When I set stepper "[data-testid='stepper-adults']" to 2``
+        """
+        self._record("set_stepper", locator, count)
+        if self._current_rule:
+            self._current_rule.actions.append(
+                Action(type="set_stepper", value=count, locator=locator, args=())
+            )
+
     # -- Browser step & call keyword (deferred passthrough) --
 
     @keyword('And I browser step "${method}"')
@@ -2702,14 +2782,32 @@ def _build_generate_prompt(requirement: str, output: Path,
         + "Follow the wise-rpa-bdd skill phases:\n"
         + orient_block
         + "2. /rrpa-explore — use `agent-browser` CLI via Bash to explore the live site. "
-        "Do NOT use curl or WebFetch. Do NOT guess selectors. "
-        "Every selector must come from agent-browser inspection. "
+        "Do NOT use curl or WebFetch. Do NOT guess selectors or URLs. "
+        "Every selector AND entry URL must come from agent-browser inspection. "
+        "For sites requiring search or login, interact with the UI to discover "
+        "the real URL (with place_id, session tokens, etc.) — never construct "
+        "URLs by guessing parameter names. "
         "Be efficient — confirm selectors on representative pages, "
         "do not crawl every page. agent-browser keeps a persistent session.\n"
         "3. /rrpa-draft — draft the .robot suite using WiseRpaBDD keywords "
         "grounded in explore evidence. Include quality gates.\n"
+        "   GENERALIZABILITY: put all dynamic values (city, dates, prices, "
+        "guest count, etc.) in *** Variables *** so users can override from "
+        "the command line with --variable. Never hardcode place_id, session "
+        "tokens, or values that change per search.\n"
+        "   KEYWORD PREFERENCE: prefer deferred BDD keywords (When I click "
+        "locator, When I type, etc.) over And I evaluate js. Use evaluate_js "
+        "only for patterns the framework can't express yet (calendar loops, "
+        "URL param navigation). Use And I configure interrupts for popup "
+        "dismissal, not inline JS dismiss hacks.\n"
         f"4. /rrpa-review — run `robot --dryrun --pythonpath {skill_dir / 'scripts'}` "
         "to verify all keywords resolve. Fix and loop until clean.\n"
+        "5. /rrpa-re-explore (if needed) — after dryrun passes, go back to "
+        "agent-browser to verify any selectors you're unsure about, check "
+        "for popups/overlays that need interrupts, or confirm pagination "
+        "behavior. Then revise the suite and re-review. This step is "
+        "especially important for complex sites with auth flows, overlays, "
+        "or dynamically loaded content.\n"
         "Do NOT run the suite against a live site for full scraping."
     )
 
