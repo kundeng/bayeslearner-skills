@@ -1,360 +1,348 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development workflow: requirements → design → tasks → implement loop. Use when planning features, implementing from specs, refining specs, resuming work, or when an existing project already has spec files that may need to be moved into `.kiro/specs/` or `.windloop/specs/`. Also use this for analytic and data-workflow specs when the user wants requirements/design/tasks for notebooks, experiment sweeps, Hamilton DAGs, review gates, or reproducible analysis promotion. Trigger especially on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, `.kiro`, `.windloop`, or migrating analytic workflow specs into the proper layout. IMPORTANT: Never edit requirements.md, design.md, tasks.md, or progress.txt without first reading this skill and the relevant references/doc."
+description: "Spec-driven development: plan → go → review loop. Use for planning features, implementing from specs, refining specs, resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
 metadata:
   author: kundeng
-  version: "1.0.0"
+  version: "2.0.0"
 ---
 
 ## Spec-Driven Development
 
-This skill powers the windloop framework. Specs live in a **spec directory** — prefer `.kiro/specs/<name>/`, then fall back to `.windloop/specs/<name>/`. The format is the same regardless of location.
+Specs live in `.kiro/specs/<NN-name>/`. Numeric prefixes for ordering (`01-auth`, `02-api-layer`). Two modes:
 
-### When to Use
+- **Full ceremony** (requirements.md → design.md → tasks.md): formal traceability, approval gates, multi-team
+- **Fast-track** (single `spec.md`): one scratchpad for planner/builder/reviewer — no gates, cycle freely between hats
 
-- Complex features with multiple components or integrations
-- Multi-step work where rework costs are significant
-- AI-assisted development where structured planning improves output quality
-- Team collaboration requiring shared understanding and traceability
-- Resuming implementation across sessions
-- Analytic or data-science workflows that need spec-level structure before implementation or promotion
-- Projects that already contain requirements/design/tasks files or spec-like docs that need to be normalized into `.kiro/specs/<name>/` or `.windloop/specs/<name>/`
-- Requests that mention `spec-help`, `spec-plan`, or ask where analytic workflow specs should live
-
-### When NOT to Use
-
-- Simple bug fixes with obvious one-file solutions
-- Time-critical hotfixes requiring immediate action
-- Experimental prototypes for rapid throwaway iteration
-- Trivial changes with no ambiguity
-- Pure exploratory analysis with no need for requirements/design/tasks yet
-
-### Quick Start
-
-**New feature:**
-```
-/spec-plan my-feature create
-```
-Creates `requirements.md`, `design.md`, `tasks.md`, `progress.txt` in a new spec directory. Walk through requirements → design → tasks with approval gates between each phase.
-
-**New analytic workflow spec:**
-```
-/spec-plan incident-analysis-pipeline create
-```
-Use the same spec flow, but read `references/analytic-work.md` and make the
-design explicit about notebook workflow, experiment comparison, review gates,
-and reproducibility promotion.
-
-**Refine existing spec:**
-```
-/spec-plan my-feature refine
-```
-Merges redundant requirements, fixes stale paths, cascades renumbering, validates traceability.
-
-**Resume implementation:**
-```
-/spec-go my-feature
-```
-Reads the spec, finds the next uncompleted task, implements it test-first, commits, and repeats.
-
-**Check progress:**
-```
-/spec-status
-```
-
-### Phase Gate Protocol
-
-Each phase requires **explicit user approval** before advancing:
-
-```
-Requirements ──[approve]──> Design ──[approve]──> Tasks ──[approve]──> Implement
-```
-
-- After generating `requirements.md`: ask *"Do the requirements look good? Ready for design?"*
-- After generating `design.md`: ask *"Does the design look good? Ready for task breakdown?"*
-- After generating `tasks.md`: ask *"Do the tasks look good? Ready to implement?"*
-- **Never skip a phase or combine phases.** If running `/spec-go` (autonomous mode), the user has pre-approved all phases by invoking the command.
-
-```mermaid
-stateDiagram-v2
-  [*] --> Requirements
-
-  Requirements --> ReviewReq : Complete
-  ReviewReq --> Requirements : Changes requested
-  ReviewReq --> Design : Approved
-
-  Design --> ReviewDesign : Complete
-  ReviewDesign --> Design : Changes requested
-  ReviewDesign --> Tasks : Approved
-
-  Tasks --> ReviewTasks : Complete
-  ReviewTasks --> Tasks : Changes requested
-  ReviewTasks --> Implement : Approved
-
-  Implement --> TaskDone : Task complete
-  TaskDone --> Implement : Next task
-  TaskDone --> [*] : All tasks done
-
-  state Implement {
-    [*] --> PickTask
-    PickTask --> Code
-    Code --> Test
-    Test --> Commit
-    Commit --> UpdateProgress
-  }
-```
-
-### Resume / Detection Protocol
-
-Determine current phase by checking which files exist in SPEC_DIR:
-
-| Files present | Phase | Next action |
-|---------------|-------|-------------|
-| None | New | `/spec-plan <name> create` — start with requirements |
-| `requirements.md` only | Design needed | Generate `design.md`, then ask for approval |
-| `requirements.md` + `design.md` | Tasks needed | Generate `tasks.md`, then ask for approval |
-| All 3 + unchecked tasks | Implementation | `/spec-go` or `/spec-task` — pick next unchecked task |
-| All tasks checked | Done | `/spec-merge` — merge branch, clean up |
-
-When resuming, **always re-read** `requirements.md`, `design.md`, and `tasks.md` before acting.
-
-### Quality Checklists
-
-**Requirements checklist** (validate before advancing to design):
-- [ ] All user roles identified
-- [ ] Normal, edge, and error cases covered
-- [ ] Every criterion uses WHEN/SHALL (EARS) format
-- [ ] Requirements are testable and measurable
-- [ ] No conflicting requirements
-
-**Design checklist** (validate before advancing to tasks):
-- [ ] All requirements addressed in design
-- [ ] Component responsibilities and interfaces specified
-- [ ] Correctness properties defined with test approaches
-- [ ] Error handling covers expected failures
-- [ ] Diagrams match system complexity
-
-**Tasks checklist** (validate before implementing):
-- [ ] Every requirement traced to ≥1 task
-- [ ] Tasks ordered to respect dependencies
-- [ ] Tests are separate tasks (not embedded)
-- [ ] Each task is independently completable
-- [ ] Scope is appropriate (30 min – 2 hours each)
-
-### Spec Lifecycle
-
-```
-idea → requirements.md (why) → design.md (what + how) → tasks.md (steps) → [implement loop] → done
-```
-
-The traceability chain:
-- **requirements.md** — requirements as user stories with WHEN/SHALL acceptance criteria — the *why*
-- **design.md** — architecture, tech stack, constraints, testing strategy, correctness properties — the *what + how*
-- **tasks.md** — implementation tasks referencing requirements and properties — the *steps*
-- **progress.txt** — auto-updated log
-- **steering/** *(optional)* — project-level context: product vision, repo structure, tech decisions. Read-only priors that inform all spec work.
-
-### Workflow References
-
-Detailed instructions for each command live in `references/` alongside this file. When a command is invoked, read the corresponding reference document.
-
-If the spec is for analytics, experimentation, or reproducible data work, also
-read `references/analytic-work.md`.
-
-### Commands
-
-| Command | Reference | Purpose |
-|---------|-----------|---------|
-| `/spec-help` | [spec-help.md](references/spec-help.md) | Onboarding guide |
-| `/spec-plan <name> [create\|refine]` | [spec-plan.md](references/spec-plan.md) | Create or refine a spec |
-| `/spec-audit <name>` | [spec-audit.md](references/spec-audit.md) | Validate spec consistency |
-| `/spec-go <name>` | [spec-go.md](references/spec-go.md) | Autonomous implement loop |
-| `/spec-task <name> <task>` | [spec-task.md](references/spec-task.md) | Implement single task |
-| `/spec-merge <name>` | [spec-merge.md](references/spec-merge.md) | Merge parallel branches, resolve conflicts, verify |
-| `/spec-status` | [spec-status.md](references/spec-status.md) | Progress dashboard |
-| `/spec-reset <name>` | [spec-reset.md](references/spec-reset.md) | Clear progress for re-run |
+**Detection:** `spec.md` → fast-track. `requirements.md` → full ceremony. Never mix both.
+**Small work:** Add to an existing spec as tasks, or create a fast-track spec.
+**Upgrade:** Fast-track → full when >20 tasks or traceability needed: Context → requirements.md, Decisions → design.md, Tasks → tasks.md.
 
 ### Spec Resolution
 
-When a command receives a spec name SPEC, resolve its directory:
+SPEC → `.kiro/specs/*-SPEC/` or `.kiro/specs/SPEC/`. No name → auto-select if exactly one exists. Let **SPEC_DIR** = resolved directory. When creating, assign next available number.
 
-1. `.kiro/specs/SPEC/` — if exists, use it
-2. `.windloop/specs/SPEC/` — if exists, use it
-3. Neither → error
+### Core Loop
 
-When no name is given, list directories in `.kiro/specs/` and `.windloop/specs/`. If exactly one spec exists, use it automatically.
+```mermaid
+stateDiagram-v2
+  [*] --> Plan : spec-plan create
 
-Let **SPEC_DIR** be the resolved directory.
+  state Plan {
+    [*] --> Scaffold
+    Scaffold --> Scan
+    Scan --> GenReqs : full
+    Scan --> GenSpec : fast
+    GenReqs --> Approve_R
+    Approve_R --> GenReqs : revise
+    Approve_R --> GenDesign : ok
+    GenDesign --> Approve_D
+    Approve_D --> GenDesign : revise
+    Approve_D --> GenTasks : ok
+    GenTasks --> Approve_T
+    Approve_T --> GenTasks : revise
+    GenSpec --> Ready
+    Approve_T --> Ready
+  }
+
+  Plan --> Go : approved
+
+  state Go {
+    [*] --> Build
+    state Build {
+      [*] --> PickTask
+      PickTask --> Implement
+      Implement --> Test
+      Test --> Implement : fix up to 3x
+      Test --> Commit : pass
+      Test --> Stuck : 3x fail
+      Commit --> PickTask : more tasks
+    }
+    Build --> SelfReview : task done or stuck
+    state SelfReview {
+      [*] --> CheckSpec
+      CheckSpec --> AddTests : coverage gaps
+      CheckSpec --> MinorFix : add or tweak tasks
+      AddTests --> CheckSpec
+      MinorFix --> CheckSpec
+      CheckSpec --> OK : clean
+    }
+    SelfReview --> Build : continue
+    SelfReview --> Replan : drastic change
+  }
+
+  Replan --> Plan : human reviews new plan
+  Go --> [*] : all tasks done
+  Go --> [*] : stuck
+```
+
+**Concurrency:** Single orchestrator owns spec files, one sequential builder by default. Subagents OK for non-code work (research, docs, website). Parallel builders only when user explicitly requests AND tasks are truly independent.
+
+| State | Entry | Stops when |
+|-------|-------|-----------|
+| **Plan** | `/spec-plan create [--fast]` | User approves (full) or spec generated (fast) |
+| **Go** | `/spec-go`, `/spec-task` | All done, needs human feedback, or stuck |
+| **Review** | `/spec-audit`, `/spec-status`, `/spec-plan refine` | Findings presented |
+
+**Resuming** — detect from files on disk:
+
+| Files present | State | Action |
+|---------------|-------|--------|
+| None | Plan | `/spec-plan create` |
+| `spec.md` | Go | Next unchecked task |
+| `requirements.md` only | Plan | Generate design.md |
+| `requirements.md` + `design.md` | Plan | Generate tasks.md |
+| All 3 + `[ ]` tasks | Go | Next task |
+| All tasks `[x]` | Done | Audit or merge |
 
 ### Rules
 
-1. **One session per working tree**: use worktrees or branches to isolate parallel work.
-2. **Resolve the spec** using the Spec Resolution rules above.
-3. Read `requirements.md` AND `design.md` before implementing. If `steering/` exists, read it too.
-4. **When in doubt, stop and re-anchor to the spec**: if there is any chance the next action could deviate from spec-driven development (unclear scope, missing task, ambiguous acceptance criteria, tempting “quick fix”, undocumented refactor), STOP and re-read `requirements.md`, `design.md`, `tasks.md`, and the relevant workflow in `references/` (typically `references/spec-go.md` or `references/spec-task.md`) before proceeding. If it still isn’t clearly supported by the spec, ask the user to refine the spec (via `/spec-plan ... refine`) instead of guessing.
-5. Check task dependencies — never skip ahead.
-6. **Tests are separate tasks**: property tests and E2E tests each get their own task. Don't embed test work inside implementation tasks.
-7. Run tests after implementation; fix up to 3 times before BLOCKED.
-8. Commit per task: `feat(<spec>/<task>): [description]`
-9. Update `tasks.md` (checkbox) and `progress.txt` (log line) after each task.
-10. Keep changes minimal and focused.
+1. **Read before acting** — all spec files + steering docs if they exist.
+2. **Re-anchor when uncertain** — re-read spec if next action could deviate.
+3. **Respect dependencies** — never skip ahead.
+4. **Tests are separate tasks.**
+5. **Commit per task** — `feat(<spec>/<task>): [description]`
+6. **Minimal changes** — only what the task requires.
 
-### Analytic Workflow Pairing
+---
 
-When the project is analytic, notebook-heavy, or experiment-oriented:
+## Commands
 
-- Use this skill for the spec lifecycle itself.
-- Use `analytic-workbench` for the execution model, review loops, and tooling choices.
-- Requirements should make approval gates, artifact outputs, and promotion criteria explicit.
-- Design should spell out the boundary between exploratory work and reproducible/promoted stages.
-- Tasks should separate experimentation, review/comparison, and promotion/hardening work.
+### `/spec-plan <name> [create|refine] [--fast]`
 
-If the user is already asking for best-practice analytic workflow structure and
-there are existing spec files on disk, invoke this skill early rather than
-waiting until after implementation has begun.
+Auto-detected: **create** if spec doesn't exist, **refine** if it does.
 
-### Common Pitfalls
+#### Create (full ceremony)
 
-**Vague requirements:**
-- Bad: "System should be fast"
-- Good: "WHEN user submits search THEN system SHALL return results within 2 seconds"
+**Scaffold:** Create `.kiro/specs/NN-SPEC/`.
+**Scan:** Read README, manifests, source structure, tests, CI, steering docs. Align with conventions.
 
-**Implementation details in requirements:**
-- Bad: "System shall use Redis for caching"
-- Good: "WHEN user requests frequently accessed data THEN system SHALL return cached results"
+**Generate requirements.md** — template below. **Generate first, iterate second.** EARS format:
+- `WHEN [event] THEN [system] SHALL [response]`
+- `IF [condition] THEN [system] SHALL [response]`
+- `WHILE [state] [system] SHALL [response]`
+- `[system] SHALL [response]`
 
-**Skipping phases:**
-- Bad: Jump straight to tasks.md without requirements or design
-- Good: Complete each phase, get approval, then advance
-
-**Monolithic tasks:**
-- Bad: "Implement the entire authentication system" (one task)
-- Good: Break into 30-min–2-hour tasks with clear boundaries and test coverage
-
-**Missing error cases:**
-- Bad: Only documenting the happy path
-- Good: Include WHEN/IF statements for all error conditions and edge cases
-
-**Embedding tests in implementation tasks:**
-- Bad: "Implement user model and write all tests" (one task)
-- Good: Separate tasks: "Implement user model" → "Write property test for user validation"
-
-### Scaffolding
-
-When `/spec-plan` creates a new spec, it must create a **per-spec subdirectory** — never put spec files directly in `.windloop/specs/` or `.kiro/specs/`.
-
-**If `.kiro/` exists:**
-1. Create `.kiro/specs/` if it doesn't exist
-2. Create `.kiro/specs/<name>/` — this is the spec directory
-3. Create all spec files inside `.kiro/specs/<name>/`
-
-**Otherwise:**
-1. Create `.windloop/specs/` if it doesn't exist
-2. Create `.windloop/specs/<name>/` — this is the spec directory
-3. Create all spec files inside `.windloop/specs/<name>/`
-
-The spec directory must contain:
+**→ Present for approval:**
 ```
-.windloop/specs/<name>/    # or .kiro/specs/<name>/
-  requirements.md
-  design.md
-  tasks.md
-  progress.txt
+Requirements for SPEC — N requirements, M acceptance criteria, K non-functional
+  R1: [title] — [N criteria]
+  R2: [title] — [N criteria]
+  NF1: [title]
+  Out of scope: [summary]
+Ready for design? (approve / revise)
 ```
 
-**Common mistake**: placing spec files directly in `.windloop/specs/` or `.kiro/specs/` without the `<name>/` subdirectory. Each spec MUST have its own subdirectory.
+**Generate design.md** — template below. Research if needed. Modules, interfaces, data flow, testing strategy, correctness properties validating requirements.
 
-### Steering Docs (optional)
-
-Steering docs provide project-level context that applies across all specs. They live at the root of the spec area:
-
-- `.windloop/steering/` or `.kiro/steering/`
-
-Note: steering docs live at the root (`.windloop/steering/`, not `.windloop/specs/steering/`).
-
-| File | Purpose |
-|------|--------|
-| `product.md` | Product vision, target users, key goals |
-| `structure.md` | Repo layout, module boundaries, naming conventions |
-| `tech.md` | Tech stack decisions, version constraints, deployment targets |
-
-**Rules:**
-- Steering docs are **read-only context** — never modify them during task execution.
-- When they exist, **always** read them during planning (`spec-plan`) and before implementing (`spec-go`, `spec-task`).
-- They are not scaffolded automatically — the user creates them when ready.
-- They inform requirements, design decisions, and coding conventions but are not part of the traceability chain.
-
-If the host project has an `AGENTS.md`, append the windloop snippet (see below). If not, create it.
-
-### AGENTS.md Snippet
-
-```markdown
-## Windloop
-
-This project uses spec-driven development. Specs live in `.windloop/specs/` or `.kiro/specs/`.
-For spec implementation, always use a dedicated git branch or worktree per spec.
-Read the `spec-driven-dev` skill before modifying any spec files.
-Run `/spec-help` for the full command list.
+**→ Present for approval:**
+```
+Design for SPEC — N modules, M properties, K decisions
+  Modules: [list]
+  Properties: P1 validates R1.1,1.2 | P2 validates R2.1 | ...
+  Test command: [command]
+  Decisions: [list titles]
+Ready for tasks? (approve / revise)
 ```
 
-### Spec Refinement Principles
+**Generate tasks.md** — template below. Each task one session. Depends/Requirements/Properties. Order: Foundation → Core → Tests → Polish. Every requirement → ≥1 task.
 
-When running `/spec-plan <name> refine`:
+**→ Present for approval:**
+```
+Tasks for SPEC — N tasks across M phases
+  1.1: [title]  (depends: —)
+  1.2: [title]  (depends: 1.1)
+  2.1: E2E — [scenario]  (depends: 1.1, 1.2)
+  Coverage: all requirements traced, all properties tested
+Ready to implement? (approve / revise)
+```
 
-1. **Merge redundant requirements**: combine duplicates into the earlier/more natural location.
-2. **Separate what from how**: move implementation details from Requirements to Constraints.
-3. **Collapse over-specified sub-requirements**: individual assertions become acceptance criteria on tasks, not separate requirements.
-4. **Demote aspirational items**: untestable patterns become Notes, not requirements.
-5. **Merge overlapping properties**: if one is a subset of another, merge and renumber.
-6. **Cascade renumbering**: update ALL references in design.md and tasks.md after merging/removing.
-7. **Validate traceability**: every requirement → ≥1 property → ≥1 task. Flag orphans.
-8. **Present tense for done work**: completed requirements describe the system as-is.
-9. **Sync derived documents**: update README, architecture docs, etc. if affected.
-10. **Align spec with disk**: fix stale paths, add missing entries, remove deleted files.
+// turbo
+**Commit:** `git add -A && git commit -m "spec(SPEC): create requirements, design, and tasks"`
 
-### Embedded Templates
+#### Create (fast-track)
 
-#### requirements.md template
+Same scaffold and scan. Generate `spec.md` (template below): Context, Decisions (can start empty), Tasks by P1/P2/P3. Iterate if feedback, then move on.
+
+// turbo
+Commit: `git add -A && git commit -m "spec(SPEC): create fast-track spec"`
+
+#### Refine (full ceremony)
+
+1. Read requirements.md, design.md, tasks.md + scan repo for drift.
+2. Ask what should change (or use `/spec-audit` findings).
+3. Refinement: merge redundant requirements, separate what from how, collapse over-specified sub-requirements, merge overlapping properties, cascade renumbering, validate traceability (requirement → property → task), align spec with disk.
+4. Trace changes top-down and bottom-up. Done tasks (`[x]`): update references, do NOT uncheck.
+
+**→ Present change summary:**
+```
+Refine SPEC — changes:
+  Requirements: +N added, ~M merged, -K removed
+  Properties:  +N added, ~M renumbered
+  Tasks:       +N added, ~M updated, -K removed
+  Traceability gaps: [list or "none"]
+  Disk drift fixed: [list or "none"]
+Approve refinement? (approve / revise)
+```
+
+// turbo
+Commit: `git add -A && git commit -m "spec(SPEC): refine — [brief]"`
+
+#### Refine (fast-track)
+
+Read `spec.md`, scan for drift, update Context/Decisions/Tasks, re-prioritize. If >20 tasks, suggest promoting to full ceremony. Append to Log.
+
+// turbo
+Commit: `git add -A && git commit -m "spec(SPEC): refine fast-track — [brief]"`
+
+---
+
+### `/spec-go <name> [count]`
+
+Autonomous build→self-review loop. Optional count limits tasks per session. Stops on: all done, needs human, or stuck.
+
+**Build phase:**
+1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md.
+2. **Pick next task** — first `[ ]` with all deps satisfied. Only optional left → STOP.
+3. **Announce** — "Starting task [ID]: [TITLE]"
+4. **Implement** — read relevant code first. Test tasks: Red-Green-Refactor. Implementation tasks: write code, run existing tests.
+5. **Test** — failures → fix up to 3x. Still failing → mark `[!] BLOCKED: reason`, skip to next. No unblocked tasks → STOP (stuck).
+// turbo
+6. **Lint** if configured.
+7. **Update** — mark task `[x]`.
+// turbo
+8. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
+
+**Self-review phase** (every 3 tasks or after a BLOCKED):
+9. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
+10. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
+11. **Report checkpoint:**
+```
+Checkpoint: SPEC — N/TOTAL tasks done
+  Completed this session:
+    [x] 1.1: [title]
+    [x] 1.2: [title]
+  Blocked:
+    [!] 2.1: [reason]
+  Tests: PASS/FAIL
+  Next: [ID]: [title]
+  Spec drift: [none / what was fixed]
+```
+Then loop to build.
+
+---
+
+### `/spec-task <name> <task>`
+
+Single task build. Same as `/spec-go` build steps 1–8 for one task. Verify deps first — if unmet, STOP. When run by a subagent in a parallel worktree, **never modify spec files** — only write code, tests, docs. Orchestrator updates status after merge.
+
+**→ Report:**
+```
+Task [ID] complete: [title]
+  Tests: PASS/FAIL
+  Files changed: [list]
+  Follow-up: [issues or "none"]
+```
+
+---
+
+### `/spec-audit <name>`
+
+Read requirements.md, design.md, tasks.md. Run checks:
+1. **Traceability** — orphan requirements, orphan properties, broken references
+2. **Redundancy** — duplicates, subset properties, implementation details in requirements
+3. **Stale language** — future tense on done tasks, checked goals with unchecked subs
+4. **Spec↔disk drift** — design directory vs actual repo
+5. **Doc sync** — README/docs vs spec
+
+**→ Print report:**
+```
+Audit: SPEC
+  Traceability:
+    ✓ N requirements → M properties → K tasks
+    ⚠ R[N] has no validating property
+    ⚠ P[N] has no implementing task
+  Redundancy:
+    ⚠ R[N] and R[M] describe same behavior
+  Stale language:
+    ⚠ R[N] future tense but task [ID] done
+  Spec↔disk drift:
+    ✗ spec lists "[path]" — not on disk
+  Doc sync:
+    ⚠ README says "[X]" but spec says "[Y]"
+  Summary: E errors, W warnings
+```
+Suggest `/spec-plan SPEC refine`.
+
+---
+
+### `/spec-status`
+
+Discover all specs in `.kiro/specs/`. Read tasks, count status marks, compute completion.
+
+**→ Print dashboard:**
+```
+SPEC STATUS
+  01-auth:
+    Progress: ████████░░ 5/7 (71%)
+    Status:   1.1✓ 1.2✓ 1.3~ 2.1✓ 2.2✓ 3.1○ 3.2○*
+    Blocked:  none
+  02-api-layer:
+    Progress: ██░░░░░░░░ 1/5 (20%)
+    Status:   1.1✓ 1.2○ 2.1○ 2.2○ 3.1○*
+    Blocked:  none
+```
+
+### `/spec-merge <name>`
+
+// turbo
+Find branches (`git branch --list "task/*"`, `git worktree list`), ask which to merge. Merge each (`git merge <branch> --no-edit`), resolve conflicts intelligently. Clean up branches/worktrees (confirm). Verify tasks status, tests, lint. Commit fixes: `git add -A && git commit -m "chore(SPEC): post-merge fixes"`
+
+### `/spec-reset <name>`
+
+Confirm with user. Reset all status marks (`[x]`/`[~]`/`[!]` → `[ ]`, preserve `*`).
+// turbo
+Commit: `git add -A && git commit -m "chore(SPEC): reset progress"`
+
+### `/spec-help`
+
+Print the Core Loop diagram and command table from this skill, then ask what the user wants to do.
+
+---
+
+## Templates
+
+### requirements.md
 
 ```markdown
 # Requirements Document
 
 ## Introduction
-<!-- Brief description of what this spec covers and why -->
+<!-- What this spec covers and why -->
 
 ## Glossary
-
 - **Term_1**: Definition
-- **Term_2**: Definition
 
 ## Requirements
 
 ### Requirement 1: [Feature area]
-
 **User Story:** As a [role], I want [action], so that [benefit].
-
 #### Acceptance Criteria
-
 1. WHEN [trigger], THE [Component] SHALL [expected behavior]
 2. WHEN [trigger], THE [Component] SHALL [expected behavior]
 
 ### Requirement 2: [Feature area]
-
 **User Story:** As a [role], I want [action], so that [benefit].
-
 #### Acceptance Criteria
-
 1. WHEN [trigger], THE [Component] SHALL [expected behavior]
 
 ### Non-Functional
-
 **NF 1**: [Performance / reliability / security requirement]
 
 ## Out of Scope
 <!-- What this spec explicitly does NOT cover -->
 ```
 
-#### design.md template
+### design.md
 
 ```markdown
 # Design: [SPEC NAME]
@@ -372,7 +360,6 @@ tests/
 \```
 
 ## Architecture Overview
-
 \```mermaid
 graph TD
     A[Module A] --> B[Module B]
@@ -382,7 +369,6 @@ graph TD
 \```
 
 ## Module Design
-
 ### [Module 1]
 - **Purpose**: [what it does]
 - **Interface**:
@@ -392,7 +378,6 @@ graph TD
 - **Dependencies**: [what it depends on]
 
 ## Data Flow
-
 \```mermaid
 sequenceDiagram
     participant User
@@ -414,133 +399,145 @@ sequenceDiagram
 <!-- Omit if simple -->
 
 ## Error Handling Strategy
-<!-- How errors are propagated and handled -->
 
 ## Testing Strategy
-
-- **Property tests**: Verify design invariants, inline with implementation tasks (required)
-- **E2E tests**: Validate user stories end-to-end, as separate tasks (required)
-- **Unit tests**: For complex internal logic only (optional, add when warranted)
+- **Property tests**: Verify design invariants (required)
+- **E2E tests**: Validate user stories end-to-end (required)
+- **Unit tests**: Complex internal logic only (optional)
 - **Test command**: `[command]`
 - **Lint command**: `[command]`
-- **Coverage target**: [percentage]
 
 ## Constraints
-<!-- Important decisions and constraints -->
 
 ## Correctness Properties
-
-Properties that must hold true. Each validates one or more requirements.
-
 ### Property 1: [Property name]
 - **Statement**: *For any* [condition], when [action], then [expected outcome]
 - **Validates**: Requirement 1.1, 1.2
 - **Example**: [concrete example]
 - **Test approach**: [how to verify]
 
-### Property 2: [Property name]
-- **Statement**: *For any* [condition], when [action], then [expected outcome]
-- **Validates**: Requirement 2.1
-- **Example**: [example]
-- **Test approach**: [approach]
-
 ## Edge Cases
-<!-- Known edge cases and how they should be handled -->
 
 ## Decisions
-
 ### Decision: [Title]
-**Context:** [Situation requiring a decision]
-**Options Considered:**
-1. [Option 1] — Pros: [benefits] / Cons: [drawbacks]
-2. [Option 2] — Pros: [benefits] / Cons: [drawbacks]
-**Decision:** [Chosen option]
-**Rationale:** [Why this was selected]
+**Context:** [Situation]
+**Options:** 1. [Option] — Pros / Cons  2. [Option] — Pros / Cons
+**Decision:** [Chosen]  **Rationale:** [Why]
 
 ## Security Considerations
 <!-- If applicable -->
 ```
 
-**Diagram guidance**: Include diagrams that match complexity:
-- **Always**: Component diagram (architecture overview)
-- **Multi-actor systems**: Sequence diagram
-- **Stateful systems**: State diagram
-- **Data-heavy systems**: ER diagram
+**Diagram guidance**: Always include component diagram. Add sequence (multi-actor), state (stateful), ER (data-heavy). Omit empty sections.
 
-Omit sections that don't apply. Use Mermaid syntax.
-
-#### tasks.md template
+### tasks.md
 
 ```markdown
 # Tasks: [SPEC NAME]
 
-## Overview
-<!-- Brief description of implementation approach -->
+## Status marks
+<!-- [ ] pending | [x] done | [~] skipped | [!] BLOCKED: reason | [ ]* optional -->
 
 ## Tasks
 
-- [ ] 1. [Phase title — REQUIRED, never leave blank]
-  - [ ] 1.1 [Task title]
-    - [What to implement]
+- [x] 1. Setup phase
+  - [x] 1.1 [Completed task title]
+    - [What was implemented]
     - **Depends**: —
     - **Requirements**: 1.1, 1.2
     - **Properties**: 1
+  - [x] 1.2 [Completed task title]
+    - **Depends**: 1.1
 
-  - [ ] 1.2 [Task title]
-    - [What to implement]
+- [ ] 2. Core phase
+  - [!] 2.1 [Blocked task] BLOCKED: [reason]
     - **Depends**: 1.1
     - **Requirements**: 2.1
     - **Properties**: 2
-
-  - [ ] 1.3 Write property test for [property name]
-    - Property 1 (validates 1.1, 1.2)
-    - **Depends**: 1.1
-    - **Properties**: 1
-
-  - [ ]* 1.4 [Optional task title]
-    - [What to implement]
-    - **Depends**: 1.1
-
-- [ ] 2. [Phase or group title]
-  - [ ] 2.1 [Task title]
-    - [What to implement]
+  - [ ] 2.2 [Pending task]
     - **Depends**: 1.1, 1.2
-    - **Requirements**: 1.3, 2.2
-    - **Properties**: 1, 2
+  - [ ] 2.3 Write property test for [property name]
+    - **Depends**: 2.2
+    - **Properties**: 2
+  - [ ]* 2.4 [Optional task]
+    - **Depends**: 2.2
 
 - [ ] 3. E2E Tests
   - [ ] 3.1 E2E — [User story scenario]
-    - End-to-end test validating [user story]
-    - **Depends**: 1.1, 1.2
-    - **Requirements**: 1.1, 1.2, 2.1
+    - **Depends**: 2.2, 2.3
+    - **Requirements**: 1.1, 2.1
 
 ## Notes
-<!-- Implementation notes, known issues, etc. -->
 ```
 
-**Task conventions**:
-- IDs use hierarchical numbering: `1.1`, `1.2`, `2.1`, etc.
-- Parent items (`1.`, `2.`) are phase/group headers — their checkbox tracks phase completion. **Always include a descriptive title** (e.g. `- [ ] 1. Set up project infrastructure`).
-- `[ ]*` marks optional tasks.
-- `[~]` = partial/skipped, `[!]` = blocked.
-- **Depends** is the only required metadata field. **Requirements** and **Properties** for traceability.
-- When a task needs testing, create a **separate sub-task** for writing the test (e.g. `1.3 Write property test for X`). Don't embed test specs inside implementation tasks.
+**Conventions**: Hierarchical IDs. Parents = phase headers (checked when all children done). **Depends** required; **Requirements**/**Properties** for traceability. Tests = separate sub-tasks. Each task 30 min – 2 hours.
 
-#### progress.txt template
+### spec.md (fast-track)
 
+This is the single working scratchpad for all three hats: **planner** (Context + Constraints + Tasks), **builder** (check off tasks + append Log), **reviewer** (Decisions + flag issues + add test tasks in Log). No gates — cycle freely between hats throughout the work.
+
+```markdown
+# [SPEC NAME]
+
+## Context
+<!-- Why this work exists, who it's for, what success looks like. -->
+
+[2-3 sentences describing the problem and motivation]
+
+## Constraints
+<!-- Non-negotiable boundaries: tech stack, perf, compatibility, timeline. -->
+
+- [e.g., Must use existing auth system]
+- [e.g., Python 3.11+, no new dependencies]
+
+## Decisions
+<!-- Key choices made. Add as you go — capture the fork, the choice, and why. -->
+
+### D1: [Decision title]
+**Choice:** [what was decided]
+**Why:** [rationale — what was the alternative, why not that]
+
+### D2: [Decision title]
+**Choice:** [what was decided]
+**Why:** [rationale]
+
+## Tasks
+<!-- [ ] pending | [x] done | [~] skipped | [!] BLOCKED: reason -->
+
+### P1 — Must Do
+- [x] 1.1 [Completed task]
+- [ ] 1.2 [Pending task]
+- [ ] 1.3 Test: [what to verify for 1.1-1.2]
+
+### P2 — Should Do
+- [ ] 2.1 [Task description]
+
+### P3 — Nice to Have
+- [ ] 3.1 [Task description]
+
+## Open Questions
+<!-- Unknowns that need research or user input before proceeding. -->
+
+- [ ] [Question — what needs answering, who can answer it]
+- [x] [Resolved question — answer found, see D2]
+
+## Log
+<!-- Append as you go. Date + what happened + decisions made + issues found. -->
+
+**[YYYY-MM-DD]** — [what was done, what was learned, what changed]
+**[YYYY-MM-DD]** — [reviewer hat: added test task 1.3, found gap in X]
 ```
-# Progress Log: [SPEC NAME]
-# Auto-updated by spec-go workflow
-# Format: [TIMESTAMP] [STATUS] [TASK_ID] - [DESCRIPTION]
-# STATUS: DONE | BLOCKED | SKIPPED | IN_PROGRESS
-# SUMMARY: 0/N done | next: 1.1
-```
 
-The `# SUMMARY:` line is machine-readable. Format: `# SUMMARY: <done>/<total> done | next: <NEXT_TASK_ID or DONE>`
+**Conventions**: IDs = `<priority>.<sequence>`. No Depends/Requirements metadata — keep lightweight. Status marks same as full ceremony. The Log is where the reviewer hat lives — flag drift, record why tasks were added/dropped, note test coverage gaps. Open Questions track unknowns that block or inform tasks.
 
-### Parallel Execution
+---
 
-For independent tasks, use worktree mode:
-1. Open a new Cascade in Worktree mode
-2. Run `/spec-task <name> <task>`
-3. Merge back when done
+## Steering Docs (optional)
+
+Read-only project context at `.kiro/steering/` (root, not inside `specs/`):
+`product.md` (vision), `structure.md` (repo layout), `tech.md` (stack decisions).
+Read during planning and before implementing. Never modify during execution.
+
+## Analytic Specs
+
+When analytic/notebook/experiment-oriented, pair with `analytic-workbench`. Requirements should cover artifact outputs, review checkpoints, promotion criteria. Design should make notebook vs module boundaries explicit. Tasks should separate exploratory → review → promotion stages.
