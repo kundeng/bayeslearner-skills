@@ -69,14 +69,14 @@ Discover Entity Integration Pages
     And I set resource globals
     ...    timeout_ms=15000
     ...    retries=2
-    And I begin rule "toc"
-    Given url contains "discover-and-integrate-it-components"
-    And selector ".toc-item a" exists
-    When I expand over elements ".toc-item a" with order "bfs"
-    ...    limit=10
-    Then I extract fields
-    ...    field=page_url    extractor=link    locator="."
-    And I emit to artifact "${ARTIFACT_ENTITY_URLS}"
+    I define rule "toc"
+        Given url contains "discover-and-integrate-it-components"
+        And selector ".toc-item a" exists
+        When I expand over elements ".toc-item a" with order "bfs"
+        ...    limit=10
+        Then I extract fields
+        ...    field=page_url    extractor=link    locator="."
+        And I emit to artifact "${ARTIFACT_ENTITY_URLS}"
 
 Discover Event Analytics Pages
     [Documentation]    BFS expand left-nav TOC to collect Event Analytics page URLs.
@@ -84,14 +84,14 @@ Discover Event Analytics Pages
     And I set resource globals
     ...    timeout_ms=15000
     ...    retries=2
-    And I begin rule "toc"
-    Given url contains "detect-and-act-on-notable-events"
-    And selector ".toc-item a" exists
-    When I expand over elements ".toc-item a" with order "bfs"
-    ...    limit=10
-    Then I extract fields
-    ...    field=page_url    extractor=link    locator="."
-    And I emit to artifact "${ARTIFACT_EVENTS_URLS}"
+    I define rule "toc"
+        Given url contains "detect-and-act-on-notable-events"
+        And selector ".toc-item a" exists
+        When I expand over elements ".toc-item a" with order "bfs"
+        ...    limit=10
+        Then I extract fields
+        ...    field=page_url    extractor=link    locator="."
+        And I emit to artifact "${ARTIFACT_EVENTS_URLS}"
 
 Extract Entity Integration Pages
     [Documentation]    Open each Entity Integration page, extract title, body, and AI-cleaned content.
@@ -100,19 +100,19 @@ Extract Entity Integration Pages
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
-    And I begin rule "page"
-    And selector "main article" exists
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h1"
-    ...    field=url      extractor=link    locator="."
-    ...    field=body     extractor=html    locator="main article"
-    Then I extract with AI "cleaned"
-    ...    input=body
-    ...    output=markdown
-    ...    max_size=30000
-    ...    prompt=${AI_CLEANUP_PROMPT}
-    And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
-    And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
+    I define rule "page"
+        And selector "main article" exists
+        Then I extract fields
+        ...    field=title    extractor=text    locator="h1"
+        ...    field=url      extractor=link    locator="."
+        ...    field=body     extractor=html    locator="main article"
+        Then I extract with AI "cleaned"
+        ...    input=body
+        ...    output=markdown
+        ...    max_size=30000
+        ...    prompt=${AI_CLEANUP_PROMPT}
+        And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
+        And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
 Extract Event Analytics Pages
     [Documentation]    Open each Event Analytics page, extract title, body, and AI-cleaned content.
@@ -121,19 +121,19 @@ Extract Event Analytics Pages
     And I set resource globals
     ...    timeout_ms=20000
     ...    retries=2
-    And I begin rule "page"
-    And selector "main article" exists
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h1"
-    ...    field=url      extractor=link    locator="."
-    ...    field=body     extractor=html    locator="main article"
-    Then I extract with AI "cleaned"
-    ...    input=body
-    ...    output=markdown
-    ...    max_size=30000
-    ...    prompt=${AI_CLEANUP_PROMPT}
-    And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
-    And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
+    I define rule "page"
+        And selector "main article" exists
+        Then I extract fields
+        ...    field=title    extractor=text    locator="h1"
+        ...    field=url      extractor=link    locator="."
+        ...    field=body     extractor=html    locator="main article"
+        Then I extract with AI "cleaned"
+        ...    input=body
+        ...    output=markdown
+        ...    max_size=30000
+        ...    prompt=${AI_CLEANUP_PROMPT}
+        And I emit to artifact "${ARTIFACT_PAGES_NESTED}"
+        And I emit to artifact "${ARTIFACT_PAGES_FLAT}"
 
 Quality Gates
     [Documentation]    Minimum record and fill-rate thresholds.

@@ -37,22 +37,22 @@ Resource page_index
 
     # Rule: root — state gate confirming correct page before extraction
     # Evidence: url is /; h1.heading and ul with li>a elements present
-    And I begin rule "root"
-    Given url contains "/"
-    And selector "#content ul li a" exists
+    I define rule "root"
+        Given url contains "/"
+        And selector "#content ul li a" exists
 
     # Rule: items — expand over each li and extract page name + URL
     # Evidence: 44 #content ul li elements on a single page.
     # Extractors:
     #   page_name — a; link text (page display name)
     #   page_url  — a; href resolved to absolute URL
-    And I begin rule "items"
-    And I declare parents "root"
-    When I expand over elements "#content ul li"
-    Then I extract fields
-    ...    field=page_name    extractor=text    locator="a"
-    ...    field=page_url     extractor=link    locator="a"
-    And I emit to artifact "${ARTIFACT_PAGES}"
+    I define rule "items"
+        And I declare parents "root"
+        When I expand over elements "#content ul li"
+        Then I extract fields
+        ...    field=page_name    extractor=text    locator="a"
+        ...    field=page_url     extractor=link    locator="a"
+        And I emit to artifact "${ARTIFACT_PAGES}"
 
 Quality Gates
     # 44 pages total; require at least 40 to allow for minor edge cases

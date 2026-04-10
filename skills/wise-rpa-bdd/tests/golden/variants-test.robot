@@ -13,6 +13,7 @@ Suite Teardown    Then I finalize deployment
 *** Variables ***
 ${DEPLOYMENT}    laptop-ajax-variants-scrape
 ${ARTIFACT_PRODUCT_URLS}    product_urls
+${ARTIFACT_HDD_OPTIONS}    hdd_options
 ${ARTIFACT_VARIANT_DATA}    variant_data
 ${ARTIFACT_VARIANT_DATA_FLAT}    variant_data_flat
 ${ENTRY_DISCOVER}    https://www.webscraper.io/test-sites/e-commerce/ajax/computers/laptops
@@ -26,6 +27,16 @@ Artifact Catalog
     And I set artifact options for "${ARTIFACT_PRODUCT_URLS}"
     ...    dedupe=url
     ...    description=Product detail page URLs discovered from AJAX listing page
+
+    # HDD options artifact — records the auto-discovered permissible values per product
+    Given I register artifact "${ARTIFACT_HDD_OPTIONS}"
+    ...    field=control    type=string    required=true
+    ...    field=value      type=string    required=true
+    And I set artifact options for "${ARTIFACT_HDD_OPTIONS}"
+    ...    output=true
+    ...    structure=flat
+    ...    consumes=product_urls
+    ...    description=Auto-discovered HDD swatch values per product page
 
     Given I register artifact "${ARTIFACT_VARIANT_DATA}"
     ...    field=title    type=string    required=true
@@ -56,17 +67,17 @@ Resource discover
     ...    timeout_ms=30000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    And I begin rule "root"
-    Given url matches "/ajax/computers/laptops"
-    And selector ".thumbnail" exists
-    And I begin rule "products"
-    And I declare parents "root"
-    When I expand over elements ".thumbnail" with order "bfs"
-    ...    limit=6
-    Then I extract fields
-    ...    field=url    extractor=attr    locator="a.title"    attr="href"
-    ...    field=title    extractor=attr    locator="a.title"    attr="title"
-    And I emit to artifact "${ARTIFACT_PRODUCT_URLS}"
+    I define rule "root"
+        Given url matches "/ajax/computers/laptops"
+        And selector ".thumbnail" exists
+    I define rule "products"
+        And I declare parents "root"
+        When I expand over elements ".thumbnail" with order "bfs"
+        ...    limit=6
+        Then I extract fields
+        ...    field=url    extractor=attr    locator="a.title"    attr="href"
+        ...    field=title    extractor=attr    locator="a.title"    attr="title"
+        And I emit to artifact "${ARTIFACT_PRODUCT_URLS}"
 
 Resource variants
     [Documentation]    Produces: variant_data, variant_data_flat
@@ -75,21 +86,21 @@ Resource variants
     ...    timeout_ms=30000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    And I begin rule "detail_root"
-    Given url matches "/ajax/product/"
-    And selector ".swatches" exists
-    And I begin rule "hdd_variants"
-    And I declare parents "detail_root"
-    When I expand over combinations
-    ...    action=click    control="button.swatch"    values=128|256|512|1024
-    When I wait 500 ms
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h4.card-title"
-    ...    field=description    extractor=text    locator="p.description"
-    ...    field=price    extractor=text    locator="h4.price.pull-right"
-    ...    field=hdd_size    extractor=text    locator="button.swatch.active"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA}"
-    And I emit to artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
+    I define rule "detail_root"
+        Given url matches "/ajax/product/"
+        And selector ".swatches" exists
+    I define rule "hdd_variants"
+        And I declare parents "detail_root"
+        When I expand over combinations
+        ...    action=click    control="button.swatch"    values=auto    emit=hdd_options
+        When I wait 500 ms
+        Then I extract fields
+        ...    field=title    extractor=text    locator="h4.card-title"
+        ...    field=description    extractor=text    locator="p.description"
+        ...    field=price    extractor=text    locator="h4.price.pull-right"
+        ...    field=hdd_size    extractor=text    locator="button.swatch.active"
+        And I emit to artifact "${ARTIFACT_VARIANT_DATA}"
+        And I emit to artifact "${ARTIFACT_VARIANT_DATA_FLAT}"
 
 Quality Gates
     And I set quality gate min records to 24

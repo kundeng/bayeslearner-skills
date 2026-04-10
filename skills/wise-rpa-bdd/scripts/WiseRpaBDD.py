@@ -95,8 +95,17 @@ class Expansion:
 class RuleNode:
     name: str
     parents: list[str] = field(default_factory=list)
-    state_checks: list[StateCheck] = field(default_factory=list)
-    actions: list[Action] = field(default_factory=list)
+    # Type 1 — Guards (preconditions): "Is the world in the expected state?"
+    # Defensive checks run before any actions.  In a perfect MDP these are
+    # redundant; they exist to catch unexpected state (wrong page, anti-bot).
+    guards: list[StateCheck] = field(default_factory=list)
+    # Type 2 — Steps: ordered list of Actions and inline StateCheck
+    # observations.  Observations between actions are synchronization gates
+    # ("has the side effect landed?"), required for correctness.
+    steps: list[Action | StateCheck] = field(default_factory=list)
+    # Policy when a guard fails: "skip" (default — skip rule + children)
+    # or "abort" (stop the entire walk — hard precondition).
+    guard_policy: str = "skip"
     expansion: Expansion | None = None
     field_specs: list[FieldSpec] = field(default_factory=list)
     table_spec: TableSpec | None = None
@@ -107,6 +116,12 @@ class RuleNode:
     children: list[RuleNode] = field(default_factory=list)
     retry_max: int = 0
     retry_delay_ms: int = 1000
+    # Per-rule interrupt scoping: override global interrupt selectors
+    interrupt_override: list[str] | None = None  # None = inherit global
+    interrupt_paused: bool = False                # True = skip dismiss for this rule
+    # Declarative rule lifecycle options
+    options: dict[str, str] = field(default_factory=dict)
+    # Recognized keys: on_enter (screenshot), on_fail (screenshot), timeout_ms (int)
 
 
 @dataclass
@@ -283,10 +298,10 @@ class _StealthAdapter:
         load = "load"
 
     def __init__(self) -> None:
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._pw: Any = None
+        self._browser: Any = None
+        self._context: Any = None
+        self._page: Any = None
         self._timeout = 30_000
 
     # -- lifecycle ----------------------------------------------------------
@@ -295,7 +310,7 @@ class _StealthAdapter:
         try:
             from patchright.sync_api import sync_playwright
         except ImportError:
-            from playwright.sync_api import sync_playwright
+            from playwright.sync_api import sync_playwright  # type: ignore[assignment]
         self._pw = sync_playwright().start()
         logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")
         self._browser = self._pw.chromium.launch(
@@ -353,10 +368,17 @@ class _StealthAdapter:
         self._page.wait_for_load_state(s, timeout=self._timeout)
 
     def wait_for_elements_state(self, selector: str, state: str = "attached",
-                                timeout: str = "10s", **_kw: Any) -> None:
-        ms = int(timeout.replace("s", "").replace("ms", "").strip())
-        if "s" in timeout and "ms" not in timeout:
-            ms *= 1000
+                                timeout: Any = "10s", **_kw: Any) -> None:
+        from datetime import timedelta
+        if isinstance(timeout, timedelta):
+            ms = int(timeout.total_seconds() * 1000)
+        elif isinstance(timeout, (int, float)):
+            ms = int(timeout)
+        else:
+            timeout_str = str(timeout)
+            ms = int(timeout_str.replace("s", "").replace("ms", "").strip())
+            if "s" in timeout_str and "ms" not in timeout_str:
+                ms *= 1000
         self._page.wait_for_selector(selector, state="attached", timeout=ms)
 
     # -- element queries ----------------------------------------------------
@@ -506,8 +528,16 @@ class _StealthBrowserBridge:
         ]
 
     def run_keyword(self, name: str, args: list, kwargs: dict | None = None) -> Any:
-        """Dynamic library interface — dispatch keyword by name."""
+        """Dynamic library interface — dispatch keyword by name.
+
+        RF-Browser registers keywords with snake_case names internally
+        (e.g. ``fill_text``), but the display names are Title Case
+        (``Fill Text``).  The DynamicKeyword handler passes the original
+        snake_case ``_orig_name`` to ``run_keyword``, so we must handle both
+        forms.
+        """
         method_map = {
+            # Title Case (display names)
             "Go To": self.go_to,
             "Get Url": self.get_url,
             "Click": self.click,
@@ -524,9 +554,26 @@ class _StealthBrowserBridge:
             "Wait For Elements State": self.wait_for_elements_state,
             "Take Screenshot": self.take_screenshot,
             "Evaluate JavaScript": self.evaluate_javascript,
+            # snake_case (RF-Browser internal _orig_name)
+            "go_to": self.go_to,
+            "get_url": self.get_url,
+            "click": self.click,
+            "fill_text": self.fill_text,
+            "type_text": self.type_text,
+            "hover": self.hover,
+            "focus": self.focus,
+            "press_keys": self.press_keys,
+            "check_checkbox": self.check_checkbox,
+            "select_options_by": self.select_options_by,
+            "get_text": self.get_text,
+            "get_attribute": self.get_attribute,
+            "get_element_count": self.get_element_count,
+            "wait_for_elements_state": self.wait_for_elements_state,
+            "take_screenshot": self.take_screenshot,
+            "evaluate_javascript": self.evaluate_javascript,
         }
-        method = method_map.get(name)
-        if method:
+        method: Any = method_map.get(name)
+        if method is not None:
             return method(*args, **(kwargs or {}))
         raise RuntimeError(f"StealthBrowserBridge: keyword '{name}' not bridged")
 
@@ -572,10 +619,17 @@ class ExecutionEngine:
         self.stealth = stealth
         self._adapter: Any = None
         self._instrument = os.environ.get(
-            "WISE_RPA_INSTRUMENT", ""
-        ).lower() in ("1", "true", "yes")
+            "WISE_RPA_INSTRUMENT", "1"
+        ).lower() not in ("0", "false", "no")
         self._max_run_time = int(os.environ.get("WISE_RPA_TIMEOUT", "120"))
         self._run_start: float = 0
+        self._stealth_bridge: _StealthBrowserBridge | None = None
+        # Slow-motion mode: pause between actions for debugging/demos
+        _slow_raw = os.environ.get("WISE_RPA_SLOW", "")
+        self._slow_ms = int(_slow_raw) if _slow_raw.isdigit() else 0
+        self._slow_screenshot = os.environ.get(
+            "WISE_RPA_SLOW_SCREENSHOT", ""
+        ).lower() in ("1", "true", "yes")
 
     def _bl(self) -> Any:
         """Lazy-init the browser backend.
@@ -589,7 +643,7 @@ class ExecutionEngine:
                 self._PageLoadStates = self._adapter.load_states
                 self._stealth_bridge = _StealthBrowserBridge(self._adapter)
             else:
-                self._stealth_bridge = None
+                pass  # _stealth_bridge already None from __init__
                 self._adapter = _get_rf_browser()
                 from Browser.utils.data_types import PageLoadStates
                 self._PageLoadStates = PageLoadStates
@@ -897,30 +951,60 @@ class ExecutionEngine:
 
         ctx = dict(context or {})
         records: list[dict] = []
+        bl = self._bl()
 
-        # State check with retry
+        # on_enter hook
+        if rule.options.get("on_enter") == "screenshot":
+            try:
+                bl.take_screenshot(filename=f"on_enter_{rule.name}.png")
+            except Exception:
+                pass
+
+        # Guards (Type 1 preconditions) with retry
         t0 = time.time() if self._instrument else 0
-        state_ok = self._check_state(rule, current_url)
-        if not state_ok and rule.retry_max > 0:
+        guards_ok = self._check_guards(rule, current_url)
+        if not guards_ok and rule.retry_max > 0:
             for attempt in range(1, rule.retry_max + 1):
                 logger.info(f"  Retry {attempt}/{rule.retry_max} for rule '{rule.name}'")
                 time.sleep(rule.retry_delay_ms / 1000.0)
-                self._execute_actions(rule, res, context=ctx)
-                state_ok = self._check_state(rule, current_url)
-                if state_ok:
+                self._execute_steps(rule, res, context=ctx)
+                guards_ok = self._check_guards(rule, current_url)
+                if guards_ok:
                     break
         if self._instrument:
             dt = time.time() - t0
-            logger.warn(f"  [INSTRUMENT] {rule.name}: state_check={dt:.2f}s ok={state_ok}")
-        if not state_ok:
-            logger.warn(f"  State check FAILED for rule '{rule.name}' — skipping")
+            logger.warn(f"  [INSTRUMENT] {rule.name}: state_check={dt:.2f}s ok={guards_ok}")
+        if not guards_ok:
+            if rule.options.get("on_fail") == "screenshot":
+                try:
+                    bl.take_screenshot(filename=f"on_fail_{rule.name}_guard.png")
+                except Exception:
+                    pass
+            if rule.guard_policy == "abort":
+                logger.warn(f"  Guard FAILED for rule '{rule.name}' — ABORTING walk")
+                raise RuntimeError(f"Guard failed (abort policy) for rule '{rule.name}'")
+            logger.warn(f"  Guard FAILED for rule '{rule.name}' — skipping")
             return records
 
+        # Steps (actions interleaved with Type 2 observation gates)
+        # Apply per-rule timeout if declared
+        rule_timeout_ms = rule.options.get("timeout_ms")
+        rule_deadline = (time.time() + int(rule_timeout_ms) / 1000.0) if rule_timeout_ms else None
+
         t0 = time.time() if self._instrument else 0
-        self._execute_actions(rule, res, context=ctx)
+        n_actions = sum(1 for s in rule.steps if isinstance(s, Action))
+        try:
+            self._execute_steps(rule, res, context=ctx, deadline=rule_deadline)
+        except TimeoutError:
+            logger.warn(f"  Rule '{rule.name}' timed out after {rule_timeout_ms}ms")
+            if rule.options.get("on_fail") == "screenshot":
+                try:
+                    bl.take_screenshot(filename=f"on_fail_{rule.name}_timeout.png")
+                except Exception:
+                    pass
         if self._instrument:
             dt = time.time() - t0
-            logger.warn(f"  [INSTRUMENT] {rule.name}: actions={dt:.2f}s ({len(rule.actions)} actions)")
+            logger.warn(f"  [INSTRUMENT] {rule.name}: actions={dt:.2f}s ({n_actions} actions)")
 
         # Refresh current_url after actions (click may have navigated)
         try:
@@ -967,92 +1051,153 @@ class ExecutionEngine:
 
         return records
 
-    def _check_state(self, rule: RuleNode, current_url: str) -> bool:
-        if not rule.state_checks:
+    def _check_guards(self, rule: RuleNode, current_url: str) -> bool:
+        """Check Type 1 guards (preconditions). Returns False if any fail."""
+        if not rule.guards:
             return True
         bl = self._bl()
-        # Dismiss any interrupts before checking state
         self._dismiss_interrupts(bl)
-        # Use actual browser URL for state checks
         try:
             actual_url = bl.get_url()
             if actual_url:
                 current_url = actual_url
         except Exception:
             pass
-        for check in rule.state_checks:
-            if check.type == "url_matches":
-                if check.pattern not in current_url:
-                    return False
-            elif check.type == "url_contains":
-                if check.pattern not in current_url:
-                    return False
-            elif check.type == "url_not_contains":
-                if check.pattern in current_url:
-                    return False
-            elif check.type == "selector_exists":
-                try:
-                    resolved = self._resolve_fallback_selector(check.pattern, None)
-                    count = bl.get_element_count(resolved)
-                    if count == 0:
-                        # Use Playwright's native wait_for_selector instead of polling
-                        self._dismiss_interrupts(bl)
-                        bl.wait_for_elements_state(resolved, "attached", "10s")
-                        count = bl.get_element_count(resolved)
-                    if count == 0:
-                        return False
-                except Exception:
-                    return False
-            elif check.type == "table_headers":
-                pass
+        for check in rule.guards:
+            if not self._eval_state_check(check, current_url, bl):
+                return False
         return True
 
-    def _execute_actions(self, rule: RuleNode, res: ResourceContext,
-                         context: dict[str, Any] | None = None) -> None:
-        if not rule.actions:
+    def _eval_state_check(self, check: StateCheck, current_url: str,
+                          bl: Any) -> bool:
+        """Evaluate a single state check. Used by guards and inline observations."""
+        if check.type == "url_matches":
+            return check.pattern in current_url
+        elif check.type == "url_contains":
+            return check.pattern in current_url
+        elif check.type == "url_not_contains":
+            return check.pattern not in current_url
+        elif check.type == "selector_exists":
+            try:
+                resolved = self._resolve_fallback_selector(check.pattern, None)
+                count = bl.get_element_count(resolved)
+                if count == 0:
+                    self._dismiss_interrupts(bl)
+                    bl.wait_for_elements_state(resolved, "attached", "10s")
+                    count = bl.get_element_count(resolved)
+                return count > 0
+            except Exception:
+                return False
+        elif check.type == "table_headers":
+            return True  # placeholder
+        return True
+
+    def _get_interrupt_selectors(self, rule: RuleNode) -> list[str]:
+        """Return the effective interrupt selectors for a rule.
+
+        Per-rule scoping: rule.interrupt_paused suppresses all dismiss.
+        rule.interrupt_override replaces the global list.
+        Otherwise inherit from ctx.interrupt_selectors.
+        """
+        if rule.interrupt_paused:
+            return []
+        if rule.interrupt_override is not None:
+            return rule.interrupt_override
+        return self.ctx.interrupt_selectors
+
+    def _execute_steps(self, rule: RuleNode, res: ResourceContext,
+                       context: dict[str, Any] | None = None,
+                       deadline: float | None = None) -> None:
+        """Execute steps: actions interleaved with Type 2 observation gates."""
+        if not rule.steps:
             return
-        for action in rule.actions:
+        bl = self._bl()
+        interrupt_sels = self._get_interrupt_selectors(rule)
+        for step in rule.steps:
+            if deadline and time.time() > deadline:
+                raise TimeoutError(f"Rule '{rule.name}' exceeded timeout")
+            # Inline observation gate (Type 2 StateCheck between actions)
+            if isinstance(step, StateCheck):
+                try:
+                    current_url = bl.get_url()
+                except Exception:
+                    current_url = ""
+                ok = self._eval_state_check(step, current_url, bl)
+                if not ok:
+                    logger.warn(f"  Observation gate failed: {step.type}={step.pattern}")
+                continue
+
+            # Action
+            action = step
             # Dismiss interrupts before each action — popups can appear
             # at any moment and block clicks/interactions
-            if self.ctx.interrupt_selectors:
-                self._dismiss_interrupts(self._bl())
+            if interrupt_sels:
+                self._dismiss_interrupts_with(bl, interrupt_sels)
             try:
-                self._do_action(action, res, context=context)
+                self._do_action_instrumented(action, res, context=context)
             except Exception as e:
                 # Recovery: dismiss interrupts and retry once — a popup
                 # may have appeared between the dismiss and the action
-                if self.ctx.interrupt_selectors:
-                    self._dismiss_interrupts(self._bl())
+                if interrupt_sels:
+                    self._dismiss_interrupts_with(bl, interrupt_sels)
                     try:
-                        self._do_action(action, res, context=context)
+                        self._do_action_instrumented(action, res, context=context)
                         continue
                     except Exception:
                         pass
                 logger.warn(f"  Action {action.type} failed: {e}")
 
+    def _do_action_instrumented(self, action: Action, res: ResourceContext,
+                               context: dict[str, Any] | None = None) -> None:
+        """AOP wrapper: instruments _do_action with timing + error context.
+
+        Also handles slow-motion mode (WISE_RPA_SLOW=N) for debugging/demos.
+        """
+        label = f"{action.type}({(action.locator or action.value or '')[:40]})"
+        t0 = time.time()
+        try:
+            self._do_action(action, res, context=context)
+        except Exception:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {label} FAILED {dt:.2f}s")
+            raise
+        dt = time.time() - t0
+        if dt > 0.5:
+            logger.warn(f"  [INSTRUMENT] {label} = {dt:.2f}s")
+        # Slow-motion: pause after each action for debugging/demos
+        if self._slow_ms:
+            time.sleep(self._slow_ms / 1000.0)
+            if self._slow_screenshot:
+                try:
+                    bl = self._bl()
+                    rule_name = getattr(res, 'name', 'unknown')
+                    fname = f"slow_{rule_name}_{label}.png"
+                    bl.take_screenshot(filename=fname)
+                except Exception:
+                    pass
+
     def _do_action(self, action: Action, res: ResourceContext,
                    context: dict[str, Any] | None = None) -> None:
         bl = self._bl()
-        delay_ms = int(action.options.get("delay_ms", 0))
 
         if action.type == "click":
             bl.click(action.locator)
-            if delay_ms:
-                time.sleep(delay_ms / 1000.0)
         elif action.type == "type":
             bl.fill_text(action.locator, action.value or "")
-            if delay_ms:
-                time.sleep(delay_ms / 1000.0)
         elif action.type == "select":
             bl.select_options_by(action.locator, "value", action.value or "")
         elif action.type == "scroll":
             bl.evaluate_javascript(None, "window.scrollBy(0, window.innerHeight)")
-            time.sleep(0.5)
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.networkidle, "5s")
+            except Exception:
+                pass
         elif action.type == "wait":
             bl.wait_for_load_state(self._PageLoadStates.networkidle)
         elif action.type == "wait_ms":
-            ms = int(action.value or 0)
-            time.sleep(ms / 1000.0)
+            # Legacy — prefer await= or split rules instead
+            bl.wait_for_load_state(self._PageLoadStates.networkidle,
+                                   f"{int(action.value or 5000)}ms")
         elif action.type == "open":
             bl.go_to(action.value or "")
             self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
@@ -1129,12 +1274,20 @@ class ExecutionEngine:
                 pass  # navigation may destroy context
             self._wait_page_ready(bl)
         elif action.type == "set_stepper":
-            # Click a stepper button N times; wait for it to appear first
+            # Click a stepper button N times via JS to avoid Playwright's
+            # stability checks — stepper buttons re-render after each click,
+            # causing "element not stable" / "detached from DOM" errors.
             count = int(action.value or 0)
             locator = action.locator
             bl.wait_for_elements_state(locator, "attached", "5s")
             for _ in range(count):
-                bl.click(locator)
+                click_script = (
+                    f"(() => {{ const el = document.querySelector({json.dumps(locator)}); "
+                    f"if (el) {{ el.click(); return true; }} return false; }})()"
+                )
+                bl.evaluate_javascript(None, click_script)
+                # Wait for re-render before next click
+                bl.wait_for_elements_state(locator, "attached", "2s")
         elif action.type == "select_date":
             self._do_select_date(bl, action)
         elif action.type == "browser_step":
@@ -1160,7 +1313,10 @@ class ExecutionEngine:
                 else:
                     raise
             # Detect if JS triggered a page navigation
-            time.sleep(1)
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded, "2s")
+            except Exception:
+                pass
             try:
                 url_after = bl.get_url()
             except Exception:
@@ -1186,48 +1342,82 @@ class ExecutionEngine:
                 from robot.libraries.BuiltIn import BuiltIn
                 BuiltIn().run_keyword(kw_name, *action.args)
 
+        # ── Inline observation gate (await=<selector>) ───────────────
+        # After any action, if await= is declared, wait for that selector
+        # before the engine advances to the next action.  MDP: s,a→o
+        # where 'await' is the expected observation 'o'.
+        await_sel = action.options.get("await")
+        if await_sel:
+            resolved = self._resolve_fallback_selector(await_sel, None)
+            bl.wait_for_elements_state(resolved, "attached", "10s")
+
     def _run_keyword_with_bridge(self, kw_name: str, args: tuple) -> None:
         """Run an RF keyword in stealth mode.
 
-        Temporarily swaps the Browser library instance with the stealth
-        bridge so that raw Browser calls (Click, Fill Text, etc.) inside
-        the keyword resolve against the stealth adapter's live page.
+        Temporarily swaps the Browser library's ``_instance`` with the stealth
+        bridge so that raw Browser calls (Click, Fill Text, etc.) inside the
+        keyword resolve against the stealth adapter's live page.
+
+        How it works (RF 7.x):
+        - RF stores libraries in ``namespace._kw_store.libraries`` (OrderedDict
+          keyed by name).  Each library is a ``TestLibrary`` whose ``.instance``
+          property returns ``._instance``.
+        - Dynamic keywords call ``self.owner.instance`` every time their
+          ``.method`` property is accessed (not cached).  Swapping
+          ``lib._instance`` therefore redirects all keyword dispatch for the
+          duration of the call.
+
+        Browser control hierarchy (3-layer stack):
+          Layer 3: RF Keywords (Click, Fill Text, …) — user-facing
+          Layer 2: Adapter interface (click(), fill_text(), …)
+          Layer 1a: RFBrowserAdapter → RF-Browser lib → Playwright (via gRPC)
+          Layer 1b: StealthAdapter   → Patchright (patched Playwright, in-proc)
+        In stealth mode, Layer 1a has no page.  The bridge routes Layer 3
+        keywords to Layer 1b so ``call_keyword`` blocks work correctly.
         """
         from robot.libraries.BuiltIn import BuiltIn
         bi = BuiltIn()
         bridge = self._stealth_bridge
-        swapped = False
+        lib_entry = None
 
-        # Swap the Browser library's internal instance with our bridge
+        # Locate the Browser TestLibrary in RF's keyword store.
+        # RF 7.x: namespace._kw_store.libraries is an OrderedDict.
         try:
             ns = bi._namespace
-            for lib in ns._kw_store._libraries:
+            libs = ns._kw_store.libraries
+            # Try direct key lookup first (most reliable)
+            for key, lib in libs.items():
                 if getattr(lib, 'name', '') == 'Browser':
-                    self._original_browser_instance = lib._instance
-                    lib._instance = bridge
-                    swapped = True
+                    lib_entry = lib
                     break
         except Exception as e:
-            logger.warn(f"  Could not swap Browser instance for stealth: {e}")
+            logger.warn(f"  Could not locate Browser library for stealth bridge: {e}")
+
+        if lib_entry is None:
+            # Fallback: run without bridge — keyword will use whatever is
+            # registered, which may fail in stealth mode.
+            logger.warn("  Browser library not found in keyword store — "
+                        "running call_keyword without stealth bridge")
+            bi.run_keyword(kw_name, *args)
+            return
+
+        # Swap and run
+        original_instance = lib_entry._instance
+        lib_entry._instance = bridge
+        logger.info(f"  Stealth bridge: swapped Browser instance for '{kw_name}'")
 
         try:
             bi.run_keyword(kw_name, *args)
         finally:
-            if swapped:
-                try:
-                    ns = bi._namespace
-                    for lib in ns._kw_store._libraries:
-                        if getattr(lib, 'name', '') == 'Browser':
-                            lib._instance = self._original_browser_instance
-                            break
-                except Exception:
-                    pass
+            lib_entry._instance = original_instance
+            logger.info(f"  Stealth bridge: restored Browser instance after '{kw_name}'")
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
                           executed: set[str] | None = None,
                           context: dict[str, Any] | None = None) -> list[dict]:
         exp = rule.expansion
+        assert exp is not None  # caller guarantees
         if exp.over == "elements":
             return self._expand_elements(rule, res, current_url,
                                          executed=executed, context=context)
@@ -1248,10 +1438,11 @@ class ExecutionEngine:
                          context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
-        selector = exp.scope
+        assert exp is not None
+        selector = exp.scope or ""
         limit = exp.limit
         use_bfs = (exp.order == "bfs")
-        records = []
+        records: list[dict] = []
 
         # exclude_if: skip elements where a child selector matches (e.g. sponsored items)
         exclude_if = exp.options.get("exclude_if")
@@ -1338,17 +1529,17 @@ class ExecutionEngine:
                 if record and record.get("data"):
                     elem_ctx.update(record["data"])
 
-                child_records: dict[str, list] = {}
+                dfs_children: dict[str, list] = {}
                 for child in rule.children:
                     child_data = self._walk_rule(child, res, elem_selector,
                                                  current_url, executed=executed,
                                                  context=elem_ctx)
                     if child_data:
-                        child_records[child.name] = child_data
+                        dfs_children[child.name] = child_data
 
                 if record is not None:
-                    if child_records:
-                        record["_children"] = child_records
+                    if dfs_children:
+                        record["_children"] = dfs_children
                     records.append(record)
 
         return records
@@ -1359,6 +1550,7 @@ class ExecutionEngine:
                            context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         next_selector = exp.locator
         limit = exp.limit
         records = []
@@ -1380,9 +1572,50 @@ class ExecutionEngine:
                 if count == 0:
                     logger.info("    No next button found, stopping pagination")
                     break
+
+                # Grab a fingerprint of the current page content so we can
+                # detect when the AJAX swap completes after clicking Next.
+                # Use the child expansion scope as the staleness anchor.
+                stale_scope = None
+                for child in rule.children:
+                    if child.expansion and child.expansion.over == "elements":
+                        stale_scope = child.expansion.scope
+                        break
+                old_text = ""
+                if stale_scope:
+                    try:
+                        old_text = bl.get_text(f"{stale_scope} >> nth=0")
+                    except Exception:
+                        pass
+
                 bl.click(next_selector)
+
+                # Wait for content swap: poll until the first element's text
+                # changes (staleness) or networkidle, whichever comes first.
                 page_delay = int(res.globals_.get("page_load_delay_ms", 500))
-                time.sleep(page_delay / 1000.0)
+                timeout_s = max(page_delay, 5000) / 1000.0
+                if stale_scope and old_text:
+                    deadline = time.time() + timeout_s
+                    while time.time() < deadline:
+                        try:
+                            new_text = bl.get_text(f"{stale_scope} >> nth=0")
+                        except Exception:
+                            new_text = ""
+                        if new_text and new_text != old_text:
+                            break
+                        try:
+                            bl.wait_for_load_state(
+                                self._PageLoadStates.networkidle, "500ms")
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        bl.wait_for_load_state(
+                            self._PageLoadStates.networkidle,
+                            f"{max(page_delay, 5000)}ms")
+                    except Exception:
+                        pass
+
                 self._dismiss_interrupts(bl)
             except Exception as e:
                 logger.info(f"    Pagination ended: {e}")
@@ -1396,6 +1629,7 @@ class ExecutionEngine:
                               context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         control_selector = exp.locator
         start = exp.start
         limit = exp.limit
@@ -1448,6 +1682,7 @@ class ExecutionEngine:
         """Cartesian product of combination axes."""
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         axes = exp.axes
         if not axes:
             return []
@@ -1537,7 +1772,10 @@ class ExecutionEngine:
                     logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
 
             # Wait for AJAX to settle after combo actions (tab clicks etc.)
-            time.sleep(2.0)
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.networkidle, "5s")
+            except Exception:
+                pass
 
             # Build per-combo context
             combo_ctx = dict(context or {})
@@ -1575,6 +1813,9 @@ class ExecutionEngine:
             if table_result:
                 data.update(table_result.get("data", {}))
 
+        # Run post_extract hooks (before AI — e.g. to_markdown converts HTML first)
+        data = self._invoke_hooks("post_extract", data)
+
         if rule.ai_extraction:
             ai_result = self._run_ai_extraction(rule.ai_extraction, data)
             if ai_result:
@@ -1582,9 +1823,6 @@ class ExecutionEngine:
 
         if not data:
             return None
-
-        # Run post_extract hooks
-        data = self._invoke_hooks("post_extract", data)
 
         return {
             "node": rule.name,
@@ -2086,31 +2324,36 @@ class ExecutionEngine:
             return
 
         # Navigate forward until target month heading is visible
+        check_script = (
+            f"(() => {{ "
+            f"const headings = []; "
+            f"for (const h of document.querySelectorAll({json.dumps(heading_sel)})) "
+            f"{{ const t = h.textContent.trim(); headings.push(t); "
+            f"if (t === {json.dumps(month_year)}) return {{found: true, headings}}; }} "
+            f"return {{found: false, headings}}; }})()"
+        )
+        fwd_script = (
+            f"(() => {{ const btn = document.querySelector({json.dumps(forward_sel)}); "
+            f"if (btn) {{ btn.click(); return true; }} return false; }})()"
+        )
         for click_i in range(max_clicks):
-            # Check if target month heading is visible
-            check_script = (
-                f"(() => {{ "
-                f"const headings = []; "
-                f"for (const h of document.querySelectorAll({json.dumps(heading_sel)})) "
-                f"{{ const t = h.textContent.trim(); headings.push(t); "
-                f"if (t === {json.dumps(month_year)}) return {{found: true, headings}}; }} "
-                f"return {{found: false, headings}}; }})()"
-            )
             result = bl.evaluate_javascript(None, check_script)
             if result and result.get("found"):
                 break
             if self._instrument and click_i == 0:
                 logger.warn(f"  [INSTRUMENT] select_date: looking for {month_year}, visible: {result}")
-            # Use JS click for the forward button to avoid Playwright's
-            # actionability checks which may interfere with calendar panels
-            fwd_script = (
-                f"(() => {{ const btn = document.querySelector({json.dumps(forward_sel)}); "
-                f"if (btn) {{ btn.click(); return true; }} return false; }})()"
-            )
+            # Snapshot current headings before clicking forward
+            old_headings = result.get("headings", []) if result else []
             clicked_fwd = bl.evaluate_javascript(None, fwd_script)
             if not clicked_fwd:
                 break
-            time.sleep(0.3)
+            # Poll until heading text changes (calendar re-rendered)
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                new_result = bl.evaluate_javascript(None, check_script)
+                new_headings = new_result.get("headings", []) if new_result else []
+                if new_headings != old_headings:
+                    break
 
         # Click the day button
         # ARIA pattern: aria-label starts with "DAY, " and contains "MONTH YEAR"
@@ -2125,7 +2368,6 @@ class ExecutionEngine:
         clicked = bl.evaluate_javascript(None, click_script)
         if not clicked:
             logger.warn(f"  Could not find day button for {date_str}")
-        time.sleep(0.3)
 
     def _wait_page_ready(self, bl: Any, page_delay_ms: int = 0) -> None:
         """Wait for page to be ready after navigation.
@@ -2137,13 +2379,16 @@ class ExecutionEngine:
         try:
             bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
         except Exception:
-            if page_delay_ms:
-                time.sleep(page_delay_ms / 1000.0)
+            pass
         self._dismiss_interrupts(bl)
 
     def _dismiss_interrupts(self, bl: Any) -> None:
+        """Auto-dismiss overlay selectors using global config."""
+        self._dismiss_interrupts_with(bl, self.ctx.interrupt_selectors)
+
+    def _dismiss_interrupts_with(self, bl: Any, selectors: list[str]) -> None:
         """Auto-dismiss overlay selectors (cookie banners, modals)."""
-        for selector in self.ctx.interrupt_selectors:
+        for selector in selectors:
             try:
                 count = bl.get_element_count(selector)
                 if count > 0:
@@ -2179,6 +2424,14 @@ class ExecutionEngine:
                         del result[val]
                     elif key == "strip_html" and val in result:
                         result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
+                    elif key == "to_markdown" and val in result:
+                        try:
+                            from markdownify import markdownify as md
+                            result[val] = md(str(result[val]),
+                                             heading_style="ATX",
+                                             strip=["script", "style", "nav"])
+                        except ImportError:
+                            result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
                     elif key == "default" and ":" in val:
                         field, default_val = val.split(":", 1)
                         if not result.get(field):
@@ -2237,7 +2490,7 @@ class ExecutionEngine:
             self.ctx.artifact_store[target].append(record)
 
     def _write_outputs(self, output_dir: str) -> None:
-        summary = {
+        summary: dict[str, Any] = {
             "deployment": self.ctx.name,
             "artifacts": {},
             "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -2384,6 +2637,7 @@ class WiseRpaBDD:
         self._deployment: DeploymentContext | None = None
         self._current_resource: ResourceContext | None = None
         self._current_rule: RuleNode | None = None
+        self._rule_has_actions: bool = False  # Tracks if current rule has actions (for guard vs observation routing)
         self._rule_stack: list[str] = []  # Track rule creation order
 
     def _record(self, name: str, *values: Any) -> None:
@@ -2522,6 +2776,7 @@ class WiseRpaBDD:
         node = RuleNode(name=rule)
         self._current_resource.rules[rule] = node
         self._current_rule = node
+        self._rule_has_actions = False
         self._rule_stack.append(rule)
 
     @keyword('And I declare parents "${parents}"')
@@ -2538,146 +2793,201 @@ class WiseRpaBDD:
             self._current_rule.retry_max = int(max)
             self._current_rule.retry_delay_ms = int(delay)
 
+    @keyword('And I set guard policy "${policy}"')
+    def set_guard_policy(self, policy: str) -> None:
+        """Set guard failure policy: "skip" (default) or "abort"."""
+        self._record("set_guard_policy", policy)
+        if self._current_rule:
+            self._current_rule.guard_policy = policy
+
+    @keyword("And I scope interrupts")
+    def scope_interrupts(self, *specs: str) -> None:
+        """Override global dismiss selectors for this rule only.
+
+        Usage in .robot::
+
+            I define rule "interactive_form"
+                And I scope interrupts
+                ...    dismiss="button.cookie-accept"
+                ...    dismiss=".modal-close"
+        """
+        self._record("scope_interrupts", *specs)
+        if not self._current_rule:
+            return
+        selectors: list[str] = []
+        for spec in specs:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "dismiss":
+                selectors.append(_strip_quotes(v))
+        self._current_rule.interrupt_override = selectors
+
+    @keyword("And I pause interrupts")
+    def pause_interrupts(self) -> None:
+        """Skip all dismiss for this rule's steps.
+
+        Usage in .robot::
+
+            I define rule "datepicker_interaction"
+                And I pause interrupts
+                When I click ...
+        """
+        self._record("pause_interrupts")
+        if self._current_rule:
+            self._current_rule.interrupt_paused = True
+
+    @keyword("And I set rule options")
+    def set_rule_options(self, *specs: str) -> None:
+        """Set declarative lifecycle options for the current rule.
+
+        Usage in .robot::
+
+            I define rule "checkout"
+                And I set rule options
+                ...    on_enter=screenshot
+                ...    on_fail=screenshot
+                ...    timeout_ms=30000
+        """
+        self._record("set_rule_options", *specs)
+        if not self._current_rule:
+            return
+        for spec in specs:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            self._current_rule.options[k.strip()] = v.strip()
+
     # -- State checks --
+
+    def _add_state_check(self, check: StateCheck) -> None:
+        """Route a state check to guards or steps based on parse position.
+
+        Before any action in the rule → guard (Type 1: precondition).
+        After an action → step (Type 2: observation gate between actions).
+        """
+        if not self._current_rule:
+            return
+        if self._rule_has_actions:
+            self._current_rule.steps.append(check)
+        else:
+            self._current_rule.guards.append(check)
 
     @keyword('Given url contains "${pattern}"')
     def url_contains(self, pattern: str) -> None:
         self._record("url_contains", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_contains", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_contains", pattern=pattern))
 
     @keyword('Given url matches "${pattern}"')
     def url_matches(self, pattern: str) -> None:
         self._record("url_matches", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_matches", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_matches", pattern=pattern))
 
     @keyword('But url does not contain "${pattern}"')
     def url_does_not_contain(self, pattern: str) -> None:
         self._record("url_does_not_contain", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_not_contains", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_not_contains", pattern=pattern))
 
     @keyword('And selector "${selector}" exists')
     def selector_exists(self, selector: str) -> None:
         self._record("selector_exists", selector)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="selector_exists", pattern=selector)
-            )
+        self._add_state_check(StateCheck(type="selector_exists", pattern=selector))
 
     @keyword('And table headers are "${headers}"')
     def table_headers_are(self, headers: str) -> None:
         self._record("table_headers_are", headers)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="table_headers", pattern=headers)
-            )
+        self._add_state_check(StateCheck(type="table_headers", pattern=headers))
 
     # -- Actions --
+
+    def _add_action(self, action: Action) -> None:
+        """Append an action to the current rule's steps list."""
+        if not self._current_rule:
+            return
+        self._rule_has_actions = True
+        self._current_rule.steps.append(action)
 
     @keyword('When I open "${url}"')
     def open_url(self, url: str) -> None:
         self._record("open_url", url)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="open", value=url)
-            )
+        self._add_action(Action(type="open", value=url))
 
     @keyword('When I open the bound field "${field}"')
     def open_bound_field(self, field: str) -> None:
         self._record("open_bound_field", field)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="open_bound", value=field)
-            )
+        self._add_action(
+            Action(type="open_bound", value=field)
+        )
 
     @keyword('When I click locator "${locator}"')
     def click_locator(self, locator: str, *options: str) -> None:
         self._record("click_locator", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="click", locator=locator, options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="click", locator=locator, options=_parse_options(options))
+        )
 
     @keyword('When I type "${value}" into locator "${locator}"')
     def type_into_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("type_into_locator", value, locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="type", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="type", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword('When I type secret "${value}" into locator "${locator}"')
     def type_secret_into_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("type_secret_into_locator", "***", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="type", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="type", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword("When I scroll down")
     def scroll_down(self) -> None:
         self._record("scroll_down")
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="scroll"))
+        self._add_action(Action(type="scroll"))
 
     @keyword("When I wait for idle")
     def wait_for_idle(self) -> None:
         self._record("wait_for_idle")
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="wait"))
+        self._add_action(Action(type="wait"))
 
     @keyword("When I wait ${ms} ms")
     def wait_ms(self, ms: Any) -> None:
         self._record("wait_ms", ms)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="wait_ms", value=str(ms))
-            )
+        self._add_action(
+            Action(type="wait_ms", value=str(ms))
+        )
 
     @keyword('When I select "${value}" from locator "${locator}"')
     def select_from_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("select_from_locator", value, locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="select", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="select", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword('When I check locator "${locator}"')
     def check_locator(self, locator: str, *options: str) -> None:
         self._record("check_locator", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="click", locator=locator, options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="click", locator=locator, options=_parse_options(options))
+        )
 
     @keyword('When I hover locator "${locator}"')
     def hover_locator(self, locator: str) -> None:
         self._record("hover_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="hover", locator=locator))
+        self._add_action(Action(type="hover", locator=locator))
 
     @keyword('When I focus locator "${locator}"')
     def focus_locator(self, locator: str) -> None:
         self._record("focus_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="focus", locator=locator))
+        self._add_action(Action(type="focus", locator=locator))
 
     @keyword('When I double click locator "${locator}"')
     def dblclick_locator(self, locator: str) -> None:
         self._record("dblclick_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="dblclick", locator=locator))
+        self._add_action(Action(type="dblclick", locator=locator))
 
     @keyword('When I press keys "${locator}"')
     def press_keys_locator(self, locator: str, *keys: str) -> None:
@@ -2686,42 +2996,40 @@ class WiseRpaBDD:
         Example: ``When I press keys "#search"    Enter``
         """
         self._record("press_keys", locator, *keys)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="press_keys", locator=locator, args=keys)
-            )
+        self._add_action(
+            Action(type="press_keys", locator=locator, args=keys)
+        )
 
     @keyword("When I take screenshot")
     def take_screenshot(self, *options: str) -> None:
         self._record("take_screenshot", *options)
         opts = _parse_options(options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
-            )
+        self._add_action(
+            Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
+        )
 
     @keyword('When I upload file "${path}" to locator "${locator}"')
     def upload_file_to_locator(self, path: str, locator: str) -> None:
         self._record("upload_file", path, locator)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="upload", locator=locator, value=path)
-            )
+        self._add_action(
+            Action(type="upload", locator=locator, value=path)
+        )
 
     # -- High-level interaction keywords (reduce need for evaluate_js) --
 
     @keyword('When I click text "${text}"')
-    def click_text(self, text: str) -> None:
+    def click_text(self, text: str, *options: str) -> None:
         """Click the first visible element whose text content matches.
 
         Uses JS to find by text, avoiding CSS limitations.
         Example: ``When I click text "Got it"``
+        Options: await=<selector> — wait for selector after click.
         """
-        self._record("click_text", text)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="click_text", value=text, args=())
-            )
+        self._record("click_text", text, *options)
+        self._add_action(
+            Action(type="click_text", value=text, args=(),
+            options=_parse_options(options))
+        )
 
     @keyword('When I add url params "${params}"')
     def add_url_params(self, params: str) -> None:
@@ -2731,10 +3039,9 @@ class WiseRpaBDD:
         Example: ``When I add url params "price_max=3000&superhost=true"``
         """
         self._record("add_url_params", params)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="add_url_params", value=params, args=())
-            )
+        self._add_action(
+            Action(type="add_url_params", value=params, args=())
+        )
 
     @keyword('When I set stepper "${locator}" to ${count}')
     def set_stepper(self, locator: str, count: str) -> None:
@@ -2743,10 +3050,9 @@ class WiseRpaBDD:
         Example: ``When I set stepper "[data-testid='stepper-adults']" to 2``
         """
         self._record("set_stepper", locator, count)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="set_stepper", value=count, locator=locator, args=())
-            )
+        self._add_action(
+            Action(type="set_stepper", value=count, locator=locator, args=())
+        )
 
     @keyword('When I select date "${date}" from datepicker')
     def select_date_from_datepicker(self, date: str, *options: str) -> None:
@@ -2770,11 +3076,10 @@ class WiseRpaBDD:
         """
         opts = _parse_options(options)
         self._record("select_date", date, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="select_date", value=date,
-                       args=(), options=opts)
-            )
+        self._add_action(
+            Action(type="select_date", value=date,
+            args=(), options=opts)
+        )
 
     # -- Browser step & call keyword (deferred passthrough) --
 
@@ -2786,10 +3091,9 @@ class WiseRpaBDD:
         Example: ``And I browser step "Press Keys" "#search" "Enter"``
         """
         self._record("browser_step", method, *args)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="browser_step", value=method, args=args)
-            )
+        self._add_action(
+            Action(type="browser_step", value=method, args=args)
+        )
 
     @keyword('And I evaluate js "${script}"')
     def evaluate_js(self, script: str) -> None:
@@ -2800,10 +3104,9 @@ class WiseRpaBDD:
         Example: ``And I evaluate js "document.querySelector('#btn').click()"``
         """
         self._record("evaluate_js", script)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="evaluate_js", value=script, args=())
-            )
+        self._add_action(
+            Action(type="evaluate_js", value=script, args=())
+        )
 
     @keyword('And I call keyword "${name}"')
     def call_keyword(self, name: str, *args: str) -> None:
@@ -2814,10 +3117,9 @@ class WiseRpaBDD:
         Example: ``And I call keyword "Login To Site"``
         """
         self._record("call_keyword", name, *args)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="call_keyword", value=name, args=args)
-            )
+        self._add_action(
+            Action(type="call_keyword", value=name, args=args)
+        )
 
     # -- Expansion --
 
@@ -3254,6 +3556,18 @@ def _build_generate_prompt(requirement: str, output: Path,
         "only for patterns the framework can't express yet (calendar loops, "
         "URL param navigation). Use And I configure interrupts for popup "
         "dismissal, not inline JS dismiss hacks.\n"
+        "   CONSTRUCT PATTERNS — choose the right one for the site:\n"
+        "   - Basic (pagination): single resource, paginate by next/numeric, "
+        "extract fields per page. E.g. quotes, book listings.\n"
+        "   - Interactive (forms): state checks between actions, await= on "
+        "form submissions, And I pause interrupts on interactive panels. "
+        "E.g. search forms, login flows, date pickers.\n"
+        "   - Multi-resource (discovery→detail): resource 1 extracts URLs, "
+        "resource 2 consumes them via {field} template. E.g. product "
+        "listing → product detail pages.\n"
+        "   - Stealth (anti-bot): WISE_RPA_STEALTH=1, use call_keyword for "
+        "auth flows, avoid evaluate_js where possible — stealth adapter "
+        "routes through patchright.\n"
         f"4. /rrpa-review — run `robot --dryrun --pythonpath {skill_dir / 'scripts'}` "
         "to verify all keywords resolve. Fix and loop until clean.\n"
         "5. /rrpa-re-explore (if needed) — after dryrun passes, go back to "

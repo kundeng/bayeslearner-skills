@@ -33,13 +33,13 @@ Resource page_scrape
     And I set resource globals
     ...    timeout_ms=15000
     ...    page_load_delay_ms=2000
-    And I begin rule "root"
-    Given url contains "/cookie-consent"
-    And selector "h1" exists
-    Then I extract fields
-    ...    field=heading    extractor=text    locator="h1"
-    ...    field=content    extractor=text    locator="main"
-    And I emit to artifact "${ARTIFACT_CONTENT}"
+    I define rule "root"
+        Given url contains "/cookie-consent"
+        And selector "h1" exists
+        Then I extract fields
+        ...    field=heading    extractor=text    locator="h1"
+        ...    field=content    extractor=text    locator="main"
+        And I emit to artifact "${ARTIFACT_CONTENT}"
 
 Quality Gates
     And I set quality gate min records to 1

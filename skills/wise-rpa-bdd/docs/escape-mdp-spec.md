@@ -1,6 +1,6 @@
 # Escape MDP: Resilient Rule Execution for WiseRpaBDD
 
-## Status: Design Spec (v0.1)
+## Status: Design Spec (v0.2 — updated April 10, 2026)
 
 ## Problem
 
@@ -18,7 +18,7 @@ from unexpected observations (popups, timeouts, navigation failures).
 
 ## Architecture
 
-### 1. Periodic Interrupt Dismiss (implemented)
+### 1. Periodic Interrupt Dismiss (implemented — scoping lesson learned)
 
 `_dismiss_interrupts()` runs before every action and state check. This is
 the simplest escape mechanism — a background recovery process that clears
@@ -27,10 +27,16 @@ known obstacles.
 ```robot
 And I configure interrupts
 ...    dismiss=text="Got it"
-...    dismiss=[role="dialog"] button[aria-label="Close"]
 ```
 
-**Status:** Implemented in this session. Works.
+**Status:** Implemented. Works.
+
+**Critical lesson (April 10):** Dismiss selectors must be **surgical**.
+Broad selectors like `[role="dialog"] button[aria-label="Close"]` or
+`[data-testid="modal-container"] button` match interactive panels (search
+bars, calendars, guest pickers) and destroy the flow by closing them
+mid-interaction. Only dismiss known popup patterns with specific selectors.
+The agent must verify each dismiss selector during explore with panels open.
 
 ### 2. Navigation-Aware Evaluate JS (implemented)
 
@@ -41,22 +47,67 @@ script content heuristics), the engine automatically:
 
 **Status:** Implemented. Eliminates the need for manual `When I wait Xms`.
 
-### 3. AOP-Style Rule Instrumentation (proposed)
+### 2b. Observation Gates — Zero-Wait Execution (implemented)
 
-Instead of inline debug prints, rules support lifecycle decorators:
+Two MDP-native patterns replace all `When I wait` in robot files:
+
+**Option 1 — Split rules:** Each s,a→o transition is its own rule. The
+engine's `wait_for_elements_state` (10s) naturally gates entry.
 
 ```robot
-And I set rule options for "root"
-...    on_enter=screenshot
-...    on_fail=screenshot+retry
-...    timeout_ms=30000
+I define rule "type_city"
+    When I type "${CITY}" into locator "#input"
+I define rule "autocomplete_ready"
+    And I declare parents "type_city"
+    And selector "[data-testid='option-0']" exists
+I define rule "select_city"
+    And I declare parents "autocomplete_ready"
+    When I click locator "[data-testid='option-0']"
 ```
 
-The engine instruments rules at walk time. Debug screenshots, timing, retry
-logic — all controlled declaratively, removable without code changes.
+**Option 2 — `await=` inline gate:** After any action, wait for a selector
+before advancing to the next action within the same rule.
 
-**Implementation:** Add `options` dict to `RuleNode`. Engine checks options
-at each lifecycle point (enter, action, state_check, fail, exit).
+```robot
+I define rule "enter_city"
+    When I type "${CITY}" into locator "#input"
+    ...    await=[data-testid='option-0']
+    When I click locator "[data-testid='option-0']"
+```
+
+**Status:** Both implemented and verified on live Airbnb (96 records, Nov
+2026 dates, 2 adults). `await=` works on click, type, click_text. Supports
+fallback selectors.
+
+### 2c. Zero time.sleep Engine (implemented)
+
+All fixed sleeps removed from the engine. Replacements:
+
+| Was | Now |
+|-----|-----|
+| `time.sleep(page_delay)` after pagination click | Staleness detection: poll until first element text changes |
+| `time.sleep(0.3)` after calendar forward | Poll until heading text changes |
+| `time.sleep(0.5)` after scroll | `networkidle` |
+| `time.sleep(2.0)` after combo click | `networkidle` |
+| `time.sleep(1)` after evaluate_js | `domcontentloaded` |
+| `delay_ms=` on click/type | Removed — use `await=` instead |
+| Stepper `bl.click()` × N | JS click + `wait_for_elements_state` (avoids Playwright stability timeout on re-rendering elements) |
+
+Only remaining `time.sleep`: retry backoff loop (intentional delay between retries).
+
+### 3. AOP-Style Rule Instrumentation (implemented — default on)
+
+AOP wrapper `_do_action_instrumented` around `_do_action`:
+- Per-rule timing: state_check, actions, expansion, total
+- Per-action timing: logs any action >0.5s or failures with context
+- Default on (`WISE_RPA_INSTRUMENT=0` to disable)
+
+**Status:** Implemented. No inline timing code in action execution. The
+wrapper handles all instrumentation uniformly.
+
+**Future:** Declarative per-rule options (`on_enter=screenshot`,
+`on_fail=screenshot+retry`, `timeout_ms=N`) are still desirable but not
+yet implemented.
 
 ### 4. Recovery Rules (proposed)
 
@@ -81,7 +132,7 @@ I define recovery "dismiss_and_retry"
 The engine attaches recovery behaviors to rules and invokes them
 automatically on failure before giving up.
 
-### 5. Built-in Navigation Keywords (proposed)
+### 5. Built-in Navigation Keywords (implemented)
 
 Replace imperative JS with declarative keywords:
 

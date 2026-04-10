@@ -40,9 +40,9 @@ Resource country_listing
 
     # Rule: root — state gate confirming correct page before extraction
     # Evidence: url contains /pages/simple/; div.country elements present
-    And I begin rule "root"
-    Given url contains "/pages/simple/"
-    And selector ".country" exists
+    I define rule "root"
+        Given url contains "/pages/simple/"
+        And selector ".country" exists
 
     # Rule: items — expand over each div.country and extract four fields
     # Evidence: 250 div.col-md-4.country elements on a single page.
@@ -51,15 +51,15 @@ Resource country_listing
     #   capital      — span.country-capital; direct text
     #   population   — span.country-population; numeric string
     #   area         — span.country-area; numeric string with decimal
-    And I begin rule "items"
-    And I declare parents "root"
-    When I expand over elements ".country"
-    Then I extract fields
-    ...    field=country_name    extractor=text      locator="h3.country-name"
-    ...    field=capital         extractor=text      locator=".country-capital"
-    ...    field=population      extractor=number    locator=".country-population"
-    ...    field=area            extractor=number    locator=".country-area"
-    And I emit to artifact "${ARTIFACT_COUNTRIES}"
+    I define rule "items"
+        And I declare parents "root"
+        When I expand over elements ".country"
+        Then I extract fields
+        ...    field=country_name    extractor=text      locator="h3.country-name"
+        ...    field=capital         extractor=text      locator=".country-capital"
+        ...    field=population      extractor=number    locator=".country-population"
+        ...    field=area            extractor=number    locator=".country-area"
+        And I emit to artifact "${ARTIFACT_COUNTRIES}"
 
 Quality Gates
     # 250 countries total; require at least 200 to allow for minor edge cases

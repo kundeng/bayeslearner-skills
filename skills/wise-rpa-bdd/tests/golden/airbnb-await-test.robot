@@ -3,14 +3,19 @@ Requirement    Scrape Airbnb vacation rental listings in Miami for a month-long 
 ...            Criteria: Miami FL, Nov 1-30, 2 adults, entire home, 1 BR, under $3,000/month, Superhost.
 ...            Collect: property title, property name, nightly/monthly price, rating, review count,
 ...            listing URL, and guest-favorite badge if present.
+...
+...            Pattern: AWAIT observation gates (Option 2).
+...            Async dependencies between actions within a rule use the await=
+...            parameter — an inline observation gate that waits for a selector
+...            before the engine advances to the next action.
+...            No "When I wait" anywhere. Rules stay grouped by user intent.
 
 *** Settings ***
 Documentation     Stealth scrape of Airbnb monthly-stay listings via interactive search flow.
-...               Starts at airbnb.com, types city, selects autocomplete (discovers place_id),
-...               sets dates via calendar, sets guests, submits search, then applies filters
-...               (price, bedrooms, superhost) via URL params.
-...               Evidence: 18 cards/page via [data-testid="card-container"], pagination
-...               via a[aria-label="Next"]. All selectors verified via agent-browser.
+...               Same scenario as airbnb-miami-stealth-test but replaces every
+...               "When I wait" with an await= observation gate on the preceding action.
+...               Rules stay grouped by user intent (fewer nodes than split-rule).
+...               Evidence: all selectors verified via agent-browser.
 Library           Browser
 Library           WiseRpaBDD
 Suite Setup       Given I start deployment "${DEPLOYMENT}"
@@ -18,8 +23,6 @@ Suite Teardown    Then I finalize deployment
 
 *** Variables ***
 # ── Generalizable search parameters ──────────────────────────────────────────
-# Override from command line:
-#   robot --variable CITY_SEARCH:Austin,\ Texas --variable CHECKIN:2027-03-01 ...
 ${CITY_SEARCH}          Miami, Florida
 ${CHECKIN}              2026-11-01
 ${CHECKOUT}             2026-11-30
@@ -29,7 +32,7 @@ ${MIN_BEDROOMS}         1
 ${SUPERHOST}            true
 ${MAX_PAGES}            5
 
-${DEPLOYMENT}           airbnb-monthly-listings
+${DEPLOYMENT}           airbnb-await
 ${ENTRY_URL}            https://www.airbnb.com
 ${ARTIFACT_LISTINGS}    listings
 
@@ -45,11 +48,12 @@ Artifact Catalog
     And I set artifact options for "${ARTIFACT_LISTINGS}"
     ...    output=true
     ...    dedupe=listing_url
-    ...    description=Airbnb monthly-stay listings (filtered by city/dates/price/bedrooms/superhost)
+    ...    description=Airbnb monthly-stay listings (await pattern)
 
 Interrupt Setup
-    [Documentation]    Auto-dismiss Airbnb overlays throughout the rule walk.
-    ...                Evidence: "Got it" pricing modal and hotel promo popup appear intermittently.
+    # Minimal dismiss — only the pricing "Got it" modal.
+    # Broader selectors ([role="dialog"], [data-testid="modal-container"])
+    # match the search/calendar/guest panels and close them mid-flow.
     And I configure interrupts
     ...    dismiss=text="Got it"
 
@@ -61,23 +65,19 @@ Resource listing_search
     ...    retries=2
     ...    page_load_delay_ms=500
 
-    # ── Action rule: expand the search bar if in compact mode ───────────────
-    # Evidence: on some viewports, search bar renders compact with "Anywhere"
-    I define rule "expand_search"
-        When I click text "Anywhere"
-
-    # ── Action rule: type city and select autocomplete ────────────────────────
-    # Evidence: input#bigsearch-query-location-input, placeholder="Search destinations"
-    # Autocomplete: [data-testid="option-0"] is first suggestion (e.g. "Miami, FL")
+    # ── Action rule: expand search bar and type city ──────────────────
+    # Evidence: "Anywhere" expands compact bar; typing triggers autocomplete.
+    # await= on click waits for the input to appear before typing.
+    # await= on type waits for autocomplete dropdown before clicking.
     I define rule "enter_city"
-        And I declare parents "expand_search"
+        When I click text "Anywhere"
+        ...    await=#bigsearch-query-location-input
         When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
+        ...    await=[data-testid='option-0']
         When I click locator "[data-testid='option-0']"
 
-    # ── Action rule: navigate calendar and select dates ───────────────────────
+    # ── Action rule: navigate calendar and select dates ───────────────
     # Evidence: calendar auto-opens after city selection.
-    # Forward: button[aria-label*="Move forward"], month headings: h2
-    # Day buttons: aria-label="1, Sunday, November 2026. Available..."
     I define rule "set_dates"
         And I declare parents "enter_city"
         When I select date "${CHECKIN}" from datepicker
@@ -87,54 +87,43 @@ Resource listing_search
         ...    forward=button[aria-label*="Move forward"]
         ...    heading=h2
 
-    # ── Action rule: set guest count ──────────────────────────────────────────
-    # Evidence: div[tabindex] containing "guest" opens panel.
-    # Adults stepper: [data-testid="stepper-adults-increase-button"]
+    # ── Action rule: set guest count ──────────────────────────────────
+    # Evidence: "Add guests" opens panel; stepper appears inside it.
+    # await= on click waits for stepper control to appear.
     I define rule "set_guests"
         And I declare parents "set_dates"
         When I click text "Add guests"
+        ...    await=[data-testid='stepper-adults-increase-button']
         When I set stepper "[data-testid='stepper-adults-increase-button']" to ${ADULTS}
 
-    # ── Action rule: submit search ────────────────────────────────────────────
-    # Evidence: button[data-testid="structured-search-input-search-button"]
-    # Popups handled by configure interrupts (periodic dismiss).
+    # ── Action rule: submit search ────────────────────────────────────
     I define rule "submit_search"
         And I declare parents "set_guests"
         When I click locator "[data-testid='structured-search-input-search-button']"
 
-    # ── Action rule: apply filters via URL params ─────────────────────────────
-    # Evidence: price_max, min_bedrooms, superhost work as URL query params.
-    # Adding superhost=true narrowed Miami results from 1000+ to 533.
-    # ── State gate: wait for initial search results before applying filters ──
+    # ── State gate: search results loaded ─────────────────────────────
     I define rule "search_loaded"
         And I declare parents "submit_search"
         Given url contains "airbnb.com/s/"
         And selector "[data-testid='card-container']" exists
 
+    # ── Action: apply filters via URL params ──────────────────────────
     I define rule "apply_filters"
         And I declare parents "search_loaded"
         When I add url params "price_max=${PRICE_MAX}&min_bedrooms=${MIN_BEDROOMS}&superhost=${SUPERHOST}"
 
-    # ── State gate: confirm search results loaded ─────────────────────────────
+    # ── State gate: filtered results loaded ───────────────────────────
     I define rule "root"
         And I declare parents "apply_filters"
         Given url contains "airbnb.com/s/"
         And selector "[data-testid='card-container']" exists
 
-    # ── Pagination ────────────────────────────────────────────────────────────
-    # Evidence: nav[aria-label="Search results pagination"], a[aria-label="Next"]
+    # ── Pagination ────────────────────────────────────────────────────
     I define rule "pages"
         And I declare parents "root"
         When I paginate by next button "a[aria-label='Next']" up to ${MAX_PAGES} pages
 
-    # ── Extraction: 18 cards per page ─────────────────────────────────────────
-    # Evidence (confirmed on p1 and p2 via agent-browser):
-    #   title       — [data-testid="listing-card-title"]  "Home in Miami"
-    #   name        — [data-testid="listing-card-name"]   "2 Beds Studio | Parking free"
-    #   price       — [data-testid="price-availability-row"]  "$2,784 $2,069..."
-    #   rating      — .r4a59j5 span[aria-hidden]  "4.87 (149)" or "New"
-    #   listing_url — a[aria-labelledby]  href="/rooms/{id}?..."
-    #   badge       — .t1qa5xaj  "Guest favorite" / "Superhost" (absent on some)
+    # ── Extraction: 18 cards per page ─────────────────────────────────
     I define rule "items"
         And I declare parents "pages"
         When I expand over elements "[data-testid='card-container']"

@@ -48,17 +48,17 @@ Resource laptop_pages
 
     # Rule: root — state gate confirming we are on the laptops listing before acting
     # Evidence: URL contains "computers/laptops"; div.card.thumbnail present on every page
-    And I begin rule "root"
-    Given url contains "computers/laptops"
-    And selector "div.card.thumbnail" exists
+    I define rule "root"
+        Given url contains "computers/laptops"
+        And selector "div.card.thumbnail" exists
 
     # Rule: pages — drive next-button pagination across all 20 pages
     # Evidence: a.page-link.next present on pages 1-19 (href=?page=N, rel="next");
     #           absent on page 20 — engine stops naturally without sentinel needed.
     #           Limit=20 matches the confirmed total page count.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "a.page-link.next" up to 20 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "a.page-link.next" up to 20 pages
 
     # Rule: items — expand over each div.card.thumbnail on every visited page, then extract
     # Evidence: exactly 6 div.card.thumbnail per page (pages 1-19); 3 on page 20 → 117 total.
@@ -67,15 +67,15 @@ Resource laptop_pages
     #   price       — h4.price span, text  (includes $ sign; e.g. "$416.99")
     #   description — p.description, text  (specs string; browser decodes &quot; entities)
     #   rating      — p[data-rating], attr=data-rating  (numeric 1-5; always present)
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements "div.card.thumbnail"
-    Then I extract fields
-    ...    field=title          extractor=attr    locator=a.title             attr=title
-    ...    field=price          extractor=text    locator=h4.price span
-    ...    field=description    extractor=text    locator=p.description
-    ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
-    And I emit to artifact "${ARTIFACT_LAPTOPS}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements "div.card.thumbnail"
+        Then I extract fields
+        ...    field=title          extractor=attr    locator=a.title             attr=title
+        ...    field=price          extractor=text    locator=h4.price span
+        ...    field=description    extractor=text    locator=p.description
+        ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
+        And I emit to artifact "${ARTIFACT_LAPTOPS}"
 
 Quality Gates
     # 20 pages × 6 items/page − 3 missing on last page = 117 total records

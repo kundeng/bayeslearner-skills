@@ -53,16 +53,16 @@ Resource quote_pages
     ...    page_load_delay_ms=1000
 
     # Rule: root — state gate confirming we are on the right domain before acting
-    And I begin rule "root"
-    Given url matches "quotes.toscrape.com"
-    And selector ".quote" exists
+    I define rule "root"
+        Given url matches "quotes.toscrape.com"
+        And selector ".quote" exists
 
     # Rule: pages — drive next-button pagination across at most 3 pages
     # Evidence: li.next present on p1 (href=/page/2/), p2 (href=/page/3/);
     #           absent on p10 — engine stops naturally. Limit=3 caps at 30 records.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "li.next a" up to 3 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "li.next a" up to 3 pages
 
     # Rule: items — expand over each div.quote on every visited page, then extract
     # Evidence: exactly 10 div.quote elements per page (confirmed p1/2/3/10).
@@ -70,15 +70,15 @@ Resource quote_pages
     #   quote_text — span.text (class="text"); includes surrounding typographic quotes
     #   author     — small.author (class="author"); always populated
     #   tags       — a.tag (class="tag"); grouped; 0–N tags per quote
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements ".quote"
-    Then I extract fields
-    ...    field=quote_text    extractor=text       locator=".text"
-    ...    field=author        extractor=text       locator="small.author"
-    ...    field=tags          extractor=grouped    locator=".tag"
-    And I emit to artifact "${ARTIFACT_QUOTES}"
-    And I emit to artifact "${ARTIFACT_QUOTES_FLAT}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements ".quote"
+        Then I extract fields
+        ...    field=quote_text    extractor=text       locator=".text"
+        ...    field=author        extractor=text       locator="small.author"
+        ...    field=tags          extractor=grouped    locator=".tag"
+        And I emit to artifact "${ARTIFACT_QUOTES}"
+        And I emit to artifact "${ARTIFACT_QUOTES_FLAT}"
 
 Quality Gates
     # 3 pages × 10 quotes/page = 30 records minimum

@@ -125,11 +125,11 @@ All actions are **deferred** — they record during test case definition and exe
 
 ### Interaction
 
-**`When I click locator "${css}"`** — Click an element. Optional: `delay_ms=<number>`
+**`When I click locator "${css}"`** — Click an element. Optional: `await=<selector>` (observation gate).
 
 **`When I double click locator "${css}"`** — Double-click an element.
 
-**`When I type "${value}" into locator "${css}"`** — Type into input (clears first).
+**`When I type "${value}" into locator "${css}"`** — Type into input (clears first). Optional: `await=<selector>`.
 
 **`When I type secret "${value}" into locator "${css}"`** — Type secret (redacted in logs).
 
@@ -147,13 +147,56 @@ All actions are **deferred** — they record during test case definition and exe
 
 **`When I upload file "${path}" to locator "${css}"`** — Upload a file to a file input.
 
-### Timing
+### Observation Gates (replacing `When I wait`)
+
+When an action triggers async content that the next action depends on, use one of two MDP-native patterns instead of `When I wait`:
+
+**Option 1 — Split rules with state gates** (zero engine changes, pure MDP):
+
+Split the actions into separate rules with a state-check rule between them. The engine's `wait_for_elements_state` (10s timeout) naturally gates the next action.
+
+```robot
+# Action: type triggers autocomplete
+I define rule "type_city"
+    When I type "${CITY}" into locator "#search-input"
+
+# Observation gate: autocomplete appeared
+I define rule "autocomplete_ready"
+    And I declare parents "type_city"
+    And selector "[data-testid='option-0']" exists
+
+# Action: click the autocomplete suggestion
+I define rule "select_city"
+    And I declare parents "autocomplete_ready"
+    When I click locator "[data-testid='option-0']"
+```
+
+**Option 2 — `await=` inline observation gate** (keeps rules grouped by intent):
+
+Add `await=<selector>` to any action. The engine waits for that selector to become visible before advancing to the next action within the same rule.
+
+```robot
+I define rule "enter_city"
+    When I type "${CITY}" into locator "#search-input"
+    ...    await=[data-testid='option-0']
+    When I click locator "[data-testid='option-0']"
+```
+
+`await=` works on `When I click locator`, `When I type`, and `When I click text`. It supports fallback selectors (`await=.opt-0 | .option:first-child`).
+
+**When to use which:**
+- **Split rules** when the observation is a meaningful state transition worth naming (e.g. "search results loaded").
+- **`await=`** when the observation is a low-level async dependency within a coherent user intent (e.g. autocomplete appearing after typing).
+
+Golden file examples: `airbnb-splitrule-test.robot` (Option 1), `airbnb-await-test.robot` (Option 2).
+
+### Timing (legacy — prefer observation gates above)
 
 **`When I scroll down`** — Scroll one viewport height.
 
 **`When I wait for idle`** — Wait for network idle.
 
-**`When I wait ${ms} ms`** — Wait a fixed duration.
+**`When I wait ${ms} ms`** — Wait a fixed duration. Prefer `await=` or split rules instead.
 
 ### Debugging
 
@@ -297,11 +340,12 @@ AI operates on previously extracted text, never on the live DOM. Capture with `h
 
 These keywords handle common interactive patterns declaratively, avoiding the need for `evaluate_js`.
 
-**`When I click text "${text}"`** — Click the first visible element whose text content matches exactly. Searches buttons, links, role=button, and clickable divs.
+**`When I click text "${text}"`** — Click the first visible element whose text content matches exactly. Searches buttons, links, role=button, and clickable divs. Optional: `await=<selector>`.
 
 ```robot
 When I click text "Got it"
 When I click text "Anywhere"
+...    await=#search-input
 When I click text "Show 500+ places"
 ```
 

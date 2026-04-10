@@ -48,17 +48,17 @@ Resource book_pages
 
     # Rule: root — state gate confirming we are on the catalogue listing before acting
     # Evidence: URL contains "catalogue"; article.product_pod present on every page
-    And I begin rule "root"
-    Given url contains "catalogue"
-    And selector "article.product_pod" exists
+    I define rule "root"
+        Given url contains "catalogue"
+        And selector "article.product_pod" exists
 
     # Rule: pages — drive next-button pagination across all 50 pages
     # Evidence: li.next a present on pages 1-49 (href=page-N.html);
     #           absent on page 50 — engine stops naturally without sentinel needed.
     #           Limit=50 matches the confirmed total page count.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "li.next a" up to 50 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "li.next a" up to 50 pages
 
     # Rule: items — expand over each article.product_pod on every visited page, then extract
     # Evidence: exactly 20 article.product_pod per page → 50 × 20 = 1000 total.
@@ -67,15 +67,15 @@ Resource book_pages
     #   price        — p.price_color, text  (includes £ symbol; e.g. "£51.77")
     #   star_rating  — p.star-rating, attr=class  (e.g. "star-rating Three"; word encodes rating)
     #   availability — p.availability, text  (e.g. "In stock"; whitespace trimmed by extractor)
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements "article.product_pod"
-    Then I extract fields
-    ...    field=title          extractor=attr    locator=h3 a              attr=title
-    ...    field=price          extractor=text    locator=p.price_color
-    ...    field=star_rating    extractor=attr    locator=p.star-rating     attr=class
-    ...    field=availability   extractor=text    locator=p.availability
-    And I emit to artifact "${ARTIFACT_BOOKS}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements "article.product_pod"
+        Then I extract fields
+        ...    field=title          extractor=attr    locator=h3 a              attr=title
+        ...    field=price          extractor=text    locator=p.price_color
+        ...    field=star_rating    extractor=attr    locator=p.star-rating     attr=class
+        ...    field=availability   extractor=text    locator=p.availability
+        And I emit to artifact "${ARTIFACT_BOOKS}"
 
 Quality Gates
     # 50 pages × 20 items/page = 1000 total records

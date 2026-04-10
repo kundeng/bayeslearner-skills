@@ -47,16 +47,16 @@ Resource tablet_pages
 
     # Rule: root -- state gate confirming we are on the tablets listing
     # Evidence: URL contains "computers/tablets"; div.thumbnail present on every page
-    And I begin rule "root"
-    Given url contains "computers/tablets"
-    And selector "div.thumbnail" exists
+    I define rule "root"
+        Given url contains "computers/tablets"
+        And selector "div.thumbnail" exists
 
     # Rule: pages -- drive numeric button pagination across all 4 pages
     # Evidence: button.page-link.page elements (data-id 1-4); AJAX content loads on click.
     # page_load_delay_ms=2000 accounts for AJAX content loading after each page click.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by numeric control "button.page-link.page" from 1 up to 4 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by numeric control "button.page-link.page" from 1 up to 4 pages
 
     # Rule: items -- expand over each div.thumbnail on every visited page, then extract
     # Evidence: 6 div.thumbnail per page (pages 1-3); 3 on page 4 -> 21 total.
@@ -65,15 +65,15 @@ Resource tablet_pages
     #   price       -- h4.price, text       (includes $ sign; e.g. "$69.99")
     #   description -- p.description, text  (specs string)
     #   rating      -- p[data-rating], attr=data-rating  (numeric 1-5)
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements "div.thumbnail"
-    Then I extract fields
-    ...    field=title          extractor=attr    locator=a.title             attr=title
-    ...    field=price          extractor=text    locator=h4.price
-    ...    field=description    extractor=text    locator=p.description
-    ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
-    And I emit to artifact "${ARTIFACT_TABLETS}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements "div.thumbnail"
+        Then I extract fields
+        ...    field=title          extractor=attr    locator=a.title             attr=title
+        ...    field=price          extractor=text    locator=h4.price
+        ...    field=description    extractor=text    locator=p.description
+        ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
+        And I emit to artifact "${ARTIFACT_TABLETS}"
 
 Quality Gates
     # 4 pages x 6 items/page - 3 missing on last page = 21 total records

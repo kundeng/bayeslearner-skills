@@ -61,6 +61,9 @@ Chain commands with `&&` in one Bash call. The browser session persists between 
 4. Put site specifics in variables, step arguments, continuation rows, locators, URLs, and field specs.
 5. Keep artifacts, resources, setup, parent chaining, emits, and quality gates explicit.
 6. AI may help author or repair locators, extract specs, and suite structure. AI must not change the fundamentals of the generic keywords.
+7. **Never use `When I wait`**. Use observation gates instead — split rules with state checks (Option 1) or `await=<selector>` on actions (Option 2). See `references/workflow.md § Async Dependencies`.
+8. **Dismiss selectors must be surgical**. During explore, verify each dismiss selector does NOT match interactive panels (search bars, calendars, guest pickers). See `references/workflow.md § Dismiss Selector Scoping`.
+9. **Identify async dependencies during explore**. For each action that triggers async content, record the action and the selector that signals completion. These become observation gates in the draft.
 
 ## Agent Contract
 
@@ -70,6 +73,7 @@ Chain commands with `&&` in one Bash call. The browser session persists between 
 4. Prefer shipped templates, generic keywords, and the WiseRpaBDD library.
 5. Extend the library only with new **generic** capabilities.
 6. `/rrpa-ship` delivers a self-contained package: suite, keyword library, docs, ready to run.
+7. **Guard vs observation is determined by position**, not by annotation. State checks before any action in a rule are guards (preconditions). State checks after an action are observations (sync gates). See `references/workflow.md § Guard vs Observation`.
 
 ## Authoring Shape
 

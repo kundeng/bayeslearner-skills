@@ -39,21 +39,21 @@ Resource phone_listing
     ...    retries=2
 
     # Rule: root — state gate + pagination across 2 pages
-    And I begin rule "root"
-    Given url contains "phones/touch"
-    And selector "div.card.thumbnail" exists
-    When I paginate by next button "a.page-link.next" up to 2 pages
+    I define rule "root"
+        Given url contains "phones/touch"
+        And selector "div.card.thumbnail" exists
+        When I paginate by next button "a.page-link.next" up to 2 pages
 
     # Rule: items — expand over each product card, extract fields
-    And I begin rule "items"
-    And I declare parents "root"
-    When I expand over elements "div.card.thumbnail"
-    Then I extract fields
-    ...    field=title          extractor=attr    locator=a.title             attr=title
-    ...    field=price          extractor=text    locator=h4.price span
-    ...    field=description    extractor=text    locator=p.description
-    ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
-    And I emit to artifact "${ARTIFACT_PHONES}"
+    I define rule "items"
+        And I declare parents "root"
+        When I expand over elements "div.card.thumbnail"
+        Then I extract fields
+        ...    field=title          extractor=attr    locator=a.title             attr=title
+        ...    field=price          extractor=text    locator=h4.price span
+        ...    field=description    extractor=text    locator=p.description
+        ...    field=rating         extractor=attr    locator=p[data-rating]      attr=data-rating
+        And I emit to artifact "${ARTIFACT_PHONES}"
 
 Quality Gates
     And I set quality gate min records to 9

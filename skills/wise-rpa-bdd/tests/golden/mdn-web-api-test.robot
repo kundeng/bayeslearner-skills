@@ -49,14 +49,14 @@ Discover API Listing Links
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    And I begin rule "index"
-    Given url contains "/docs/Web/API"
-    And selector "section[aria-labelledby='specifications'] a" exists
-    When I expand over elements "section[aria-labelledby='specifications'] a" with order "bfs"
-    ...    limit=10
-    Then I extract fields
-    ...    field=page_url    extractor=link    locator="."
-    And I emit to artifact "${ARTIFACT_API_URLS}"
+    I define rule "index"
+        Given url contains "/docs/Web/API"
+        And selector "section[aria-labelledby='specifications'] a" exists
+        When I expand over elements "section[aria-labelledby='specifications'] a" with order "bfs"
+        ...    limit=10
+        Then I extract fields
+        ...    field=page_url    extractor=link    locator="."
+        And I emit to artifact "${ARTIFACT_API_URLS}"
 
 Extract API Details
     [Documentation]    Open each discovered API page (up to 10) and extract the name
@@ -66,12 +66,12 @@ Extract API Details
     ...    timeout_ms=20000
     ...    retries=2
     ...    page_load_delay_ms=1500
-    And I begin rule "page"
-    And selector "h1" exists
-    Then I extract fields
-    ...    field=name           extractor=text    locator="h1"
-    ...    field=description    extractor=text    locator="main .content-section > p"
-    And I emit to artifact "${ARTIFACT_APIS}"
+    I define rule "page"
+        And selector "h1" exists
+        Then I extract fields
+        ...    field=name           extractor=text    locator="h1"
+        ...    field=description    extractor=text    locator="main .content-section > p"
+        And I emit to artifact "${ARTIFACT_APIS}"
 
 Quality Gates
     [Documentation]    Minimum thresholds for the MDN Web API scrape.
