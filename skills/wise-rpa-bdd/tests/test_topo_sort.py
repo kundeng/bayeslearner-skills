@@ -132,6 +132,11 @@ class TestDiamondDAGExecution:
     def _make_engine(self):
         engine = ExecutionEngine.__new__(ExecutionEngine)
         engine.ctx = DeploymentContext(name="test")
+        engine._run_start = 0
+        engine._max_run_time = 9999
+        engine._instrument = False
+        engine._slow_ms = 0
+        engine._slow_screenshot = False
         return engine
 
     def _mock_browser_lib(self, engine):
@@ -183,8 +188,8 @@ class TestDiamondDAGExecution:
 
         # Execute with tracking
         with patch.object(ExecutionEngine, "_extract_from_scope", tracking_extract), \
-             patch.object(ExecutionEngine, "_check_state", return_value=True), \
-             patch.object(ExecutionEngine, "_execute_actions"):
+             patch.object(ExecutionEngine, "_check_guards", return_value=True), \
+             patch.object(ExecutionEngine, "_execute_steps"):
             executed: set[str] = set()
             engine._walk_rule(roots[0], res, None,
                               "http://test.example.com", executed=executed)
@@ -222,8 +227,8 @@ class TestDiamondDAGExecution:
         roots = engine._build_rule_tree(res)
 
         with patch.object(ExecutionEngine, "_extract_from_scope", tracking_extract), \
-             patch.object(ExecutionEngine, "_check_state", return_value=True), \
-             patch.object(ExecutionEngine, "_execute_actions"):
+             patch.object(ExecutionEngine, "_check_guards", return_value=True), \
+             patch.object(ExecutionEngine, "_execute_steps"):
             executed: set[str] = set()
             engine._walk_rule(roots[0], res, None,
                               "http://test.example.com", executed=executed)
