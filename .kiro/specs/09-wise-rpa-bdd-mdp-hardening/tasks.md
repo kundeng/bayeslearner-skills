@@ -116,19 +116,18 @@
     - **Depends**: 3.1
     - **Requirements**: 3.2
 
-- [~] 4. Carry-Forward (from specs 06–08)
+- [x] 4. Carry-Forward (from specs 06–08)
 
-  - [ ] 4.1 Dev → main merge
-    - Define shippable file list (exclude dev tooling: tests/, .venv, pyproject.toml dev deps)
-    - Cherry-pick or merge --no-commit + selective staging
-    - Verify main branch passes smoke test without dev tooling
-    - **Depends**: 1.1 (stealth bridge should be resolved first)
+  - [x] 4.1 Dev → main merge
+    - Multiple promotions during session: hardening, SKILL.md, checkpoint/resume, tutorial reorg
+    - Main excludes dev tooling (pyproject.toml, test_topo_sort.py)
+    - **Depends**: 1.1
     - **Source**: spec-07 item 3
 
-  - [ ] 4.2 Yelp stealth validation
-    - Run yelp-interrupt-test.robot (deleted — recreate or use airbnb as proxy)
-    - patchright + playwright-stealth implemented but never validated against fingerprint-heavy site
-    - If TLS/JA3 blocks: document limitation, mark as known constraint
+  - [!] 4.2 Yelp stealth validation — DEFERRED
+    - TLS/JA3 fingerprinting is a genuinely hard problem (DataDome)
+    - patchright defeats browser-level flags but JA3 requires real browser subprocess + CDP
+    - Deferred to a future spec — separate concern from MDP hardening
     - **Depends**: 1.1
     - **Source**: spec-07 item 6, spec-08 item 2
 
@@ -150,6 +149,40 @@
   - [x] 4.6 Interrupt dismiss golden test — DONE in phase 1
     - `cookiebot-interrupt-test.robot` exercises auto-dismiss
     - **Source**: spec-06 P1
+
+- [x] 5. Additional Work (emerged during session)
+
+  - [x] 5.1 AOP checkpoint/resume
+    - PersistentArtifactStore: drop-in dict replacement with write-ahead staging
+    - AspectRegistry: unified hooks for instrumentation, slow-motion, checkpoint
+    - CLI: run --fresh/--resume flags, WISE_RPA_RESUME_MODE env var
+    - Verified: 3 consecutive ITSI runs resume correctly (8→14→20 URLs)
+    - **Requirements**: new (not in original spec — user-requested P0)
+
+  - [x] 5.2 All-in-one SKILL.md
+    - Replaced pointer-heavy SKILL.md with 616-line self-contained doc
+    - Full keyword API, 10 patterns, validation commands, agent contract inline
+    - Generate prompt updated to read SKILL.md instead of references/
+
+  - [x] 5.3 Skill consolidation
+    - Deleted references/ folder (5 files, 919 lines) — absorbed into SKILL.md
+    - Deleted docs/escape-mdp-spec.md — recovery rules proposal moved to design.md
+    - to_markdown hook transform added (markdownify)
+
+  - [x] 5.4 Tutorial full reorg
+    - 34 sections, sequential 0-33 numbering (no b/c suffixes)
+    - CLI moved to section 8 (early), Python internals after deferred execution
+    - Observation gates promoted, record linkage moved to appendix
+    - CLI section documents checkpoint/resume, env vars, testing strategy
+
+  - [x] 5.5 Test infrastructure
+    - E2E test harness expanded from 7 to 21 cases
+    - test_topo_sort.py fixed for phase 2 method renames
+    - Regression verified: 5 golden tests via CLI entry script
+
+  - [x] 5.6 Naming cleanup
+    - WISE_RPA_INSTRUMENT → WISE_RPA_TIMING (clearer purpose)
+    - splunk-itsi-complete-test.robot: full 2-section scrape with markdownify + AI
 
 ## Notes
 

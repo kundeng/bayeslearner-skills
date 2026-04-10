@@ -149,6 +149,48 @@ Current order is mostly logical. Changes needed:
 - **Validates**: Requirement 4.3
 - **Test approach**: Benchmark quotes-test with and without slow mode env var.
 
+## Section 4: AOP Architecture (implemented)
+
+### 3-Layer Design
+
+```
+┌─ AspectRegistry ──────────────────────────────┐
+│  Aspect: instrument  (after_action: timing)   │
+│  Aspect: slow_motion (after_action: delay)    │
+│  Aspect: checkpoint  (before/after url/res)   │
+│  Hooks: before/after action, url, resource    │
+└───────────────────────────────────────────────┘
+┌─ PersistentArtifactStore ─────────────────────┐
+│  committed: dict[str, list]  (on disk)        │
+│  staging:   dict[str, list]  (per URL buffer) │
+│  commit_url() → flush staging → committed     │
+│  rollback_url() → discard staging             │
+└───────────────────────────────────────────────┘
+┌─ ExecutionEngine (unchanged core) ────────────┐
+│  _walk_rule, _execute_steps, _extract_*       │
+│  Sees artifact_store as plain dict[str, list] │
+└───────────────────────────────────────────────┘
+```
+
+### Write-Ahead Staging
+
+Records accumulate in a staging buffer per URL. Only `commit_url()` flushes
+to the committed store. Timeout or crash → staging discarded, URL retried
+on resume. **No partial data** reaches the checkpoint.
+
+### Checkpoint/Resume
+
+- `run` auto-resumes if `_checkpoint.json` exists
+- `run --fresh` deletes checkpoint, starts clean
+- `run --resume` requires checkpoint, errors if none
+- Checkpoint deleted on successful completion, kept on timeout
+
+### DB-Backed Storage (future)
+
+The `PersistentArtifactStore` interface makes SQLite trivial: `_save()`/`_load()`
+become transactions, `begin_url()`/`commit_url()`/`rollback_url()` map to
+BEGIN/COMMIT/ROLLBACK. The engine never knows.
+
 ## Future: Recovery Rules (from escape-mdp-spec, not yet implemented)
 
 User-defined escape transitions when state checks fail:

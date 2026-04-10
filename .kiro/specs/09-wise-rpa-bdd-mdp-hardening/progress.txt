@@ -2,8 +2,8 @@
 # Auto-updated by spec-go workflow
 # Format: [TIMESTAMP] [STATUS] [TASK_ID] - [DESCRIPTION]
 # STATUS: DONE | BLOCKED | SKIPPED | IN_PROGRESS
-# SUMMARY: 18/18 done | next: DONE
-# NOTE: 4.4, 4.5, 4.6 pre-completed in phase 1
+# SUMMARY: 24/25 done | next: DONE (4.2 Yelp deferred)
+# NOTE: 4.4, 4.5, 4.6 pre-completed in phase 1; tasks 5.1-5.6 added during session
 [2026-04-10] DONE 1.1 - Stealth bridge: fixed _kw_store._libraries → .libraries (RF 7.x), added 3-layer hierarchy docs
 [2026-04-10] DONE 1.7 - AOP slow-motion mode: WISE_RPA_SLOW + WISE_RPA_SLOW_SCREENSHOT in _do_action_instrumented
 [2026-04-10] DONE 2.1 - Dismiss scoping: interrupt_override + interrupt_paused on RuleNode, new BDD keywords
@@ -22,3 +22,11 @@
 [2026-04-10] DONE 1.4 - Python-modindex: site-side, adjusted thresholds to 85%/80%
 [2026-04-10] DONE 1.5 - MDN-web-api: already fixed in golden file, all gates pass
 [2026-04-10] DONE 1.6 - Splunk-ITSI: already fixed, passes but hits 120s timeout on some pages
+[2026-04-10] DONE 4.1 - Dev→main merge: multiple promotions (hardening, SKILL.md, checkpoint, tutorial)
+[2026-04-10] DEFER 4.2 - Yelp stealth: TLS/JA3 is genuinely hard, deferred to future spec
+[2026-04-10] DONE 5.1 - AOP checkpoint/resume: PersistentArtifactStore + AspectRegistry
+[2026-04-10] DONE 5.2 - All-in-one SKILL.md (616 lines, self-contained)
+[2026-04-10] DONE 5.3 - Consolidation: deleted references/ + escape-mdp-spec, added to_markdown hook
+[2026-04-10] DONE 5.4 - Tutorial reorg: 34 sections, sequential numbering, CLI early
+[2026-04-10] DONE 5.5 - Test infra: e2e 7→21 cases, test_topo_sort fixed, 5-golden regression
+[2026-04-10] DONE 5.6 - Naming: INSTRUMENT→TIMING, splunk-itsi-complete golden

@@ -302,6 +302,23 @@ table.explain tr:nth-child(even) { background: var(--bg-alt); }
   Traditional scraping: "write custom code per site." WiseRpaBDD: "write a declarative spec per site, execute it with one generic engine." The spec is the product &mdash; a portable, readable, tested extraction plan that a non-developer can run, inspect, and maintain.
 </div>
 
+<h3>Feature overview</h3>
+<p>WiseRpaBDD combines capabilities that don't exist together in any open-source scraping framework:</p>
+
+<table class="explain">
+<tr><th>Feature</th><th>What it means</th><th>Alternatives lack</th></tr>
+<tr><td><strong>Declarative BDD specs</strong></td><td>The <code>.robot</code> file IS the execution plan &mdash; readable, testable, portable</td><td>Scrapy/Playwright/Crawlee use imperative code</td></tr>
+<tr><td><strong>MDP rule engine</strong></td><td>Rules are states, actions cause transitions, DOM is the observation. Guards (preconditions) and observation gates (sync checks) are first-class</td><td>No scraping framework models extraction as an MDP</td></tr>
+<tr><td><strong>DAG execution</strong></td><td>Resources execute in topological order. Multi-parent nodes run once. Artifact chaining connects discovery &rarr; detail</td><td>Most scrapers use flat queues, not rule DAGs</td></tr>
+<tr><td><strong>Write-ahead checkpoint</strong></td><td>Records staged per URL, committed on success, rolled back on failure. Resume picks up where you left off &mdash; zero partial data</td><td>Scrapy has job persistence but not per-URL atomicity</td></tr>
+<tr><td><strong>AOP aspect registry</strong></td><td>Timing, slow-motion, and checkpoint are registered aspects with lifecycle hooks &mdash; not scattered inline code</td><td>No scraping framework uses formal AOP</td></tr>
+<tr><td><strong>Stealth browser adapter</strong></td><td>Patchright (patched Chromium) + playwright-stealth, transparent bridge for RF keywords via instance swap</td><td>Stealth usually means separate tools, not integrated adapters</td></tr>
+<tr><td><strong>Observation gates</strong></td><td>Three patterns (split rules, <code>await=</code>, interleaved checks) replace all fixed sleeps. Zero <code>time.sleep</code> in the engine</td><td>Most frameworks use hardcoded waits or implicit retries</td></tr>
+<tr><td><strong>AI extraction pipeline</strong></td><td>HTML &rarr; markdownify (fast) &rarr; AI cleanup (aichat/anthropic/openai). AI operates on captured text, never drives the browser</td><td>No framework chains fast conversion + LLM cleanup</td></tr>
+<tr><td><strong>Agent-generated suites</strong></td><td>Natural language &rarr; AI explores live site &rarr; drafts .robot &rarr; validates against golden baseline. 21 regression test cases</td><td>No scraping framework generates specs from prompts with validation</td></tr>
+<tr><td><strong>Per-rule lifecycle</strong></td><td>Dismiss scoping (<code>pause/scope interrupts</code>), declarative options (<code>on_enter</code>, <code>on_fail</code>, <code>timeout_ms</code>), guard policies (<code>skip/abort</code>)</td><td>Popup dismiss is usually global or manual</td></tr>
+</table>
+
 <h3>The AI generation angle</h3>
 <p>Because the spec is structured and the keyword catalog is finite (~60 keywords), an AI agent can <strong>generate</strong> the spec from a natural-language requirement. The agent explores the live site, gathers selector evidence, and produces a tested <code>.robot</code> file. The user reviews and refines the spec in plain English, not in code. This is the <strong>explore &rarr; draft &rarr; review &rarr; ship</strong> workflow at the heart of the wise-rpa-bdd skill.</p>
 </div>
