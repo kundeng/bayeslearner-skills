@@ -2348,35 +2348,81 @@ Resource variants
 
 <!-- ──────────── TOPIC 27 ──────────── -->
 <div class="section" id="t27">
-<h2><span class="num">27</span> Unified CLI</h2>
+<h2><span class="num">27</span> CLI &amp; Execution Modes</h2>
 
-<p><code>WiseRpaBDD.py</code> doubles as a command-line tool. Instead of invoking <code>robot</code> directly with <code>--pythonpath</code> flags, you can use the unified CLI:</p>
-
-<pre><code><span class="hl-cmt"># Run a suite live (full browser execution)</span>
-python WiseRpaBDD.py run tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Verify keyword resolution without launching a browser</span>
-python WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Lint BDD format (no Robot Framework needed)</span>
-python WiseRpaBDD.py validate tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Generate a suite via AI agent</span>
-python WiseRpaBDD.py generate "Scrape laptop prices from webscraper.io" \
-    -o tests/generated/laptops.robot</code></pre>
+<p><code>WiseRpaBDD.py</code> is the single entry point for all operations. It wraps <code>robot</code> with the correct <code>--pythonpath</code>, manages checkpoint/resume, and provides validation and agent generation commands.</p>
 
 <h3>Commands</h3>
 <table class="explain">
-<tr><th>Command</th><th>What it does</th></tr>
-<tr><td><code>run &lt;suite&gt; [robot-args]</code></td><td>Runs <code>robot --pythonpath scripts/ &lt;suite&gt;</code> with any extra robot arguments</td></tr>
-<tr><td><code>dryrun &lt;suite&gt; [robot-args]</code></td><td>Runs <code>robot --dryrun</code> to verify all keywords resolve (no browser, no output files)</td></tr>
-<tr><td><code>validate &lt;suite&gt; [...]</code></td><td>Checks that every executable step uses BDD prefixes (Given/When/Then/And/But). Pure Python, no RF needed.</td></tr>
-<tr><td><code>generate &lt;requirement&gt; -o &lt;path&gt;</code></td><td>Invokes an AI agent to explore a site and generate a <code>.robot</code> suite</td></tr>
+<tr><th>Command</th><th>Purpose</th><th>Browser?</th></tr>
+<tr><td><code>validate &lt;suite&gt;</code></td><td>BDD format lint &mdash; checks all steps use Given/When/Then/And/But. Pure Python, no RF needed. The fastest gate.</td><td>No</td></tr>
+<tr><td><code>dryrun &lt;suite&gt;</code></td><td>Keyword resolution check &mdash; verifies all WiseRpaBDD keywords resolve without launching a browser. Catches typos, missing keywords, bad argument counts.</td><td>No</td></tr>
+<tr><td><code>run &lt;suite&gt;</code></td><td>Full live execution &mdash; opens a browser, walks the rule tree, extracts data, writes output artifacts. Auto-resumes from checkpoint if one exists.</td><td>Yes</td></tr>
+<tr><td><code>generate &lt;req&gt; -o &lt;path&gt;</code></td><td>AI agent generation &mdash; sends a natural-language requirement to an AI agent, which explores the live site and produces a <code>.robot</code> suite.</td><td>Yes (agent)</td></tr>
 </table>
+
+<h3>The testing pipeline</h3>
+
+<p>Use commands in order, from cheapest to most expensive:</p>
+
+<pre><code><span class="hl-cmt"># 1. Lint — instant, catches structural errors</span>
+python WiseRpaBDD.py validate tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 2. Dryrun — seconds, catches keyword resolution errors</span>
+python WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 3. Live run — full exploitation against the real site</span>
+python WiseRpaBDD.py run tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 4. Batch regression — run multiple suites at once</span>
+python WiseRpaBDD.py run tests/golden/quotes-test.robot \
+    tests/golden/countries-list-test.robot \
+    tests/golden/hockey-teams-test.robot</code></pre>
+
+<h3>Checkpoint &amp; Resume</h3>
+
+<p>The <code>run</code> command automatically checkpoints progress after each URL. If a run times out or crashes, the next <code>run</code> resumes from where it left off &mdash; skipping completed resources and already-processed URLs. No partial data: records are staged per URL and only committed on success.</p>
+
+<table class="explain">
+<tr><th>Flag</th><th>Behavior</th></tr>
+<tr><td><code>run &lt;suite&gt;</code></td><td>Auto-resume: load checkpoint if one exists, otherwise start fresh</td></tr>
+<tr><td><code>run --fresh &lt;suite&gt;</code></td><td>Start clean: delete any existing checkpoint, run from scratch</td></tr>
+<tr><td><code>run --resume &lt;suite&gt;</code></td><td>Require checkpoint: error if no checkpoint exists (useful for CI)</td></tr>
+</table>
+
+<p>The checkpoint file lives at <code>output/{deployment}/_checkpoint.json</code>. It is deleted automatically on successful completion.</p>
+
+<h3>Environment variables</h3>
+
+<table class="explain">
+<tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>WISE_RPA_STEALTH</code></td><td><code>true</code></td><td>Use patchright stealth adapter (anti-bot detection). Set <code>0</code> for RF-Browser.</td></tr>
+<tr><td><code>WISE_RPA_HEADED</code></td><td><code>false</code></td><td>Show browser window. Set <code>1</code> for visible execution.</td></tr>
+<tr><td><code>WISE_RPA_TIMEOUT</code></td><td><code>120</code></td><td>Global timeout in seconds. The engine checkpoints and stops after this.</td></tr>
+<tr><td><code>WISE_RPA_TIMING</code></td><td><code>1</code> (on)</td><td>Per-action and per-rule timing logs. Set <code>0</code> for quiet output.</td></tr>
+<tr><td><code>WISE_RPA_SLOW</code></td><td>(off)</td><td>Slow-motion delay in ms after each action. For debugging/demos.</td></tr>
+<tr><td><code>WISE_RPA_SLOW_SCREENSHOT</code></td><td>(off)</td><td>Take screenshot after each action in slow mode. Set <code>1</code> to enable.</td></tr>
+<tr><td><code>WISE_RPA_RESUME_MODE</code></td><td><code>auto</code></td><td>Set by CLI flags. <code>fresh</code> or <code>require</code> override auto-resume.</td></tr>
+</table>
+
+<pre><code><span class="hl-cmt"># Example: headed run with 10-minute timeout, quiet output</span>
+WISE_RPA_HEADED=1 WISE_RPA_TIMEOUT=600 WISE_RPA_TIMING=0 \
+    python WiseRpaBDD.py run tests/golden/splunk-itsi-complete-test.robot
+
+<span class="hl-cmt"># Example: non-stealth, slow-motion debugging</span>
+WISE_RPA_STEALTH=0 WISE_RPA_SLOW=500 WISE_RPA_SLOW_SCREENSHOT=1 \
+    python WiseRpaBDD.py run tests/golden/quotes-test.robot</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  <strong>Checkpoint/resume is always on.</strong> The engine uses AOP (aspect-oriented programming) to manage cross-cutting concerns: timing, slow-motion, and checkpoint are all registered as aspects with hooks at action, URL, and resource lifecycle points. Aspects are default-on &mdash; no flags needed to get resume behavior.
+</div>
 
 <div class="callout try">
   <div class="callout-title">Try It</div>
-  Run <code>python WiseRpaBDD.py validate tests/golden/*.robot</code> to lint all golden baselines at once. It prints one line per file (OK or error details).
+  Run a large scrape with a short timeout to see checkpoint in action:<br/>
+  <code>WISE_RPA_TIMEOUT=30 python WiseRpaBDD.py run tests/golden/hockey-teams-test.robot</code><br/>
+  Then run it again &mdash; it picks up where it left off.
 </div>
 </div>
 
@@ -2465,9 +2511,29 @@ npx agent-browser click '&lt;css&gt;'       <span class="hl-cmt"># click element
 
 <!-- ──────────── TOPIC 30 ──────────── -->
 <div class="section" id="t30">
-<h2><span class="num">30</span> E2E Test Harness</h2>
+<h2><span class="num">30</span> Testing Strategy</h2>
 
-<p>The <code>WiseRpaBDDTest</code> class is a separate RF keyword library for testing agent-generated suites. It lives in the same <code>WiseRpaBDD.py</code> file but has a distinct purpose: invoke the AI agent with a requirement, capture the output, and validate it.</p>
+<p>Two kinds of testing, each with its own entry point:</p>
+
+<h3>Regression testing (golden suites against live sites)</h3>
+
+<p>Run golden <code>.robot</code> files against live sites to verify the engine and selectors still work. Uses the CLI <code>run</code> command &mdash; same entry point as production:</p>
+
+<pre><code><span class="hl-cmt"># Single suite</span>
+python WiseRpaBDD.py run --fresh tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Batch regression</span>
+python WiseRpaBDD.py run --fresh \
+    tests/golden/quotes-test.robot \
+    tests/golden/countries-list-test.robot \
+    tests/golden/hockey-teams-test.robot \
+    tests/golden/scifi-books-test.robot</code></pre>
+
+<p>This tests the <strong>exploitation pipeline</strong>: browser → rule walk → extraction → quality gates → output. Use <code>--fresh</code> to bypass checkpoint (each regression run should start clean).</p>
+
+<h3>Agent generation testing (AI drafts suites from requirements)</h3>
+
+<p>The <code>WiseRpaBDDTest</code> class is a separate RF keyword library that tests the <strong>exploration pipeline</strong>: send a natural-language requirement to an AI agent, validate that it produces a correct <code>.robot</code> suite matching a golden baseline.</p>
 
 <h3>Test harness keywords</h3>
 <table class="explain">
