@@ -559,56 +559,83 @@ Resource quote_pages
 
 <!-- ──────────── TOPIC 8 ──────────── -->
 <div class="section" id="t8">
-<h2><span class="num">8</span> Running Tests</h2>
+<h2><span class="num">8</span> CLI &amp; Execution Modes</h2>
 
-<h3>The <code>robot</code> CLI</h3>
-<pre><code><span class="hl-cmt"># Run a single test file</span>
-robot --pythonpath scripts/ tests/golden/quotes-test.robot
+<p><code>WiseRpaBDD.py</code> is the single entry point for all operations. It wraps <code>robot</code> with the correct <code>--pythonpath</code>, manages checkpoint/resume, and provides validation and agent generation commands.</p>
 
-<span class="hl-cmt"># Run all golden tests</span>
-robot --pythonpath scripts/ tests/golden/
-
-<span class="hl-cmt"># Run with headed browser (see it work)</span>
-WISE_RPA_HEADED=true robot --pythonpath scripts/ tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Run with stealth mode disabled (use RF-Browser directly)</span>
-WISE_RPA_STEALTH=false robot --pythonpath scripts/ tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Dryrun -- validate syntax without launching a browser</span>
-robot --dryrun --pythonpath scripts/ tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Filter by test name pattern</span>
-robot --test "Resource*" --pythonpath scripts/ tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Or use the unified CLI (handles --pythonpath automatically):</span>
-python scripts/WiseRpaBDD.py run tests/golden/quotes-test.robot
-python scripts/WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
-python scripts/WiseRpaBDD.py validate tests/golden/quotes-test.robot</code></pre>
-
-<h3>Output files</h3>
-<p>After every run, RF produces three files in the current directory (or <code>--outputdir</code>):</p>
+<h3>Commands</h3>
 <table class="explain">
-<tr><th>File</th><th>Purpose</th></tr>
-<tr><td><code>output.xml</code></td><td>Machine-readable execution data (timestamps, pass/fail, keyword traces)</td></tr>
-<tr><td><code>log.html</code></td><td>Detailed step-by-step log &mdash; expandable keyword calls, screenshots, messages</td></tr>
-<tr><td><code>report.html</code></td><td>High-level summary &mdash; pass/fail counts, execution time, suite statistics</td></tr>
+<tr><th>Command</th><th>Purpose</th><th>Browser?</th></tr>
+<tr><td><code>validate &lt;suite&gt;</code></td><td>BDD format lint &mdash; checks all steps use Given/When/Then/And/But. Pure Python, no RF needed. The fastest gate.</td><td>No</td></tr>
+<tr><td><code>dryrun &lt;suite&gt;</code></td><td>Keyword resolution check &mdash; verifies all WiseRpaBDD keywords resolve without launching a browser. Catches typos, missing keywords, bad argument counts.</td><td>No</td></tr>
+<tr><td><code>run &lt;suite&gt;</code></td><td>Full live execution &mdash; opens a browser, walks the rule tree, extracts data, writes output artifacts. Auto-resumes from checkpoint if one exists.</td><td>Yes</td></tr>
+<tr><td><code>generate &lt;req&gt; -o &lt;path&gt;</code></td><td>AI agent generation &mdash; sends a natural-language requirement to an AI agent, which explores the live site and produces a <code>.robot</code> suite.</td><td>Yes (agent)</td></tr>
 </table>
 
-<p>Additionally, WiseRpaBDD writes its own output to <code>output/{deployment_name}/</code>:</p>
-<ul>
-  <li><code>{deployment}_{artifact}.json</code> &mdash; extracted data per artifact</li>
-  <li><code>{deployment}.json</code> &mdash; deployment summary (record counts, timestamps)</li>
-</ul>
+<h3>The testing pipeline</h3>
+
+<p>Use commands in order, from cheapest to most expensive:</p>
+
+<pre><code><span class="hl-cmt"># 1. Lint — instant, catches structural errors</span>
+python WiseRpaBDD.py validate tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 2. Dryrun — seconds, catches keyword resolution errors</span>
+python WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 3. Live run — full exploitation against the real site</span>
+python WiseRpaBDD.py run tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># 4. Batch regression — run multiple suites at once</span>
+python WiseRpaBDD.py run tests/golden/quotes-test.robot \
+    tests/golden/countries-list-test.robot \
+    tests/golden/hockey-teams-test.robot</code></pre>
+
+<h3>Checkpoint &amp; Resume</h3>
+
+<p>The <code>run</code> command automatically checkpoints progress after each URL. If a run times out or crashes, the next <code>run</code> resumes from where it left off &mdash; skipping completed resources and already-processed URLs. No partial data: records are staged per URL and only committed on success.</p>
+
+<table class="explain">
+<tr><th>Flag</th><th>Behavior</th></tr>
+<tr><td><code>run &lt;suite&gt;</code></td><td>Auto-resume: load checkpoint if one exists, otherwise start fresh</td></tr>
+<tr><td><code>run --fresh &lt;suite&gt;</code></td><td>Start clean: delete any existing checkpoint, run from scratch</td></tr>
+<tr><td><code>run --resume &lt;suite&gt;</code></td><td>Require checkpoint: error if no checkpoint exists (useful for CI)</td></tr>
+</table>
+
+<p>The checkpoint file lives at <code>output/{deployment}/_checkpoint.json</code>. It is deleted automatically on successful completion.</p>
+
+<h3>Environment variables</h3>
+
+<table class="explain">
+<tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>WISE_RPA_STEALTH</code></td><td><code>true</code></td><td>Use patchright stealth adapter (anti-bot detection). Set <code>0</code> for RF-Browser.</td></tr>
+<tr><td><code>WISE_RPA_HEADED</code></td><td><code>false</code></td><td>Show browser window. Set <code>1</code> for visible execution.</td></tr>
+<tr><td><code>WISE_RPA_TIMEOUT</code></td><td><code>120</code></td><td>Global timeout in seconds. The engine checkpoints and stops after this.</td></tr>
+<tr><td><code>WISE_RPA_TIMING</code></td><td><code>1</code> (on)</td><td>Per-action and per-rule timing logs. Set <code>0</code> for quiet output.</td></tr>
+<tr><td><code>WISE_RPA_SLOW</code></td><td>(off)</td><td>Slow-motion delay in ms after each action. For debugging/demos.</td></tr>
+<tr><td><code>WISE_RPA_SLOW_SCREENSHOT</code></td><td>(off)</td><td>Take screenshot after each action in slow mode. Set <code>1</code> to enable.</td></tr>
+<tr><td><code>WISE_RPA_RESUME_MODE</code></td><td><code>auto</code></td><td>Set by CLI flags. <code>fresh</code> or <code>require</code> override auto-resume.</td></tr>
+</table>
+
+<pre><code><span class="hl-cmt"># Example: headed run with 10-minute timeout, quiet output</span>
+WISE_RPA_HEADED=1 WISE_RPA_TIMEOUT=600 WISE_RPA_TIMING=0 \
+    python WiseRpaBDD.py run tests/golden/splunk-itsi-complete-test.robot
+
+<span class="hl-cmt"># Example: non-stealth, slow-motion debugging</span>
+WISE_RPA_STEALTH=0 WISE_RPA_SLOW=500 WISE_RPA_SLOW_SCREENSHOT=1 \
+    python WiseRpaBDD.py run tests/golden/quotes-test.robot</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  <strong>Checkpoint/resume is always on.</strong> The engine uses AOP (aspect-oriented programming) to manage cross-cutting concerns: timing, slow-motion, and checkpoint are all registered as aspects with hooks at action, URL, and resource lifecycle points. Aspects are default-on &mdash; no flags needed to get resume behavior.
+</div>
 
 <div class="callout try">
   <div class="callout-title">Try It</div>
-  Run a test, then open <code>log.html</code> in your browser. Expand the "Then I finalize deployment" keyword to see every browser action logged by the execution engine.
+  Run a large scrape with a short timeout to see checkpoint in action:<br/>
+  <code>WISE_RPA_TIMEOUT=30 python WiseRpaBDD.py run tests/golden/hockey-teams-test.robot</code><br/>
+  Then run it again &mdash; it picks up where it left off.
 </div>
 </div>
-
-<!-- ════════════════════════════════════════════════════════════════ -->
-<!-- PART 2: BROWSER AUTOMATION                                     -->
-<!-- ════════════════════════════════════════════════════════════════ -->
 
 <!-- ──────────── TOPIC 9 ──────────── -->
 <div class="section" id="t9">
@@ -839,7 +866,63 @@ Then I extract fields
 
 <!-- ──────────── TOPIC 13 ──────────── -->
 <div class="section" id="t13">
-<h2><span class="num">13</span> Python Class as RF Library</h2>
+<h2><span class="num">13</span> The Deferred Execution Model</h2>
+
+<h3>The fundamental insight</h3>
+<p>RF executes keywords <strong>sequentially, one at a time</strong>. But web scraping requires <strong>nested loops</strong>: for each page, for each element on the page, extract multiple fields. You cannot express nested loops in RF's flat keyword sequence.</p>
+
+<p>The solution is a <strong>two-phase architecture</strong>:</p>
+
+<table class="explain">
+<tr><th>Phase</th><th>What happens</th><th>When</th></tr>
+<tr><td><strong>Phase A: Plan</strong></td><td>RF keywords build an in-memory tree of rules, expansions, and field specs</td><td>During test case execution (before Suite Teardown)</td></tr>
+<tr><td><strong>Phase B: Execute</strong></td><td><code>finalize_deployment</code> walks the tree using a real browser</td><td>During Suite Teardown</td></tr>
+</table>
+
+<h3>How keywords build the plan</h3>
+<pre><code><span class="hl-cmt"># Phase A: Each keyword just stores data on the context</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)
+<span class="hl-py">def</span> start_deployment(self, deployment):
+    self._deployment = DeploymentContext(name=deployment)
+    <span class="hl-cmt"># Creates the empty plan object</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I register artifact "${artifact}"'</span>)
+<span class="hl-py">def</span> register_artifact(self, artifact, *fields):
+    self._deployment.artifacts[artifact] = ArtifactSchema(name=artifact, ...)
+    <span class="hl-cmt"># Adds an artifact definition to the plan</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'I define rule "${rule}"'</span>)
+<span class="hl-py">def</span> begin_rule(self, rule):
+    node = RuleNode(name=rule)
+    self._current_resource.rules[rule] = node
+    self._current_rule = node
+    <span class="hl-cmt"># Adds a rule to the current resource</span>
+
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'When I paginate by next button "${locator}" up to ${limit} pages'</span>)
+<span class="hl-py">def</span> paginate_by_next_button(self, locator, limit):
+    self._current_rule.expansion = Expansion(
+        over=<span class="hl-str">"pages_next"</span>, locator=locator, limit=int(limit))
+    <span class="hl-cmt"># Attaches pagination to the current rule -- no browser action yet!</span></code></pre>
+
+<h3>Phase B: finalize_deployment triggers execution</h3>
+<pre><code><span class="hl-dec">@keyword</span>(<span class="hl-str">"Then I finalize deployment"</span>)
+<span class="hl-py">def</span> finalize_deployment(self):
+    self._finalize_resource_roots()
+    headed = os.environ.get(<span class="hl-str">"WISE_RPA_HEADED"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">in</span> (<span class="hl-str">"1"</span>, <span class="hl-str">"true"</span>, <span class="hl-str">"yes"</span>)
+    stealth = os.environ.get(<span class="hl-str">"WISE_RPA_STEALTH"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">not in</span> (<span class="hl-str">"0"</span>, <span class="hl-str">"false"</span>, <span class="hl-str">"no"</span>)
+    engine = ExecutionEngine(self._deployment, headed=headed, stealth=stealth)
+    engine.run()   <span class="hl-cmt"># THIS is where the browser launches and scraping happens</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Every keyword before <code>finalize_deployment</code> is a <strong>no-op at the browser level</strong>. They only build Python dataclass objects. The browser does not even launch until the suite teardown runs <code>engine.run()</code>.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 14 ──────────── -->
+<div class="section" id="t14">
+<h2><span class="num">14</span> Python Class as RF Library</h2>
 
 <h3>The <code>@library</code> and <code>@keyword</code> decorators</h3>
 <p>A <strong>decorator</strong> is a Python feature that modifies a function or class. It starts with <code>@</code> and sits on the line above the thing it decorates. Here is the WiseRpaBDD class declaration:</p>
@@ -899,9 +982,9 @@ Then I extract fields
 </div>
 </div>
 
-<!-- ──────────── TOPIC 14 ──────────── -->
-<div class="section" id="t14">
-<h2><span class="num">14</span> Python Concepts Used in the Project</h2>
+<!-- ──────────── TOPIC 15 ──────────── -->
+<div class="section" id="t15">
+<h2><span class="num">15</span> Python Concepts Used in the Project</h2>
 
 <h3>Dataclasses</h3>
 <p>A <strong>dataclass</strong> is a Python shortcut for creating classes that mainly hold data:</p>
@@ -953,9 +1036,9 @@ elem_selector = f<span class="hl-str">"{selector} >> nth={i}"</span>
 <p>The <code>*</code> means "collect all remaining positional arguments into a tuple." When RF calls this keyword with multiple arguments from the <code>...</code> continuation lines, they all arrive as the <code>specs</code> tuple.</p>
 </div>
 
-<!-- ──────────── TOPIC 15 ──────────── -->
-<div class="section" id="t15">
-<h2><span class="num">15</span> The <code>from __future__ import annotations</code> Pattern</h2>
+<!-- ──────────── TOPIC 16 ──────────── -->
+<div class="section" id="t16">
+<h2><span class="num">16</span> The <code>from __future__ import annotations</code> Pattern</h2>
 
 <h3>What it does</h3>
 <p>The very first non-comment line in WiseRpaBDD.py is:</p>
@@ -981,62 +1064,6 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
 <!-- ════════════════════════════════════════════════════════════════ -->
 <!-- PART 4: WISERPABDD ARCHITECTURE                                -->
 <!-- ════════════════════════════════════════════════════════════════ -->
-
-<!-- ──────────── TOPIC 16 ──────────── -->
-<div class="section" id="t16">
-<h2><span class="num">16</span> The Deferred Execution Model</h2>
-
-<h3>The fundamental insight</h3>
-<p>RF executes keywords <strong>sequentially, one at a time</strong>. But web scraping requires <strong>nested loops</strong>: for each page, for each element on the page, extract multiple fields. You cannot express nested loops in RF's flat keyword sequence.</p>
-
-<p>The solution is a <strong>two-phase architecture</strong>:</p>
-
-<table class="explain">
-<tr><th>Phase</th><th>What happens</th><th>When</th></tr>
-<tr><td><strong>Phase A: Plan</strong></td><td>RF keywords build an in-memory tree of rules, expansions, and field specs</td><td>During test case execution (before Suite Teardown)</td></tr>
-<tr><td><strong>Phase B: Execute</strong></td><td><code>finalize_deployment</code> walks the tree using a real browser</td><td>During Suite Teardown</td></tr>
-</table>
-
-<h3>How keywords build the plan</h3>
-<pre><code><span class="hl-cmt"># Phase A: Each keyword just stores data on the context</span>
-
-<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I start deployment "${deployment}"'</span>)
-<span class="hl-py">def</span> start_deployment(self, deployment):
-    self._deployment = DeploymentContext(name=deployment)
-    <span class="hl-cmt"># Creates the empty plan object</span>
-
-<span class="hl-dec">@keyword</span>(<span class="hl-str">'Given I register artifact "${artifact}"'</span>)
-<span class="hl-py">def</span> register_artifact(self, artifact, *fields):
-    self._deployment.artifacts[artifact] = ArtifactSchema(name=artifact, ...)
-    <span class="hl-cmt"># Adds an artifact definition to the plan</span>
-
-<span class="hl-dec">@keyword</span>(<span class="hl-str">'I define rule "${rule}"'</span>)
-<span class="hl-py">def</span> begin_rule(self, rule):
-    node = RuleNode(name=rule)
-    self._current_resource.rules[rule] = node
-    self._current_rule = node
-    <span class="hl-cmt"># Adds a rule to the current resource</span>
-
-<span class="hl-dec">@keyword</span>(<span class="hl-str">'When I paginate by next button "${locator}" up to ${limit} pages'</span>)
-<span class="hl-py">def</span> paginate_by_next_button(self, locator, limit):
-    self._current_rule.expansion = Expansion(
-        over=<span class="hl-str">"pages_next"</span>, locator=locator, limit=int(limit))
-    <span class="hl-cmt"># Attaches pagination to the current rule -- no browser action yet!</span></code></pre>
-
-<h3>Phase B: finalize_deployment triggers execution</h3>
-<pre><code><span class="hl-dec">@keyword</span>(<span class="hl-str">"Then I finalize deployment"</span>)
-<span class="hl-py">def</span> finalize_deployment(self):
-    self._finalize_resource_roots()
-    headed = os.environ.get(<span class="hl-str">"WISE_RPA_HEADED"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">in</span> (<span class="hl-str">"1"</span>, <span class="hl-str">"true"</span>, <span class="hl-str">"yes"</span>)
-    stealth = os.environ.get(<span class="hl-str">"WISE_RPA_STEALTH"</span>, <span class="hl-str">""</span>).lower() <span class="hl-py">not in</span> (<span class="hl-str">"0"</span>, <span class="hl-str">"false"</span>, <span class="hl-str">"no"</span>)
-    engine = ExecutionEngine(self._deployment, headed=headed, stealth=stealth)
-    engine.run()   <span class="hl-cmt"># THIS is where the browser launches and scraping happens</span></code></pre>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  Every keyword before <code>finalize_deployment</code> is a <strong>no-op at the browser level</strong>. They only build Python dataclass objects. The browser does not even launch until the suite teardown runs <code>engine.run()</code>.
-</div>
-</div>
 
 <!-- ──────────── TOPIC 17 ──────────── -->
 <div class="section" id="t17">
@@ -1381,9 +1408,9 @@ Category "Home &amp; Garden"                        <span class="hl-cmt"># Level
 </table>
 </div>
 
-<!-- ──────────── TOPIC 19b ──────────── -->
-<div class="section" id="t19b">
-<h2><span class="num">19b</span> Browser Control Hierarchy</h2>
+<!-- ──────────── TOPIC 20 ──────────── -->
+<div class="section" id="t20">
+<h2><span class="num">20</span> Browser Control Hierarchy</h2>
 
 <p>The engine has a <strong>3-layer stack</strong> for browser control. Understanding which layer owns the page in each mode is essential for debugging and for writing <code>call_keyword</code> blocks.</p>
 
@@ -1416,9 +1443,9 @@ Layer 1b: StealthAdapter      → Patchright (patched Playwright, in-process Pyt
 </div>
 </div>
 
-<!-- ──────────── TOPIC 19c ──────────── -->
-<div class="section" id="t19c">
-<h2><span class="num">19c</span> Keyword Hierarchy</h2>
+<!-- ──────────── TOPIC 21 ──────────── -->
+<div class="section" id="t21">
+<h2><span class="num">21</span> Keyword Hierarchy</h2>
 
 <p>There are four levels of keyword abstraction for browser interaction, listed from highest to lowest. Prefer the highest level that can express your intent.</p>
 
@@ -1436,9 +1463,9 @@ Layer 1b: StealthAdapter      → Patchright (patched Playwright, in-process Pyt
 </div>
 </div>
 
-<!-- ──────────── TOPIC 20 ──────────── -->
-<div class="section" id="t20">
-<h2><span class="num">20</span> Expansion Strategies</h2>
+<!-- ──────────── TOPIC 22 ──────────── -->
+<div class="section" id="t22">
+<h2><span class="num">22</span> Expansion Strategies</h2>
 
 <p>Expansions are how the engine loops. The <code>.robot</code> file declares <em>what</em> to loop over, and the <code>ExecutionEngine</code> handles the <em>how</em>.</p>
 
@@ -1504,9 +1531,589 @@ When I expand over combinations
 </div>
 </div>
 
-<!-- ──────────── TOPIC 20b ──────────── -->
-<div class="section" id="t20b">
-<h2><span class="num">20b</span> Record Linkage Walkthrough</h2>
+<!-- ──────────── TOPIC 23 ──────────── -->
+<div class="section" id="t23">
+<h2><span class="num">23</span> Observation Gates &amp; Zero-Sleep Execution</h2>
+
+<p>WiseRpaBDD models every scrape as a delayed MDP: state &rarr; action &rarr; observation. Fixed-duration waits (<code>When I wait</code>) are an anti-pattern because they paper over <em>missing observations</em>. This section covers the two observation-gate patterns that replace all sleeps, the scoping rules for dismiss selectors, and how the engine achieves zero-sleep execution internally.</p>
+
+<h3>1. The Problem: Why <code>When I wait</code> Is an Anti-Pattern</h3>
+
+<p>A <code>When I wait 3 seconds</code> step tells the engine nothing about <em>what</em> it is waiting for. It introduces three problems:</p>
+
+<ul>
+  <li><strong>Hidden observations.</strong> The MDP transition <em>s, a &rarr; o</em> is incomplete &mdash; the observation <em>o</em> is implicit ("something probably changed after 3 seconds"). The engine cannot verify the transition succeeded.</li>
+  <li><strong>Fragility.</strong> Too short and the test is flaky on slow networks; too long and the suite is needlessly slow. There is no correct fixed value.</li>
+  <li><strong>Engine violation.</strong> The engine should never call <code>time.sleep</code>. All timing is event-driven: Playwright's <code>wait_for_elements_state</code> (default 10s timeout), staleness detection, or explicit selector polling.</li>
+</ul>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Every action must declare its observation gate &mdash; the selector or condition that proves the action's effect is visible in the DOM. If you cannot name the gate, the action's MDP node is incomplete.
+</div>
+
+<h3>2. Option 1: Split Rules with State Gates</h3>
+
+<p>The purest MDP representation: each <em>s, a &rarr; o</em> transition is its own rule node. The engine's built-in <code>wait_for_elements_state</code> (10s default) handles timing at each node boundary.</p>
+
+<p><strong>Example:</strong> An Airbnb-style city autocomplete flow. Typing a city name triggers an async autocomplete dropdown. The three-rule split makes every observation explicit:</p>
+
+<pre><code>I define rule "type_city"
+    And I declare parents "expand_search"
+    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
+
+I define rule "autocomplete_ready"
+    And I declare parents "type_city"
+    And selector "[data-testid='option-0']" exists
+
+I define rule "select_city"
+    And I declare parents "autocomplete_ready"
+    When I click locator "[data-testid='option-0']"</code></pre>
+
+<p><strong>When to use:</strong> Named state transitions worth documenting &mdash; login flows, multi-step wizards, any place where the intermediate state is meaningful to a reader of the <code>.robot</code> file.</p>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  Check if an existing <code>When I wait</code> can be replaced by splitting the rule. If the wait is between "type" and "click", there is almost certainly a selector you can gate on.
+</div>
+
+<h3>3. Option 2: <code>await=</code> Inline Observation Gate</h3>
+
+<p>When splitting into separate rules adds noise without clarity, use the <code>await=</code> continuation parameter. It keeps rules grouped by user intent while still declaring every observation.</p>
+
+<p><code>await=&lt;selector&gt;</code> can be attached to any action keyword (<code>click</code>, <code>type</code>, <code>click_text</code>). The engine waits for the selector to appear in the DOM before advancing to the next action. Fallback selectors are supported via the standard <code>|</code> separator.</p>
+
+<p><strong>Example:</strong> The same Airbnb city flow, compact form:</p>
+
+<pre><code>I define rule "enter_city"
+    When I click text "Anywhere"
+    ...    await=#bigsearch-query-location-input
+    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
+    ...    await=[data-testid='option-0']
+    When I click locator "[data-testid='option-0']"</code></pre>
+
+<p><strong>When to use:</strong> Sequences where the intermediate states are mechanical (click &rarr; wait for input to appear) and naming each one would clutter the rule tree.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Both options produce zero-sleep execution. Option 1 (split rules) is self-documenting but verbose. Option 2 (<code>await=</code>) is compact but hides observations inside continuation lines. Choose based on whether readers need to see each state.
+</div>
+
+<h3>4. Dismiss Selector Scoping</h3>
+
+<p>The dismiss mechanism (<code>I configure interrupts ... dismiss=&lt;selector&gt;</code>) runs <strong>before every action</strong> in the rule walk. This is powerful but dangerous: an overly broad selector will close interactive panels the user intentionally opened.</p>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  <strong>CRITICAL:</strong> <code>[role="dialog"]</code> matches search panels, date-picker calendars, and filter drawers &mdash; not just cookie banners. A dismiss selector that clicks the close button of any <code>[role="dialog"]</code> will sabotage your own flow.
+</div>
+
+<p><strong>Rules for dismiss selectors:</strong></p>
+<ul>
+  <li>Only dismiss known popup text or patterns &mdash; be as specific as possible.</li>
+  <li>Test your dismiss selectors during the explore phase with all interactive panels open.</li>
+  <li>Prefer text-based selectors that match the popup's accept/dismiss button label.</li>
+</ul>
+
+<table class="explain">
+<tr><th>Quality</th><th>Selector</th><th>Why</th></tr>
+<tr><td><strong>Good</strong></td><td><code>text="Got it"</code></td><td>Matches only the specific cookie-consent button text</td></tr>
+<tr><td><strong>Good</strong></td><td><code>button#onetrust-accept-btn-handler</code></td><td>ID-specific, cannot match anything else</td></tr>
+<tr><td><strong>Bad</strong></td><td><code>[role="dialog"] button[aria-label="Close"]</code></td><td>Matches every dialog's close button, including calendars and search panels</td></tr>
+<tr><td><strong>Bad</strong></td><td><code>.modal-overlay .close</code></td><td>Too generic &mdash; any component using modal patterns will be dismissed</td></tr>
+</table>
+
+<h3>5. Engine Internals: How Zero-Sleep Works</h3>
+
+<p>The engine achieves zero-sleep execution through four mechanisms. None use <code>time.sleep</code>.</p>
+
+<table class="explain">
+<tr><th>Mechanism</th><th>Where Used</th><th>How It Works</th></tr>
+<tr><td><strong>Staleness detection</strong></td><td>Pagination</td><td>After clicking "next page", the engine polls until the first element's text content changes from its pre-click value. This proves the new page has rendered.</td></tr>
+<tr><td><strong>Heading-text polling</strong></td><td>Calendar forward</td><td>After clicking the calendar's forward button, the engine polls until the month/year heading text differs from its pre-click value.</td></tr>
+<tr><td><strong>JS click + <code>wait_for_elements_state</code></strong></td><td>Stepper / quantity controls</td><td>Standard Playwright <code>click()</code> stability checks fail on elements that re-render during the click. The engine uses a raw JS click followed by <code>wait_for_elements_state("visible")</code> as a post-condition.</td></tr>
+<tr><td><strong>AOP instrumentation</strong></td><td>All actions</td><td>The <code>_do_action_instrumented</code> wrapper runs around every action. It handles pre-action dismiss, post-action observation gates (<code>await=</code>), and retry/recovery. Enabled by default.</td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The AOP wrapper (<code>_do_action_instrumented</code>) is the single point of control for all action timing. It runs dismiss selectors, executes the action, waits for the <code>await=</code> gate if present, and retries on failure. Every action in the rule walk passes through this wrapper &mdash; there is no path that bypasses it.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 24 ──────────── -->
+<div class="section" id="t24">
+<h2><span class="num">24</span> State Setup &amp; Interrupts</h2>
+
+<h3>State setup (authentication)</h3>
+<p>Many sites require login before scraping. The <code>configure state setup</code> keyword defines a sequence of pre-scrape actions:</p>
+
+<pre><code>    Given I configure state setup
+    ...    skip_when=.logged-in-indicator
+    ...    action=open     url=https://example.com/login
+    ...    action=input    css=#username    value=myuser
+    ...    action=password css=#password    value=mypass
+    ...    action=click    css=button[type=submit]</code></pre>
+
+<h3>Setup action types</h3>
+<table class="explain">
+<tr><th>Action</th><th>What it does</th></tr>
+<tr><td><code>open</code></td><td>Navigate to a URL (<code>bl.go_to(url)</code>)</td></tr>
+<tr><td><code>input</code></td><td>Type visible text into a field (<code>bl.fill_text(css, value)</code>)</td></tr>
+<tr><td><code>password</code></td><td>Same as input but semantically distinct for passwords</td></tr>
+<tr><td><code>click</code></td><td>Click an element (<code>bl.click(css)</code>)</td></tr>
+</table>
+
+<p>The <code>skip_when</code> option checks for a CSS selector &mdash; if found, setup is skipped (already logged in). After all actions, the engine waits for <code>networkidle</code>.</p>
+
+<h3>Interrupt handling</h3>
+<p>Cookie banners, popup modals, and consent dialogs can block scraping. The <code>configure interrupts</code> keyword registers selectors to auto-dismiss:</p>
+
+<pre><code>    And I configure interrupts
+    ...    dismiss=button#onetrust-accept-btn-handler
+    ...    dismiss=.modal-close-button</code></pre>
+
+<p>The engine calls <code>_dismiss_interrupts</code> which checks each selector and clicks it if found. This runs before every action during step execution.</p>
+
+<h3>Per-rule dismiss scoping</h3>
+
+<p>Global dismiss selectors can interfere with interactive panels (calendars, guest pickers, dropdown menus). Two keywords let you scope or suppress dismiss per rule:</p>
+
+<pre><code>    <span class="hl-cmt"># Override: use ONLY these selectors for this rule</span>
+    I define rule "interactive_form"
+        And I scope interrupts
+        ...    dismiss="button.cookie-accept"
+        ...    dismiss=".promo-close"
+
+    <span class="hl-cmt"># Suppress: skip ALL dismiss for this rule</span>
+    I define rule "datepicker_interaction"
+        And I pause interrupts
+        When I click locator ".calendar-next"</code></pre>
+
+<p>When a rule declares <code>And I scope interrupts</code>, only those selectors are used for dismiss during that rule's steps. When <code>And I pause interrupts</code> is declared, no dismiss runs at all. After the rule completes, the engine returns to the global config.</p>
+
+<h3>Declarative rule options</h3>
+
+<p>Rules can declare lifecycle hooks via <code>And I set rule options</code>:</p>
+
+<pre><code>    I define rule "checkout"
+        And I set rule options
+        ...    on_enter=screenshot
+        ...    on_fail=screenshot
+        ...    timeout_ms=30000</code></pre>
+
+<table class="explain">
+<tr><th>Option</th><th>Effect</th></tr>
+<tr><td><code>on_enter=screenshot</code></td><td>Take screenshot before guard checks</td></tr>
+<tr><td><code>on_fail=screenshot</code></td><td>Take screenshot on guard failure or rule timeout</td></tr>
+<tr><td><code>timeout_ms=N</code></td><td>Abort rule after N milliseconds</td></tr>
+</table>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  Interrupt selectors use simple <code>get_element_count</code> + <code>click</code>. If a dismiss button triggers a page reload, your extraction timing may be affected. Use <code>page_load_delay_ms</code> as a safety buffer. Use <code>And I pause interrupts</code> on rules where dismiss would break the flow.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 25 ──────────── -->
+<div class="section" id="t25">
+<h2><span class="num">25</span> AI Extraction</h2>
+
+<p>WiseRpaBDD can invoke an AI model to extract structured data from previously captured content. This runs <em>after</em> field/table extraction on the same rule node, operating on the already-extracted data.</p>
+
+<h3>Usage in .robot</h3>
+<pre><code>    Then I extract with AI "itsi_data"
+    ...    input=page_html
+    ...    prompt=${AI_PROMPT}
+    ...    schema={"modules": [{"name": "str", "status": "str"}]}
+    ...    max_size=50000</code></pre>
+
+<h3>AI adapter chain</h3>
+<p>The <code>_call_ai</code> method tries adapters in order until one succeeds:</p>
+<table class="explain">
+<tr><th>Adapter</th><th>How it works</th><th>Model</th></tr>
+<tr><td><code>cli:&lt;command&gt;</code></td><td>Pipes prompt to stdin of an arbitrary CLI tool</td><td>Whatever the CLI uses</td></tr>
+<tr><td><code>aichat</code></td><td>Uses the <code>aichat</code> CLI (default if available on PATH)</td><td>Configured in aichat</td></tr>
+<tr><td><code>anthropic</code></td><td>Anthropic Python SDK</td><td>claude-haiku-4-5-20251001</td></tr>
+<tr><td><code>openai</code></td><td>OpenAI Python SDK</td><td>gpt-4o-mini</td></tr>
+</table>
+
+<p>Set the adapter at deployment level:</p>
+<pre><code>    And I set AI adapter "anthropic"</code></pre>
+<p>If no adapter is set, the engine tries aichat, then anthropic, then openai (first that works).</p>
+
+<h3>AI extraction options</h3>
+<table class="explain">
+<tr><th>Option</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>input</code></td><td>all fields as JSON</td><td>Field name to use as AI input</td></tr>
+<tr><td><code>prompt</code></td><td>mode-based</td><td>Custom instruction for the AI</td></tr>
+<tr><td><code>mode</code></td><td><code>extract</code></td><td>Built-in mode: <code>extract</code>, <code>cleanup</code>, <code>classify</code>, <code>refine</code></td></tr>
+<tr><td><code>schema</code></td><td>&mdash;</td><td>JSON schema hint (forces JSON output)</td></tr>
+<tr><td><code>categories</code></td><td>&mdash;</td><td>Classification categories (forces JSON output)</td></tr>
+<tr><td><code>max_size</code></td><td>50000</td><td>Max input chars before skipping (0 = unlimited)</td></tr>
+<tr><td><code>chunk_size</code></td><td>0</td><td>Split input into chunks, process each, concatenate</td></tr>
+<tr><td><code>output</code></td><td><code>json</code></td><td>Response format: <code>json</code>, <code>markdown</code>, <code>text</code></td></tr>
+</table>
+
+<h3>Flow</h3>
+<pre><code><span class="hl-cmt"># In _extract_from_scope, after field/table extraction:</span>
+<span class="hl-py">if</span> rule.ai_extraction:
+    ai_result = self._run_ai_extraction(rule.ai_extraction, data)
+    <span class="hl-py">if</span> ai_result:
+        data.update(ai_result)
+<span class="hl-cmt"># AI results merge into the same record alongside field-extracted data</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  AI extraction is a <strong>post-processing</strong> step. The browser first extracts raw content (e.g., <code>page_html</code> via the <code>html</code> extractor), then the AI transforms that content into structured data. The AI never drives the browser.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 26 ──────────── -->
+<div class="section" id="t26">
+<h2><span class="num">26</span> Hooks System</h2>
+
+<p>Hooks allow you to transform extracted data at specific lifecycle points without modifying the engine. They run as config-driven rules applied to each record.</p>
+
+<h3>Registering a hook</h3>
+<pre><code>    And I register hook "clean_text" at "post_extract"
+    ...    strip_html=description
+    ...    lowercase=category
+    ...    default=status:unknown
+    ...    rename=old_field:new_field</code></pre>
+
+<h3>Lifecycle points</h3>
+<table class="explain">
+<tr><th>Point</th><th>When it fires</th></tr>
+<tr><td><code>post_discover</code></td><td>After initial page discovery</td></tr>
+<tr><td><code>pre_extract</code></td><td>Before field extraction begins</td></tr>
+<tr><td><code>post_extract</code></td><td>After field extraction, before emit</td></tr>
+<tr><td><code>pre_assemble</code></td><td>Before output assembly</td></tr>
+<tr><td><code>post_assemble</code></td><td>After output is assembled</td></tr>
+</table>
+
+<h3>Available transforms</h3>
+<table class="explain">
+<tr><th>Transform</th><th>Syntax</th><th>What it does</th></tr>
+<tr><td><code>rename</code></td><td><code>rename=old:new</code></td><td>Rename a field in the record</td></tr>
+<tr><td><code>drop</code></td><td><code>drop=field_name</code></td><td>Remove a field entirely</td></tr>
+<tr><td><code>strip_html</code></td><td><code>strip_html=field_name</code></td><td>Remove HTML tags from a field's value</td></tr>
+<tr><td><code>default</code></td><td><code>default=field:value</code></td><td>Set a default if the field is empty/missing</td></tr>
+<tr><td><code>lowercase</code></td><td><code>lowercase=field_name</code></td><td>Lowercase a field's value</td></tr>
+<tr><td><code>regex</code></td><td><code>regex=field:pattern:replacement</code></td><td>Regex find-and-replace on a field</td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Hooks are the extensibility mechanism for data cleaning. Instead of adding site-specific logic to the engine, you declare transforms in the <code>.robot</code> file. The engine applies them generically.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 27 ──────────── -->
+<div class="section" id="t27">
+<h2><span class="num">27</span> Emit Patterns</h2>
+
+<p>After extraction, records must be emitted to an artifact store. WiseRpaBDD supports three emit strategies controlled by the keyword used.</p>
+
+<h3>Simple emit</h3>
+<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES}"</code></pre>
+<p>Appends each extracted record directly to the named artifact's store.</p>
+
+<h3>Flattened emit</h3>
+<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES_FLAT}" flattened by "tags"</code></pre>
+<p>If a field contains a list (e.g., <code>tags: ["love", "life", "humor"]</code>), the engine creates one record per list item. A quote with 3 tags becomes 3 flat records. Useful for generating denormalized/tabular output.</p>
+
+<h3>Merge emit</h3>
+<pre><code>    And I merge into artifact "${ARTIFACT_PRODUCTS}" on key "product_id"</code></pre>
+<p>If a record with the same key value already exists in the artifact store, the new data is <strong>merged</strong> into the existing record (via <code>dict.update</code>). If no match is found, the record is appended normally. This is used when multiple rules or expansions contribute fields to the same logical entity.</p>
+
+<h3>Direct write</h3>
+<pre><code>    Then I write artifact "${ARTIFACT}" to "output/my_data.json"</code></pre>
+<p>Writes an artifact's current contents to a specific file path, useful for mid-suite checkpoints or non-standard output locations.</p>
+
+<h3>Artifact options affecting output</h3>
+<pre><code>    And I set artifact options for "${ARTIFACT}"
+    ...    output=true              <span class="hl-cmt"># write to disk (default: false)</span>
+    ...    structure=flat            <span class="hl-cmt"># flat vs nested (default: nested)</span>
+    ...    format=jsonl              <span class="hl-cmt"># json, jsonl, csv, markdown</span>
+    ...    dedupe=product_id         <span class="hl-cmt"># deduplicate on this field</span>
+    ...    query=[].data             <span class="hl-cmt"># JMESPath transform before writing</span>
+    ...    consumes=product_urls     <span class="hl-cmt"># declares dependency on another artifact</span></code></pre>
+</div>
+
+<!-- ──────────── TOPIC 28 ──────────── -->
+<div class="section" id="t28">
+<h2><span class="num">28</span> Multi-Resource Chaining</h2>
+
+<p>A deployment can have multiple resources that form a pipeline. Resources can <strong>consume</strong> artifacts produced by earlier resources, enabling multi-step scraping.</p>
+
+<h3>Example: variants-test.robot</h3>
+<pre><code><span class="hl-cmt"># Resource 1: "discover" -- scrapes product URLs</span>
+Resource discover
+    [Setup]    Given I start resource "discover" at "${ENTRY_DISCOVER}"
+    <span class="hl-cmt"># ... extracts product URLs, emits to "product_urls" artifact</span>
+
+<span class="hl-cmt"># Resource 2: "variants" -- consumes product URLs, visits each one</span>
+Resource variants
+    [Setup]    Given I start resource "variants" at "${ENTRY_VARIANTS}"
+    <span class="hl-cmt"># ${ENTRY_VARIANTS} = "https://www.webscraper.io{url}"</span>
+    <span class="hl-cmt"># The {url} is a template that gets expanded per product_urls record</span></code></pre>
+
+<h3>How the engine resolves execution order</h3>
+<p>The engine uses <strong>Kahn's algorithm</strong> (topological sort) on the artifact dependency graph:</p>
+<ol>
+  <li>Build a directed graph: resource B depends on resource A if B consumes an artifact that A produces</li>
+  <li>Run topological sort to produce an execution order (e.g., <code>["discover", "variants"]</code>)</li>
+  <li>Execute resources in that order</li>
+</ol>
+
+<h3>Template URL expansion</h3>
+<p>When a resource entry URL contains <code>{field}</code>, the engine expands it for each record in the consumed artifact:</p>
+<pre><code><span class="hl-cmt"># Template: "https://www.webscraper.io{url}"</span>
+<span class="hl-cmt"># Consumed artifact records: [{"data": {"url": "/product/60"}}, ...]</span>
+<span class="hl-cmt"># Expanded: "https://www.webscraper.io/product/60"</span>
+<span class="hl-cmt"># The engine visits each expanded URL in sequence</span></code></pre>
+
+<h3>Alternative chaining: iterate over parent records</h3>
+<pre><code>    Given I iterate over parent records from "discover"</code></pre>
+<p>Instead of URL templates, this approach passes each parent record directly to the child resource, which can access parent data during extraction.</p>
+
+<h3>The complete execution flow</h3>
+<pre><code>ExecutionEngine.run()
+    |-- new_browser()
+    |-- _execute_resources()              <span class="hl-cmt"># Topologically sorted</span>
+    |     |-- _execute_resource(discover)
+    |     |     |-- new_context(), new_page()
+    |     |     |-- go_to(entry_url)
+    |     |     |-- _build_rule_tree()    <span class="hl-cmt"># Populate children, topo sort</span>
+    |     |     |-- _walk_rule(root)
+    |     |     |     |-- _check_state()
+    |     |     |     |-- _handle_expansion(elements, bfs)
+    |     |     |     |     |-- _extract_from_element() x N
+    |     |     |     |-- _emit_records("product_urls")
+    |     |     |-- close_context()
+    |     |
+    |     |-- _execute_resource(variants)
+    |           |-- _resolve_entry_urls() <span class="hl-cmt"># Template expansion from product_urls</span>
+    |           |-- For each URL:
+    |                 |-- go_to(url)
+    |                 |-- _walk_rule(detail_root)
+    |                       |-- _handle_expansion(combinations)
+    |                             |-- Click swatch, extract, repeat
+    |
+    |-- _write_outputs()                  <span class="hl-cmt"># JSON/CSV/JSONL files</span>
+    |-- _check_quality_gates()            <span class="hl-cmt"># Advisory checks</span>
+    |-- close_browser()</code></pre>
+</div>
+
+<!-- ──────────── TOPIC 29 ──────────── -->
+<div class="section" id="t29">
+<h2><span class="num">29</span> Quality Gates &amp; Output</h2>
+
+<h3>Quality gates in .robot</h3>
+<p>Every golden test ends with a Quality Gates test case that sets minimum thresholds:</p>
+
+<pre><code>Quality Gates
+    And I set quality gate min records to 30
+    And I set filled percentage for "quote_text" to 100
+    And I set filled percentage for "author" to 100
+    And I set filled percentage for "tags" to 80
+    And I set max failed percentage to 5</code></pre>
+
+<h3>How quality gates are checked</h3>
+<p>After all resources are scraped and output is written, the engine calls <code>_check_quality_gates</code>:</p>
+<ol>
+  <li><strong>Min records</strong> &mdash; total records across all artifacts must meet the threshold</li>
+  <li><strong>Field fill %</strong> &mdash; for each declared field, the percentage of records with a non-empty value must meet the threshold</li>
+  <li><strong>Max failed %</strong> &mdash; the percentage of failed extractions (empty records) must be below the threshold</li>
+</ol>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  Quality gate failures are <strong>warnings</strong>, not errors. The test will still pass in RF terms. The quality gate is an advisory check for the AI agent or operator to review.
+</div>
+
+<h3>Output formats</h3>
+<table class="explain">
+<tr><th>Format</th><th>Extension</th><th>Use case</th></tr>
+<tr><td><code>json</code></td><td><code>.json</code></td><td>Default &mdash; nested or flat JSON array</td></tr>
+<tr><td><code>jsonl</code></td><td><code>.jsonl</code></td><td>One JSON object per line &mdash; good for streaming</td></tr>
+<tr><td><code>csv</code></td><td><code>.csv</code></td><td>Flat tabular data</td></tr>
+<tr><td><code>markdown</code></td><td><code>.md</code></td><td>Human-readable output</td></tr>
+</table>
+
+<p>Output goes to <code>output/{deployment_name}/</code>:</p>
+<pre><code>output/quotes-toscrape/
+    quotes-toscrape_quotes.json          <span class="hl-cmt"># Nested artifact</span>
+    quotes-toscrape_quotes_flat.json     <span class="hl-cmt"># Flat artifact</span>
+    quotes-toscrape.json                 <span class="hl-cmt"># Deployment summary</span></code></pre>
+
+<h3>Artifact post-processing</h3>
+<p>Before writing, the engine can apply two transforms:</p>
+<ul>
+  <li><strong>Dedupe</strong> &mdash; if <code>dedupe=field_name</code> is set, removes duplicate records by that field's value</li>
+  <li><strong>JMESPath query</strong> &mdash; if <code>query=expression</code> is set, transforms the output using JMESPath (requires the <code>jmespath</code> package)</li>
+</ul>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The WiseRpaBDD architecture turns Robot Framework's flat keyword sequence into a powerful scraping engine through four ideas: (1) deferred execution, (2) a rule tree with expansions, (3) artifact chaining with topological sort, and (4) pluggable AI extraction and hook-based transforms.
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 5: CLI & TOOLING                                          -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 30 ──────────── -->
+<div class="section" id="t30">
+<h2><span class="num">30</span> BDD Validation</h2>
+
+<p>The <code>validate_bdd</code> function is a standalone linter that checks every executable step in a <code>.robot</code> file uses a BDD prefix. It runs without Robot Framework or a browser &mdash; pure Python file parsing.</p>
+
+<h3>What it checks</h3>
+<ul>
+  <li>Every step in <code>*** Test Cases ***</code> and <code>*** Keywords ***</code> sections must start with <code>Given</code>, <code>When</code>, <code>Then</code>, <code>And</code>, or <code>But</code></li>
+  <li><code>[Setup]</code> and <code>[Teardown]</code> values must also use BDD prefixes</li>
+  <li><code>Suite Setup</code> and <code>Suite Teardown</code> in <code>*** Settings ***</code> are checked</li>
+  <li>Continuation lines (<code>...</code>), tags, documentation, and comments are skipped</li>
+</ul>
+
+<h3>Error output</h3>
+<pre><code><span class="hl-cmt"># Example validation error:</span>
+tests/generated/bad-test.robot:42: step must start with BDD prefix
+tests/generated/bad-test.robot:58: setup/teardown step must use BDD keyword</code></pre>
+
+<h3>Using in code</h3>
+<pre><code><span class="hl-py">from</span> WiseRpaBDD <span class="hl-py">import</span> validate_bdd
+<span class="hl-py">from</span> pathlib <span class="hl-py">import</span> Path
+
+errors = validate_bdd(Path(<span class="hl-str">"tests/golden/quotes-test.robot"</span>))
+<span class="hl-py">if</span> errors:
+    <span class="hl-py">for</span> e <span class="hl-py">in</span> errors:
+        print(e)
+<span class="hl-py">else</span>:
+    print(<span class="hl-str">"BDD format OK"</span>)</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  BDD validation is the <strong>first gate</strong> in the two-gate validation strategy. It catches structural errors (missing BDD prefixes) cheaply, before the heavier <code>robot --dryrun</code> gate checks keyword resolution.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 31 ──────────── -->
+<div class="section" id="t31">
+<h2><span class="num">31</span> Agent Generation</h2>
+
+<p>The <code>generate</code> command invokes an AI agent to explore a live website and produce a <code>.robot</code> suite. The agent follows the wise-rpa-bdd skill phases (orient, explore, draft, review) autonomously.</p>
+
+<h3>Basic usage</h3>
+<pre><code>python WiseRpaBDD.py generate \
+    "Scrape all laptop names and prices from webscraper.io/test-sites/e-commerce/allinone/computers/laptops" \
+    -o tests/generated/laptops.robot</code></pre>
+
+<h3>Options</h3>
+<table class="explain">
+<tr><th>Flag</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>-o / --output</code></td><td>(required)</td><td>Output path for the generated <code>.robot</code> file</td></tr>
+<tr><td><code>--backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
+<tr><td><code>--model</code></td><td>per-backend</td><td>Override model name (e.g., <code>opus</code>, <code>gpt-5.4-mini</code>)</td></tr>
+<tr><td><code>--max-turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
+<tr><td><code>--fast</code></td><td>off</td><td>Pre-bake keyword docs into prompt, skip orient file reads</td></tr>
+</table>
+
+<h3>Agent backends</h3>
+<table class="explain">
+<tr><th>Backend</th><th>CLI tool</th><th>Default model</th><th>How it runs</th></tr>
+<tr><td><code>claude</code></td><td><code>claude</code></td><td>sonnet</td><td><code>claude --dangerously-skip-permissions -p &lt;prompt&gt;</code></td></tr>
+<tr><td><code>codex</code></td><td><code>codex</code></td><td>gpt-5.4-mini</td><td><code>codex exec --dangerously-bypass-approvals-and-sandbox</code></td></tr>
+<tr><td><code>aichat</code></td><td><code>aichat</code></td><td>(configured)</td><td><code>aichat -r coder &lt;prompt&gt;</code></td></tr>
+</table>
+
+<h3>Fast mode</h3>
+<p>With <code>--fast</code>, the keyword reference and format docs are inlined directly into the agent prompt, along with an <code>agent-browser</code> cheatsheet. The agent skips the orient phase (no file reads) and goes straight to exploration. This saves ~6 seconds of LLM turns on each generation.</p>
+
+<pre><code><span class="hl-cmt"># Fast mode includes this agent-browser cheatsheet in the prompt:</span>
+npx agent-browser open &lt;url&gt;          <span class="hl-cmt"># navigate (persistent session)</span>
+npx agent-browser snapshot -c -d 3    <span class="hl-cmt"># accessibility tree with classes</span>
+npx agent-browser get count '&lt;css&gt;'   <span class="hl-cmt"># count matching elements</span>
+npx agent-browser get text '&lt;css&gt;'    <span class="hl-cmt"># get text content</span>
+npx agent-browser get html '&lt;css&gt;'    <span class="hl-cmt"># get outer HTML</span>
+npx agent-browser eval '&lt;js&gt;'         <span class="hl-cmt"># run JS expression</span>
+npx agent-browser click '&lt;css&gt;'       <span class="hl-cmt"># click element</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The generation pipeline is: <strong>prompt &rarr; agent explores live site with agent-browser &rarr; agent drafts .robot &rarr; agent runs dryrun &rarr; agent fixes and loops until clean</strong>. The human gets a tested, runnable suite.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 32 ──────────── -->
+<div class="section" id="t32">
+<h2><span class="num">32</span> Testing Strategy</h2>
+
+<p>Two kinds of testing, each with its own entry point:</p>
+
+<h3>Regression testing (golden suites against live sites)</h3>
+
+<p>Run golden <code>.robot</code> files against live sites to verify the engine and selectors still work. Uses the CLI <code>run</code> command &mdash; same entry point as production:</p>
+
+<pre><code><span class="hl-cmt"># Single suite</span>
+python WiseRpaBDD.py run --fresh tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Batch regression</span>
+python WiseRpaBDD.py run --fresh \
+    tests/golden/quotes-test.robot \
+    tests/golden/countries-list-test.robot \
+    tests/golden/hockey-teams-test.robot \
+    tests/golden/scifi-books-test.robot</code></pre>
+
+<p>This tests the <strong>exploitation pipeline</strong>: browser → rule walk → extraction → quality gates → output. Use <code>--fresh</code> to bypass checkpoint (each regression run should start clean).</p>
+
+<h3>Agent generation testing (AI drafts suites from requirements)</h3>
+
+<p>The <code>WiseRpaBDDTest</code> class is a separate RF keyword library that tests the <strong>exploration pipeline</strong>: send a natural-language requirement to an AI agent, validate that it produces a correct <code>.robot</code> suite matching a golden baseline.</p>
+
+<h3>Test harness keywords</h3>
+<table class="explain">
+<tr><th>Keyword</th><th>What it does</th></tr>
+<tr><td><code>Generate Suite From Requirement</code></td><td>Calls the AI agent with a natural-language requirement, saves the generated <code>.robot</code> file</td></tr>
+<tr><td><code>Generated Suite Should Pass BDD Validation</code></td><td>Runs <code>validate_bdd</code> on the generated file, fails if any step lacks a BDD prefix</td></tr>
+<tr><td><code>Generated Suite Should Pass Dryrun</code></td><td>Runs <code>robot --dryrun</code> on the generated file, fails if any keyword is unresolved</td></tr>
+<tr><td><code>Generated Suite Should Match Golden Baseline</code></td><td>Compares the set of keywords used in the generated suite against a golden baseline, fails if any are missing</td></tr>
+</table>
+
+<h3>Usage in an E2E test</h3>
+<pre><code><span class="hl-sec">*** Settings ***</span>
+<span class="hl-kw">Library</span>    WiseRpaBDDTest    model=sonnet    max_turns=50    backend=claude
+
+<span class="hl-sec">*** Test Cases ***</span>
+Agent Generates Valid Quotes Suite
+    ${path}=    Generate Suite From Requirement
+    ...    Scrape quotes from quotes.toscrape.com with pagination
+    ...    output_path=tests/generated/quotes.robot
+    Generated Suite Should Pass BDD Validation
+    Generated Suite Should Pass Dryrun
+    Generated Suite Should Match Golden Baseline
+    ...    tests/golden/quotes-test.robot</code></pre>
+
+<h3>Constructor options</h3>
+<table class="explain">
+<tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>model</code></td><td><code>sonnet</code></td><td>AI model name</td></tr>
+<tr><td><code>max_turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
+<tr><td><code>backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The E2E test harness closes the loop: it uses an AI agent to generate a suite, then validates the output with the same two-gate strategy (BDD lint + dryrun) used during development. This catches regressions in both the skill instructions and the keyword library.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 33 ──────────── -->
+<div class="section" id="t33">
+<h2><span class="num">33</span> Record Linkage Walkthrough</h2>
 
 <p>This topic traces exactly how records are built, linked, emitted, and stored as the engine walks a rule tree. We start with the flagship <strong>3-level e-commerce catalogue</strong> example to show record linking in full depth, then cover the existing <strong>books-catalogue</strong> and <strong>variants</strong> golden tests.</p>
 
@@ -1909,666 +2516,6 @@ urls = [
 <div class="callout key">
   <div class="callout-title">Key Concept</div>
   Records flow <strong>bottom-up</strong> (leaf rules extract, parent rules collect via <code>_children</code>), while context flows <strong>top-down</strong> (parent data is available to children). The emit step happens at whatever rule declares <code>emit to artifact</code> &mdash; it does not have to be the leaf. When emitting at a higher level, all descendant records are included in the <code>_children</code> tree. When using <code>structure=flat</code>, the engine recursively flattens this tree, merging ancestor <code>data</code> into each leaf row.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 21 ──────────── -->
-<div class="section" id="t21">
-<h2><span class="num">21</span> AI Extraction</h2>
-
-<p>WiseRpaBDD can invoke an AI model to extract structured data from previously captured content. This runs <em>after</em> field/table extraction on the same rule node, operating on the already-extracted data.</p>
-
-<h3>Usage in .robot</h3>
-<pre><code>    Then I extract with AI "itsi_data"
-    ...    input=page_html
-    ...    prompt=${AI_PROMPT}
-    ...    schema={"modules": [{"name": "str", "status": "str"}]}
-    ...    max_size=50000</code></pre>
-
-<h3>AI adapter chain</h3>
-<p>The <code>_call_ai</code> method tries adapters in order until one succeeds:</p>
-<table class="explain">
-<tr><th>Adapter</th><th>How it works</th><th>Model</th></tr>
-<tr><td><code>cli:&lt;command&gt;</code></td><td>Pipes prompt to stdin of an arbitrary CLI tool</td><td>Whatever the CLI uses</td></tr>
-<tr><td><code>aichat</code></td><td>Uses the <code>aichat</code> CLI (default if available on PATH)</td><td>Configured in aichat</td></tr>
-<tr><td><code>anthropic</code></td><td>Anthropic Python SDK</td><td>claude-haiku-4-5-20251001</td></tr>
-<tr><td><code>openai</code></td><td>OpenAI Python SDK</td><td>gpt-4o-mini</td></tr>
-</table>
-
-<p>Set the adapter at deployment level:</p>
-<pre><code>    And I set AI adapter "anthropic"</code></pre>
-<p>If no adapter is set, the engine tries aichat, then anthropic, then openai (first that works).</p>
-
-<h3>AI extraction options</h3>
-<table class="explain">
-<tr><th>Option</th><th>Default</th><th>Purpose</th></tr>
-<tr><td><code>input</code></td><td>all fields as JSON</td><td>Field name to use as AI input</td></tr>
-<tr><td><code>prompt</code></td><td>mode-based</td><td>Custom instruction for the AI</td></tr>
-<tr><td><code>mode</code></td><td><code>extract</code></td><td>Built-in mode: <code>extract</code>, <code>cleanup</code>, <code>classify</code>, <code>refine</code></td></tr>
-<tr><td><code>schema</code></td><td>&mdash;</td><td>JSON schema hint (forces JSON output)</td></tr>
-<tr><td><code>categories</code></td><td>&mdash;</td><td>Classification categories (forces JSON output)</td></tr>
-<tr><td><code>max_size</code></td><td>50000</td><td>Max input chars before skipping (0 = unlimited)</td></tr>
-<tr><td><code>chunk_size</code></td><td>0</td><td>Split input into chunks, process each, concatenate</td></tr>
-<tr><td><code>output</code></td><td><code>json</code></td><td>Response format: <code>json</code>, <code>markdown</code>, <code>text</code></td></tr>
-</table>
-
-<h3>Flow</h3>
-<pre><code><span class="hl-cmt"># In _extract_from_scope, after field/table extraction:</span>
-<span class="hl-py">if</span> rule.ai_extraction:
-    ai_result = self._run_ai_extraction(rule.ai_extraction, data)
-    <span class="hl-py">if</span> ai_result:
-        data.update(ai_result)
-<span class="hl-cmt"># AI results merge into the same record alongside field-extracted data</span></code></pre>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  AI extraction is a <strong>post-processing</strong> step. The browser first extracts raw content (e.g., <code>page_html</code> via the <code>html</code> extractor), then the AI transforms that content into structured data. The AI never drives the browser.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 22 ──────────── -->
-<div class="section" id="t22">
-<h2><span class="num">22</span> State Setup &amp; Interrupts</h2>
-
-<h3>State setup (authentication)</h3>
-<p>Many sites require login before scraping. The <code>configure state setup</code> keyword defines a sequence of pre-scrape actions:</p>
-
-<pre><code>    Given I configure state setup
-    ...    skip_when=.logged-in-indicator
-    ...    action=open     url=https://example.com/login
-    ...    action=input    css=#username    value=myuser
-    ...    action=password css=#password    value=mypass
-    ...    action=click    css=button[type=submit]</code></pre>
-
-<h3>Setup action types</h3>
-<table class="explain">
-<tr><th>Action</th><th>What it does</th></tr>
-<tr><td><code>open</code></td><td>Navigate to a URL (<code>bl.go_to(url)</code>)</td></tr>
-<tr><td><code>input</code></td><td>Type visible text into a field (<code>bl.fill_text(css, value)</code>)</td></tr>
-<tr><td><code>password</code></td><td>Same as input but semantically distinct for passwords</td></tr>
-<tr><td><code>click</code></td><td>Click an element (<code>bl.click(css)</code>)</td></tr>
-</table>
-
-<p>The <code>skip_when</code> option checks for a CSS selector &mdash; if found, setup is skipped (already logged in). After all actions, the engine waits for <code>networkidle</code>.</p>
-
-<h3>Interrupt handling</h3>
-<p>Cookie banners, popup modals, and consent dialogs can block scraping. The <code>configure interrupts</code> keyword registers selectors to auto-dismiss:</p>
-
-<pre><code>    And I configure interrupts
-    ...    dismiss=button#onetrust-accept-btn-handler
-    ...    dismiss=.modal-close-button</code></pre>
-
-<p>The engine calls <code>_dismiss_interrupts</code> which checks each selector and clicks it if found. This runs before every action during step execution.</p>
-
-<h3>Per-rule dismiss scoping</h3>
-
-<p>Global dismiss selectors can interfere with interactive panels (calendars, guest pickers, dropdown menus). Two keywords let you scope or suppress dismiss per rule:</p>
-
-<pre><code>    <span class="hl-cmt"># Override: use ONLY these selectors for this rule</span>
-    I define rule "interactive_form"
-        And I scope interrupts
-        ...    dismiss="button.cookie-accept"
-        ...    dismiss=".promo-close"
-
-    <span class="hl-cmt"># Suppress: skip ALL dismiss for this rule</span>
-    I define rule "datepicker_interaction"
-        And I pause interrupts
-        When I click locator ".calendar-next"</code></pre>
-
-<p>When a rule declares <code>And I scope interrupts</code>, only those selectors are used for dismiss during that rule's steps. When <code>And I pause interrupts</code> is declared, no dismiss runs at all. After the rule completes, the engine returns to the global config.</p>
-
-<h3>Declarative rule options</h3>
-
-<p>Rules can declare lifecycle hooks via <code>And I set rule options</code>:</p>
-
-<pre><code>    I define rule "checkout"
-        And I set rule options
-        ...    on_enter=screenshot
-        ...    on_fail=screenshot
-        ...    timeout_ms=30000</code></pre>
-
-<table class="explain">
-<tr><th>Option</th><th>Effect</th></tr>
-<tr><td><code>on_enter=screenshot</code></td><td>Take screenshot before guard checks</td></tr>
-<tr><td><code>on_fail=screenshot</code></td><td>Take screenshot on guard failure or rule timeout</td></tr>
-<tr><td><code>timeout_ms=N</code></td><td>Abort rule after N milliseconds</td></tr>
-</table>
-
-<div class="callout warn">
-  <div class="callout-title">Watch Out</div>
-  Interrupt selectors use simple <code>get_element_count</code> + <code>click</code>. If a dismiss button triggers a page reload, your extraction timing may be affected. Use <code>page_load_delay_ms</code> as a safety buffer. Use <code>And I pause interrupts</code> on rules where dismiss would break the flow.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 22b ──────────── -->
-<div class="section" id="t22b">
-<h2><span class="num">22b</span> Observation Gates &amp; Zero-Sleep Execution</h2>
-
-<p>WiseRpaBDD models every scrape as a delayed MDP: state &rarr; action &rarr; observation. Fixed-duration waits (<code>When I wait</code>) are an anti-pattern because they paper over <em>missing observations</em>. This section covers the two observation-gate patterns that replace all sleeps, the scoping rules for dismiss selectors, and how the engine achieves zero-sleep execution internally.</p>
-
-<h3>1. The Problem: Why <code>When I wait</code> Is an Anti-Pattern</h3>
-
-<p>A <code>When I wait 3 seconds</code> step tells the engine nothing about <em>what</em> it is waiting for. It introduces three problems:</p>
-
-<ul>
-  <li><strong>Hidden observations.</strong> The MDP transition <em>s, a &rarr; o</em> is incomplete &mdash; the observation <em>o</em> is implicit ("something probably changed after 3 seconds"). The engine cannot verify the transition succeeded.</li>
-  <li><strong>Fragility.</strong> Too short and the test is flaky on slow networks; too long and the suite is needlessly slow. There is no correct fixed value.</li>
-  <li><strong>Engine violation.</strong> The engine should never call <code>time.sleep</code>. All timing is event-driven: Playwright's <code>wait_for_elements_state</code> (default 10s timeout), staleness detection, or explicit selector polling.</li>
-</ul>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  Every action must declare its observation gate &mdash; the selector or condition that proves the action's effect is visible in the DOM. If you cannot name the gate, the action's MDP node is incomplete.
-</div>
-
-<h3>2. Option 1: Split Rules with State Gates</h3>
-
-<p>The purest MDP representation: each <em>s, a &rarr; o</em> transition is its own rule node. The engine's built-in <code>wait_for_elements_state</code> (10s default) handles timing at each node boundary.</p>
-
-<p><strong>Example:</strong> An Airbnb-style city autocomplete flow. Typing a city name triggers an async autocomplete dropdown. The three-rule split makes every observation explicit:</p>
-
-<pre><code>I define rule "type_city"
-    And I declare parents "expand_search"
-    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
-
-I define rule "autocomplete_ready"
-    And I declare parents "type_city"
-    And selector "[data-testid='option-0']" exists
-
-I define rule "select_city"
-    And I declare parents "autocomplete_ready"
-    When I click locator "[data-testid='option-0']"</code></pre>
-
-<p><strong>When to use:</strong> Named state transitions worth documenting &mdash; login flows, multi-step wizards, any place where the intermediate state is meaningful to a reader of the <code>.robot</code> file.</p>
-
-<div class="callout try">
-  <div class="callout-title">Try It</div>
-  Check if an existing <code>When I wait</code> can be replaced by splitting the rule. If the wait is between "type" and "click", there is almost certainly a selector you can gate on.
-</div>
-
-<h3>3. Option 2: <code>await=</code> Inline Observation Gate</h3>
-
-<p>When splitting into separate rules adds noise without clarity, use the <code>await=</code> continuation parameter. It keeps rules grouped by user intent while still declaring every observation.</p>
-
-<p><code>await=&lt;selector&gt;</code> can be attached to any action keyword (<code>click</code>, <code>type</code>, <code>click_text</code>). The engine waits for the selector to appear in the DOM before advancing to the next action. Fallback selectors are supported via the standard <code>|</code> separator.</p>
-
-<p><strong>Example:</strong> The same Airbnb city flow, compact form:</p>
-
-<pre><code>I define rule "enter_city"
-    When I click text "Anywhere"
-    ...    await=#bigsearch-query-location-input
-    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
-    ...    await=[data-testid='option-0']
-    When I click locator "[data-testid='option-0']"</code></pre>
-
-<p><strong>When to use:</strong> Sequences where the intermediate states are mechanical (click &rarr; wait for input to appear) and naming each one would clutter the rule tree.</p>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  Both options produce zero-sleep execution. Option 1 (split rules) is self-documenting but verbose. Option 2 (<code>await=</code>) is compact but hides observations inside continuation lines. Choose based on whether readers need to see each state.
-</div>
-
-<h3>4. Dismiss Selector Scoping</h3>
-
-<p>The dismiss mechanism (<code>I configure interrupts ... dismiss=&lt;selector&gt;</code>) runs <strong>before every action</strong> in the rule walk. This is powerful but dangerous: an overly broad selector will close interactive panels the user intentionally opened.</p>
-
-<div class="callout warn">
-  <div class="callout-title">Watch Out</div>
-  <strong>CRITICAL:</strong> <code>[role="dialog"]</code> matches search panels, date-picker calendars, and filter drawers &mdash; not just cookie banners. A dismiss selector that clicks the close button of any <code>[role="dialog"]</code> will sabotage your own flow.
-</div>
-
-<p><strong>Rules for dismiss selectors:</strong></p>
-<ul>
-  <li>Only dismiss known popup text or patterns &mdash; be as specific as possible.</li>
-  <li>Test your dismiss selectors during the explore phase with all interactive panels open.</li>
-  <li>Prefer text-based selectors that match the popup's accept/dismiss button label.</li>
-</ul>
-
-<table class="explain">
-<tr><th>Quality</th><th>Selector</th><th>Why</th></tr>
-<tr><td><strong>Good</strong></td><td><code>text="Got it"</code></td><td>Matches only the specific cookie-consent button text</td></tr>
-<tr><td><strong>Good</strong></td><td><code>button#onetrust-accept-btn-handler</code></td><td>ID-specific, cannot match anything else</td></tr>
-<tr><td><strong>Bad</strong></td><td><code>[role="dialog"] button[aria-label="Close"]</code></td><td>Matches every dialog's close button, including calendars and search panels</td></tr>
-<tr><td><strong>Bad</strong></td><td><code>.modal-overlay .close</code></td><td>Too generic &mdash; any component using modal patterns will be dismissed</td></tr>
-</table>
-
-<h3>5. Engine Internals: How Zero-Sleep Works</h3>
-
-<p>The engine achieves zero-sleep execution through four mechanisms. None use <code>time.sleep</code>.</p>
-
-<table class="explain">
-<tr><th>Mechanism</th><th>Where Used</th><th>How It Works</th></tr>
-<tr><td><strong>Staleness detection</strong></td><td>Pagination</td><td>After clicking "next page", the engine polls until the first element's text content changes from its pre-click value. This proves the new page has rendered.</td></tr>
-<tr><td><strong>Heading-text polling</strong></td><td>Calendar forward</td><td>After clicking the calendar's forward button, the engine polls until the month/year heading text differs from its pre-click value.</td></tr>
-<tr><td><strong>JS click + <code>wait_for_elements_state</code></strong></td><td>Stepper / quantity controls</td><td>Standard Playwright <code>click()</code> stability checks fail on elements that re-render during the click. The engine uses a raw JS click followed by <code>wait_for_elements_state("visible")</code> as a post-condition.</td></tr>
-<tr><td><strong>AOP instrumentation</strong></td><td>All actions</td><td>The <code>_do_action_instrumented</code> wrapper runs around every action. It handles pre-action dismiss, post-action observation gates (<code>await=</code>), and retry/recovery. Enabled by default.</td></tr>
-</table>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  The AOP wrapper (<code>_do_action_instrumented</code>) is the single point of control for all action timing. It runs dismiss selectors, executes the action, waits for the <code>await=</code> gate if present, and retries on failure. Every action in the rule walk passes through this wrapper &mdash; there is no path that bypasses it.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 23 ──────────── -->
-<div class="section" id="t23">
-<h2><span class="num">23</span> Hooks System</h2>
-
-<p>Hooks allow you to transform extracted data at specific lifecycle points without modifying the engine. They run as config-driven rules applied to each record.</p>
-
-<h3>Registering a hook</h3>
-<pre><code>    And I register hook "clean_text" at "post_extract"
-    ...    strip_html=description
-    ...    lowercase=category
-    ...    default=status:unknown
-    ...    rename=old_field:new_field</code></pre>
-
-<h3>Lifecycle points</h3>
-<table class="explain">
-<tr><th>Point</th><th>When it fires</th></tr>
-<tr><td><code>post_discover</code></td><td>After initial page discovery</td></tr>
-<tr><td><code>pre_extract</code></td><td>Before field extraction begins</td></tr>
-<tr><td><code>post_extract</code></td><td>After field extraction, before emit</td></tr>
-<tr><td><code>pre_assemble</code></td><td>Before output assembly</td></tr>
-<tr><td><code>post_assemble</code></td><td>After output is assembled</td></tr>
-</table>
-
-<h3>Available transforms</h3>
-<table class="explain">
-<tr><th>Transform</th><th>Syntax</th><th>What it does</th></tr>
-<tr><td><code>rename</code></td><td><code>rename=old:new</code></td><td>Rename a field in the record</td></tr>
-<tr><td><code>drop</code></td><td><code>drop=field_name</code></td><td>Remove a field entirely</td></tr>
-<tr><td><code>strip_html</code></td><td><code>strip_html=field_name</code></td><td>Remove HTML tags from a field's value</td></tr>
-<tr><td><code>default</code></td><td><code>default=field:value</code></td><td>Set a default if the field is empty/missing</td></tr>
-<tr><td><code>lowercase</code></td><td><code>lowercase=field_name</code></td><td>Lowercase a field's value</td></tr>
-<tr><td><code>regex</code></td><td><code>regex=field:pattern:replacement</code></td><td>Regex find-and-replace on a field</td></tr>
-</table>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  Hooks are the extensibility mechanism for data cleaning. Instead of adding site-specific logic to the engine, you declare transforms in the <code>.robot</code> file. The engine applies them generically.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 24 ──────────── -->
-<div class="section" id="t24">
-<h2><span class="num">24</span> Emit Patterns</h2>
-
-<p>After extraction, records must be emitted to an artifact store. WiseRpaBDD supports three emit strategies controlled by the keyword used.</p>
-
-<h3>Simple emit</h3>
-<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES}"</code></pre>
-<p>Appends each extracted record directly to the named artifact's store.</p>
-
-<h3>Flattened emit</h3>
-<pre><code>    And I emit to artifact "${ARTIFACT_QUOTES_FLAT}" flattened by "tags"</code></pre>
-<p>If a field contains a list (e.g., <code>tags: ["love", "life", "humor"]</code>), the engine creates one record per list item. A quote with 3 tags becomes 3 flat records. Useful for generating denormalized/tabular output.</p>
-
-<h3>Merge emit</h3>
-<pre><code>    And I merge into artifact "${ARTIFACT_PRODUCTS}" on key "product_id"</code></pre>
-<p>If a record with the same key value already exists in the artifact store, the new data is <strong>merged</strong> into the existing record (via <code>dict.update</code>). If no match is found, the record is appended normally. This is used when multiple rules or expansions contribute fields to the same logical entity.</p>
-
-<h3>Direct write</h3>
-<pre><code>    Then I write artifact "${ARTIFACT}" to "output/my_data.json"</code></pre>
-<p>Writes an artifact's current contents to a specific file path, useful for mid-suite checkpoints or non-standard output locations.</p>
-
-<h3>Artifact options affecting output</h3>
-<pre><code>    And I set artifact options for "${ARTIFACT}"
-    ...    output=true              <span class="hl-cmt"># write to disk (default: false)</span>
-    ...    structure=flat            <span class="hl-cmt"># flat vs nested (default: nested)</span>
-    ...    format=jsonl              <span class="hl-cmt"># json, jsonl, csv, markdown</span>
-    ...    dedupe=product_id         <span class="hl-cmt"># deduplicate on this field</span>
-    ...    query=[].data             <span class="hl-cmt"># JMESPath transform before writing</span>
-    ...    consumes=product_urls     <span class="hl-cmt"># declares dependency on another artifact</span></code></pre>
-</div>
-
-<!-- ──────────── TOPIC 25 ──────────── -->
-<div class="section" id="t25">
-<h2><span class="num">25</span> Multi-Resource Chaining</h2>
-
-<p>A deployment can have multiple resources that form a pipeline. Resources can <strong>consume</strong> artifacts produced by earlier resources, enabling multi-step scraping.</p>
-
-<h3>Example: variants-test.robot</h3>
-<pre><code><span class="hl-cmt"># Resource 1: "discover" -- scrapes product URLs</span>
-Resource discover
-    [Setup]    Given I start resource "discover" at "${ENTRY_DISCOVER}"
-    <span class="hl-cmt"># ... extracts product URLs, emits to "product_urls" artifact</span>
-
-<span class="hl-cmt"># Resource 2: "variants" -- consumes product URLs, visits each one</span>
-Resource variants
-    [Setup]    Given I start resource "variants" at "${ENTRY_VARIANTS}"
-    <span class="hl-cmt"># ${ENTRY_VARIANTS} = "https://www.webscraper.io{url}"</span>
-    <span class="hl-cmt"># The {url} is a template that gets expanded per product_urls record</span></code></pre>
-
-<h3>How the engine resolves execution order</h3>
-<p>The engine uses <strong>Kahn's algorithm</strong> (topological sort) on the artifact dependency graph:</p>
-<ol>
-  <li>Build a directed graph: resource B depends on resource A if B consumes an artifact that A produces</li>
-  <li>Run topological sort to produce an execution order (e.g., <code>["discover", "variants"]</code>)</li>
-  <li>Execute resources in that order</li>
-</ol>
-
-<h3>Template URL expansion</h3>
-<p>When a resource entry URL contains <code>{field}</code>, the engine expands it for each record in the consumed artifact:</p>
-<pre><code><span class="hl-cmt"># Template: "https://www.webscraper.io{url}"</span>
-<span class="hl-cmt"># Consumed artifact records: [{"data": {"url": "/product/60"}}, ...]</span>
-<span class="hl-cmt"># Expanded: "https://www.webscraper.io/product/60"</span>
-<span class="hl-cmt"># The engine visits each expanded URL in sequence</span></code></pre>
-
-<h3>Alternative chaining: iterate over parent records</h3>
-<pre><code>    Given I iterate over parent records from "discover"</code></pre>
-<p>Instead of URL templates, this approach passes each parent record directly to the child resource, which can access parent data during extraction.</p>
-
-<h3>The complete execution flow</h3>
-<pre><code>ExecutionEngine.run()
-    |-- new_browser()
-    |-- _execute_resources()              <span class="hl-cmt"># Topologically sorted</span>
-    |     |-- _execute_resource(discover)
-    |     |     |-- new_context(), new_page()
-    |     |     |-- go_to(entry_url)
-    |     |     |-- _build_rule_tree()    <span class="hl-cmt"># Populate children, topo sort</span>
-    |     |     |-- _walk_rule(root)
-    |     |     |     |-- _check_state()
-    |     |     |     |-- _handle_expansion(elements, bfs)
-    |     |     |     |     |-- _extract_from_element() x N
-    |     |     |     |-- _emit_records("product_urls")
-    |     |     |-- close_context()
-    |     |
-    |     |-- _execute_resource(variants)
-    |           |-- _resolve_entry_urls() <span class="hl-cmt"># Template expansion from product_urls</span>
-    |           |-- For each URL:
-    |                 |-- go_to(url)
-    |                 |-- _walk_rule(detail_root)
-    |                       |-- _handle_expansion(combinations)
-    |                             |-- Click swatch, extract, repeat
-    |
-    |-- _write_outputs()                  <span class="hl-cmt"># JSON/CSV/JSONL files</span>
-    |-- _check_quality_gates()            <span class="hl-cmt"># Advisory checks</span>
-    |-- close_browser()</code></pre>
-</div>
-
-<!-- ──────────── TOPIC 26 ──────────── -->
-<div class="section" id="t26">
-<h2><span class="num">26</span> Quality Gates &amp; Output</h2>
-
-<h3>Quality gates in .robot</h3>
-<p>Every golden test ends with a Quality Gates test case that sets minimum thresholds:</p>
-
-<pre><code>Quality Gates
-    And I set quality gate min records to 30
-    And I set filled percentage for "quote_text" to 100
-    And I set filled percentage for "author" to 100
-    And I set filled percentage for "tags" to 80
-    And I set max failed percentage to 5</code></pre>
-
-<h3>How quality gates are checked</h3>
-<p>After all resources are scraped and output is written, the engine calls <code>_check_quality_gates</code>:</p>
-<ol>
-  <li><strong>Min records</strong> &mdash; total records across all artifacts must meet the threshold</li>
-  <li><strong>Field fill %</strong> &mdash; for each declared field, the percentage of records with a non-empty value must meet the threshold</li>
-  <li><strong>Max failed %</strong> &mdash; the percentage of failed extractions (empty records) must be below the threshold</li>
-</ol>
-
-<div class="callout warn">
-  <div class="callout-title">Watch Out</div>
-  Quality gate failures are <strong>warnings</strong>, not errors. The test will still pass in RF terms. The quality gate is an advisory check for the AI agent or operator to review.
-</div>
-
-<h3>Output formats</h3>
-<table class="explain">
-<tr><th>Format</th><th>Extension</th><th>Use case</th></tr>
-<tr><td><code>json</code></td><td><code>.json</code></td><td>Default &mdash; nested or flat JSON array</td></tr>
-<tr><td><code>jsonl</code></td><td><code>.jsonl</code></td><td>One JSON object per line &mdash; good for streaming</td></tr>
-<tr><td><code>csv</code></td><td><code>.csv</code></td><td>Flat tabular data</td></tr>
-<tr><td><code>markdown</code></td><td><code>.md</code></td><td>Human-readable output</td></tr>
-</table>
-
-<p>Output goes to <code>output/{deployment_name}/</code>:</p>
-<pre><code>output/quotes-toscrape/
-    quotes-toscrape_quotes.json          <span class="hl-cmt"># Nested artifact</span>
-    quotes-toscrape_quotes_flat.json     <span class="hl-cmt"># Flat artifact</span>
-    quotes-toscrape.json                 <span class="hl-cmt"># Deployment summary</span></code></pre>
-
-<h3>Artifact post-processing</h3>
-<p>Before writing, the engine can apply two transforms:</p>
-<ul>
-  <li><strong>Dedupe</strong> &mdash; if <code>dedupe=field_name</code> is set, removes duplicate records by that field's value</li>
-  <li><strong>JMESPath query</strong> &mdash; if <code>query=expression</code> is set, transforms the output using JMESPath (requires the <code>jmespath</code> package)</li>
-</ul>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  The WiseRpaBDD architecture turns Robot Framework's flat keyword sequence into a powerful scraping engine through four ideas: (1) deferred execution, (2) a rule tree with expansions, (3) artifact chaining with topological sort, and (4) pluggable AI extraction and hook-based transforms.
-</div>
-</div>
-
-<!-- ════════════════════════════════════════════════════════════════ -->
-<!-- PART 5: CLI & TOOLING                                          -->
-<!-- ════════════════════════════════════════════════════════════════ -->
-
-<!-- ──────────── TOPIC 27 ──────────── -->
-<div class="section" id="t27">
-<h2><span class="num">27</span> CLI &amp; Execution Modes</h2>
-
-<p><code>WiseRpaBDD.py</code> is the single entry point for all operations. It wraps <code>robot</code> with the correct <code>--pythonpath</code>, manages checkpoint/resume, and provides validation and agent generation commands.</p>
-
-<h3>Commands</h3>
-<table class="explain">
-<tr><th>Command</th><th>Purpose</th><th>Browser?</th></tr>
-<tr><td><code>validate &lt;suite&gt;</code></td><td>BDD format lint &mdash; checks all steps use Given/When/Then/And/But. Pure Python, no RF needed. The fastest gate.</td><td>No</td></tr>
-<tr><td><code>dryrun &lt;suite&gt;</code></td><td>Keyword resolution check &mdash; verifies all WiseRpaBDD keywords resolve without launching a browser. Catches typos, missing keywords, bad argument counts.</td><td>No</td></tr>
-<tr><td><code>run &lt;suite&gt;</code></td><td>Full live execution &mdash; opens a browser, walks the rule tree, extracts data, writes output artifacts. Auto-resumes from checkpoint if one exists.</td><td>Yes</td></tr>
-<tr><td><code>generate &lt;req&gt; -o &lt;path&gt;</code></td><td>AI agent generation &mdash; sends a natural-language requirement to an AI agent, which explores the live site and produces a <code>.robot</code> suite.</td><td>Yes (agent)</td></tr>
-</table>
-
-<h3>The testing pipeline</h3>
-
-<p>Use commands in order, from cheapest to most expensive:</p>
-
-<pre><code><span class="hl-cmt"># 1. Lint — instant, catches structural errors</span>
-python WiseRpaBDD.py validate tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># 2. Dryrun — seconds, catches keyword resolution errors</span>
-python WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># 3. Live run — full exploitation against the real site</span>
-python WiseRpaBDD.py run tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># 4. Batch regression — run multiple suites at once</span>
-python WiseRpaBDD.py run tests/golden/quotes-test.robot \
-    tests/golden/countries-list-test.robot \
-    tests/golden/hockey-teams-test.robot</code></pre>
-
-<h3>Checkpoint &amp; Resume</h3>
-
-<p>The <code>run</code> command automatically checkpoints progress after each URL. If a run times out or crashes, the next <code>run</code> resumes from where it left off &mdash; skipping completed resources and already-processed URLs. No partial data: records are staged per URL and only committed on success.</p>
-
-<table class="explain">
-<tr><th>Flag</th><th>Behavior</th></tr>
-<tr><td><code>run &lt;suite&gt;</code></td><td>Auto-resume: load checkpoint if one exists, otherwise start fresh</td></tr>
-<tr><td><code>run --fresh &lt;suite&gt;</code></td><td>Start clean: delete any existing checkpoint, run from scratch</td></tr>
-<tr><td><code>run --resume &lt;suite&gt;</code></td><td>Require checkpoint: error if no checkpoint exists (useful for CI)</td></tr>
-</table>
-
-<p>The checkpoint file lives at <code>output/{deployment}/_checkpoint.json</code>. It is deleted automatically on successful completion.</p>
-
-<h3>Environment variables</h3>
-
-<table class="explain">
-<tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-<tr><td><code>WISE_RPA_STEALTH</code></td><td><code>true</code></td><td>Use patchright stealth adapter (anti-bot detection). Set <code>0</code> for RF-Browser.</td></tr>
-<tr><td><code>WISE_RPA_HEADED</code></td><td><code>false</code></td><td>Show browser window. Set <code>1</code> for visible execution.</td></tr>
-<tr><td><code>WISE_RPA_TIMEOUT</code></td><td><code>120</code></td><td>Global timeout in seconds. The engine checkpoints and stops after this.</td></tr>
-<tr><td><code>WISE_RPA_TIMING</code></td><td><code>1</code> (on)</td><td>Per-action and per-rule timing logs. Set <code>0</code> for quiet output.</td></tr>
-<tr><td><code>WISE_RPA_SLOW</code></td><td>(off)</td><td>Slow-motion delay in ms after each action. For debugging/demos.</td></tr>
-<tr><td><code>WISE_RPA_SLOW_SCREENSHOT</code></td><td>(off)</td><td>Take screenshot after each action in slow mode. Set <code>1</code> to enable.</td></tr>
-<tr><td><code>WISE_RPA_RESUME_MODE</code></td><td><code>auto</code></td><td>Set by CLI flags. <code>fresh</code> or <code>require</code> override auto-resume.</td></tr>
-</table>
-
-<pre><code><span class="hl-cmt"># Example: headed run with 10-minute timeout, quiet output</span>
-WISE_RPA_HEADED=1 WISE_RPA_TIMEOUT=600 WISE_RPA_TIMING=0 \
-    python WiseRpaBDD.py run tests/golden/splunk-itsi-complete-test.robot
-
-<span class="hl-cmt"># Example: non-stealth, slow-motion debugging</span>
-WISE_RPA_STEALTH=0 WISE_RPA_SLOW=500 WISE_RPA_SLOW_SCREENSHOT=1 \
-    python WiseRpaBDD.py run tests/golden/quotes-test.robot</code></pre>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  <strong>Checkpoint/resume is always on.</strong> The engine uses AOP (aspect-oriented programming) to manage cross-cutting concerns: timing, slow-motion, and checkpoint are all registered as aspects with hooks at action, URL, and resource lifecycle points. Aspects are default-on &mdash; no flags needed to get resume behavior.
-</div>
-
-<div class="callout try">
-  <div class="callout-title">Try It</div>
-  Run a large scrape with a short timeout to see checkpoint in action:<br/>
-  <code>WISE_RPA_TIMEOUT=30 python WiseRpaBDD.py run tests/golden/hockey-teams-test.robot</code><br/>
-  Then run it again &mdash; it picks up where it left off.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 28 ──────────── -->
-<div class="section" id="t28">
-<h2><span class="num">28</span> BDD Validation</h2>
-
-<p>The <code>validate_bdd</code> function is a standalone linter that checks every executable step in a <code>.robot</code> file uses a BDD prefix. It runs without Robot Framework or a browser &mdash; pure Python file parsing.</p>
-
-<h3>What it checks</h3>
-<ul>
-  <li>Every step in <code>*** Test Cases ***</code> and <code>*** Keywords ***</code> sections must start with <code>Given</code>, <code>When</code>, <code>Then</code>, <code>And</code>, or <code>But</code></li>
-  <li><code>[Setup]</code> and <code>[Teardown]</code> values must also use BDD prefixes</li>
-  <li><code>Suite Setup</code> and <code>Suite Teardown</code> in <code>*** Settings ***</code> are checked</li>
-  <li>Continuation lines (<code>...</code>), tags, documentation, and comments are skipped</li>
-</ul>
-
-<h3>Error output</h3>
-<pre><code><span class="hl-cmt"># Example validation error:</span>
-tests/generated/bad-test.robot:42: step must start with BDD prefix
-tests/generated/bad-test.robot:58: setup/teardown step must use BDD keyword</code></pre>
-
-<h3>Using in code</h3>
-<pre><code><span class="hl-py">from</span> WiseRpaBDD <span class="hl-py">import</span> validate_bdd
-<span class="hl-py">from</span> pathlib <span class="hl-py">import</span> Path
-
-errors = validate_bdd(Path(<span class="hl-str">"tests/golden/quotes-test.robot"</span>))
-<span class="hl-py">if</span> errors:
-    <span class="hl-py">for</span> e <span class="hl-py">in</span> errors:
-        print(e)
-<span class="hl-py">else</span>:
-    print(<span class="hl-str">"BDD format OK"</span>)</code></pre>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  BDD validation is the <strong>first gate</strong> in the two-gate validation strategy. It catches structural errors (missing BDD prefixes) cheaply, before the heavier <code>robot --dryrun</code> gate checks keyword resolution.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 29 ──────────── -->
-<div class="section" id="t29">
-<h2><span class="num">29</span> Agent Generation</h2>
-
-<p>The <code>generate</code> command invokes an AI agent to explore a live website and produce a <code>.robot</code> suite. The agent follows the wise-rpa-bdd skill phases (orient, explore, draft, review) autonomously.</p>
-
-<h3>Basic usage</h3>
-<pre><code>python WiseRpaBDD.py generate \
-    "Scrape all laptop names and prices from webscraper.io/test-sites/e-commerce/allinone/computers/laptops" \
-    -o tests/generated/laptops.robot</code></pre>
-
-<h3>Options</h3>
-<table class="explain">
-<tr><th>Flag</th><th>Default</th><th>Purpose</th></tr>
-<tr><td><code>-o / --output</code></td><td>(required)</td><td>Output path for the generated <code>.robot</code> file</td></tr>
-<tr><td><code>--backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
-<tr><td><code>--model</code></td><td>per-backend</td><td>Override model name (e.g., <code>opus</code>, <code>gpt-5.4-mini</code>)</td></tr>
-<tr><td><code>--max-turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
-<tr><td><code>--fast</code></td><td>off</td><td>Pre-bake keyword docs into prompt, skip orient file reads</td></tr>
-</table>
-
-<h3>Agent backends</h3>
-<table class="explain">
-<tr><th>Backend</th><th>CLI tool</th><th>Default model</th><th>How it runs</th></tr>
-<tr><td><code>claude</code></td><td><code>claude</code></td><td>sonnet</td><td><code>claude --dangerously-skip-permissions -p &lt;prompt&gt;</code></td></tr>
-<tr><td><code>codex</code></td><td><code>codex</code></td><td>gpt-5.4-mini</td><td><code>codex exec --dangerously-bypass-approvals-and-sandbox</code></td></tr>
-<tr><td><code>aichat</code></td><td><code>aichat</code></td><td>(configured)</td><td><code>aichat -r coder &lt;prompt&gt;</code></td></tr>
-</table>
-
-<h3>Fast mode</h3>
-<p>With <code>--fast</code>, the keyword reference and format docs are inlined directly into the agent prompt, along with an <code>agent-browser</code> cheatsheet. The agent skips the orient phase (no file reads) and goes straight to exploration. This saves ~6 seconds of LLM turns on each generation.</p>
-
-<pre><code><span class="hl-cmt"># Fast mode includes this agent-browser cheatsheet in the prompt:</span>
-npx agent-browser open &lt;url&gt;          <span class="hl-cmt"># navigate (persistent session)</span>
-npx agent-browser snapshot -c -d 3    <span class="hl-cmt"># accessibility tree with classes</span>
-npx agent-browser get count '&lt;css&gt;'   <span class="hl-cmt"># count matching elements</span>
-npx agent-browser get text '&lt;css&gt;'    <span class="hl-cmt"># get text content</span>
-npx agent-browser get html '&lt;css&gt;'    <span class="hl-cmt"># get outer HTML</span>
-npx agent-browser eval '&lt;js&gt;'         <span class="hl-cmt"># run JS expression</span>
-npx agent-browser click '&lt;css&gt;'       <span class="hl-cmt"># click element</span></code></pre>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  The generation pipeline is: <strong>prompt &rarr; agent explores live site with agent-browser &rarr; agent drafts .robot &rarr; agent runs dryrun &rarr; agent fixes and loops until clean</strong>. The human gets a tested, runnable suite.
-</div>
-</div>
-
-<!-- ──────────── TOPIC 30 ──────────── -->
-<div class="section" id="t30">
-<h2><span class="num">30</span> Testing Strategy</h2>
-
-<p>Two kinds of testing, each with its own entry point:</p>
-
-<h3>Regression testing (golden suites against live sites)</h3>
-
-<p>Run golden <code>.robot</code> files against live sites to verify the engine and selectors still work. Uses the CLI <code>run</code> command &mdash; same entry point as production:</p>
-
-<pre><code><span class="hl-cmt"># Single suite</span>
-python WiseRpaBDD.py run --fresh tests/golden/quotes-test.robot
-
-<span class="hl-cmt"># Batch regression</span>
-python WiseRpaBDD.py run --fresh \
-    tests/golden/quotes-test.robot \
-    tests/golden/countries-list-test.robot \
-    tests/golden/hockey-teams-test.robot \
-    tests/golden/scifi-books-test.robot</code></pre>
-
-<p>This tests the <strong>exploitation pipeline</strong>: browser → rule walk → extraction → quality gates → output. Use <code>--fresh</code> to bypass checkpoint (each regression run should start clean).</p>
-
-<h3>Agent generation testing (AI drafts suites from requirements)</h3>
-
-<p>The <code>WiseRpaBDDTest</code> class is a separate RF keyword library that tests the <strong>exploration pipeline</strong>: send a natural-language requirement to an AI agent, validate that it produces a correct <code>.robot</code> suite matching a golden baseline.</p>
-
-<h3>Test harness keywords</h3>
-<table class="explain">
-<tr><th>Keyword</th><th>What it does</th></tr>
-<tr><td><code>Generate Suite From Requirement</code></td><td>Calls the AI agent with a natural-language requirement, saves the generated <code>.robot</code> file</td></tr>
-<tr><td><code>Generated Suite Should Pass BDD Validation</code></td><td>Runs <code>validate_bdd</code> on the generated file, fails if any step lacks a BDD prefix</td></tr>
-<tr><td><code>Generated Suite Should Pass Dryrun</code></td><td>Runs <code>robot --dryrun</code> on the generated file, fails if any keyword is unresolved</td></tr>
-<tr><td><code>Generated Suite Should Match Golden Baseline</code></td><td>Compares the set of keywords used in the generated suite against a golden baseline, fails if any are missing</td></tr>
-</table>
-
-<h3>Usage in an E2E test</h3>
-<pre><code><span class="hl-sec">*** Settings ***</span>
-<span class="hl-kw">Library</span>    WiseRpaBDDTest    model=sonnet    max_turns=50    backend=claude
-
-<span class="hl-sec">*** Test Cases ***</span>
-Agent Generates Valid Quotes Suite
-    ${path}=    Generate Suite From Requirement
-    ...    Scrape quotes from quotes.toscrape.com with pagination
-    ...    output_path=tests/generated/quotes.robot
-    Generated Suite Should Pass BDD Validation
-    Generated Suite Should Pass Dryrun
-    Generated Suite Should Match Golden Baseline
-    ...    tests/golden/quotes-test.robot</code></pre>
-
-<h3>Constructor options</h3>
-<table class="explain">
-<tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr>
-<tr><td><code>model</code></td><td><code>sonnet</code></td><td>AI model name</td></tr>
-<tr><td><code>max_turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
-<tr><td><code>backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
-</table>
-
-<div class="callout key">
-  <div class="callout-title">Key Concept</div>
-  The E2E test harness closes the loop: it uses an AI agent to generate a suite, then validates the output with the same two-gate strategy (BDD lint + dryrun) used during development. This catches regressions in both the skill instructions and the keyword library.
 </div>
 </div>
 
