@@ -19,6 +19,12 @@ flowchart LR
   review --> ship
 ```
 
+**Key capabilities:** declarative BDD specs as executable rule DAGs, MDP-modeled
+execution with guards and observation gates, write-ahead checkpoint/resume,
+AOP aspect registry (timing, slow-motion, checkpoint), stealth browser adapter,
+AI extraction pipeline, multi-resource chaining, and agent-generated suites
+validated against golden baselines.
+
 Use when: Robot Framework BDD syntax, repeatable browser extraction, pagination,
 table capture, detail scraping, or generic browser-automation keywords are needed.
 
