@@ -160,7 +160,9 @@ Commit: `git add -A && git commit -m "spec(SPEC): refine fast-track — [brief]"
 
 ### `/spec-go <name> [count]`
 
-Autonomous build→self-review loop. Optional count limits tasks per session. Stops on: all done, needs human, or stuck.
+Also triggered by: "run the spec", "implement the spec", "loop the spec", "build the spec".
+
+**This is a loop — do NOT stop after one task.** Keep cycling build→self-review→build until: all tasks done, human feedback needed, or stuck on repeated failures. Optional count limits tasks per session.
 
 **Build phase:**
 1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md.
@@ -189,7 +191,7 @@ Checkpoint: SPEC — N/TOTAL tasks done
   Next: [ID]: [title]
   Spec drift: [none / what was fixed]
 ```
-Then loop to build.
+**DO NOT STOP HERE.** Go back to Build phase step 2 and pick the next task. Only stop when: all tasks `[x]`, a task needs human input, or stuck on repeated failures.
 
 ---
 
