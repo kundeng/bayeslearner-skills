@@ -837,8 +837,8 @@ class ExecutionEngine:
         self.headed = headed
         self.stealth = stealth
         self._adapter: Any = None
-        self._instrument = os.environ.get(
-            "WISE_RPA_INSTRUMENT", "1"
+        self._timing = os.environ.get(
+            "WISE_RPA_TIMING", "1"
         ).lower() not in ("0", "false", "no")
         self._max_run_time = int(os.environ.get("WISE_RPA_TIMEOUT", "120"))
         self._run_start: float = 0
@@ -913,7 +913,7 @@ class ExecutionEngine:
     def _setup_aspects(self, store: PersistentArtifactStore) -> None:
         """Register all cross-cutting aspects."""
         # Instrumentation
-        if self._instrument:
+        if self._timing:
             self._aspects.register(Aspect(
                 name="instrument",
                 after_action=lambda a, r, res, dt: (
@@ -1260,7 +1260,7 @@ class ExecutionEngine:
             logger.warn(f"  Global timeout ({self._max_run_time}s) exceeded — aborting")
             return []
 
-        t_rule = time.time() if self._instrument else 0
+        t_rule = time.time() if self._timing else 0
 
         ctx = dict(context or {})
         records: list[dict] = []
@@ -1274,7 +1274,7 @@ class ExecutionEngine:
                 pass
 
         # Guards (Type 1 preconditions) with retry
-        t0 = time.time() if self._instrument else 0
+        t0 = time.time() if self._timing else 0
         guards_ok = self._check_guards(rule, current_url)
         if not guards_ok and rule.retry_max > 0:
             for attempt in range(1, rule.retry_max + 1):
@@ -1284,7 +1284,7 @@ class ExecutionEngine:
                 guards_ok = self._check_guards(rule, current_url)
                 if guards_ok:
                     break
-        if self._instrument:
+        if self._timing:
             dt = time.time() - t0
             logger.warn(f"  [INSTRUMENT] {rule.name}: state_check={dt:.2f}s ok={guards_ok}")
         if not guards_ok:
@@ -1304,7 +1304,7 @@ class ExecutionEngine:
         rule_timeout_ms = rule.options.get("timeout_ms")
         rule_deadline = (time.time() + int(rule_timeout_ms) / 1000.0) if rule_timeout_ms else None
 
-        t0 = time.time() if self._instrument else 0
+        t0 = time.time() if self._timing else 0
         n_actions = sum(1 for s in rule.steps if isinstance(s, Action))
         try:
             self._execute_steps(rule, res, context=ctx, deadline=rule_deadline)
@@ -1315,7 +1315,7 @@ class ExecutionEngine:
                     bl.take_screenshot(filename=f"on_fail_{rule.name}_timeout.png")
                 except Exception:
                     pass
-        if self._instrument:
+        if self._timing:
             dt = time.time() - t0
             logger.warn(f"  [INSTRUMENT] {rule.name}: actions={dt:.2f}s ({n_actions} actions)")
 
@@ -1325,7 +1325,7 @@ class ExecutionEngine:
         except Exception:
             pass
 
-        t0 = time.time() if self._instrument else 0
+        t0 = time.time() if self._timing else 0
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url,
                                              executed=executed, context=ctx)
@@ -1349,7 +1349,7 @@ class ExecutionEngine:
                 if child_records:
                     record["_children"] = child_records
                 records.append(record)
-        if self._instrument:
+        if self._timing:
             dt = time.time() - t0
             phase = "expansion" if rule.expansion else "extract+children"
             logger.warn(f"  [INSTRUMENT] {rule.name}: {phase}={dt:.2f}s records={len(records)}")
@@ -1357,7 +1357,7 @@ class ExecutionEngine:
         for target in rule.emit_targets:
             self._emit_records(target, rule, records, current_url)
 
-        if self._instrument:
+        if self._timing:
             dt_total = time.time() - t_rule
             if dt_total > 0.5:
                 logger.warn(f"  [INSTRUMENT] {rule.name}: TOTAL={dt_total:.2f}s")
@@ -1469,7 +1469,7 @@ class ExecutionEngine:
             self._do_action(action, res, context=context)
         except Exception:
             dt = time.time() - t0
-            if self._instrument:
+            if self._timing:
                 label = f"{action.type}({(action.locator or action.value or '')[:40]})"
                 logger.warn(f"  [INSTRUMENT] {label} FAILED {dt:.2f}s")
             raise
@@ -2640,7 +2640,7 @@ class ExecutionEngine:
             result = bl.evaluate_javascript(None, check_script)
             if result and result.get("found"):
                 break
-            if self._instrument and click_i == 0:
+            if self._timing and click_i == 0:
                 logger.warn(f"  [INSTRUMENT] select_date: looking for {month_year}, visible: {result}")
             # Snapshot current headings before clicking forward
             old_headings = result.get("headings", []) if result else []

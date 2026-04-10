@@ -134,7 +134,7 @@ class TestDiamondDAGExecution:
         engine.ctx = DeploymentContext(name="test")
         engine._run_start = 0
         engine._max_run_time = 9999
-        engine._instrument = False
+        engine._timing = False
         engine._slow_ms = 0
         engine._slow_screenshot = False
         return engine
