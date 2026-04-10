@@ -122,39 +122,11 @@ Auto-detected: **create** if spec doesn't exist, **refine** if it does.
 - `WHILE [state] [system] SHALL [response]`
 - `[system] SHALL [response]`
 
-**→ Present for approval:**
-```
-Requirements for SPEC — N requirements, M acceptance criteria, K non-functional
-  R1: [title] — [N criteria]
-  R2: [title] — [N criteria]
-  NF1: [title]
-  Out of scope: [summary]
-Ready for design? (approve / revise)
-```
+Write the file, then ask: *"Please review requirements.md. Ready for design?"*
 
-**Generate design.md** — template below. Research if needed. Modules, interfaces, data flow, testing strategy, correctness properties validating requirements.
+**Generate design.md** — template below. Research if needed. Modules, interfaces, data flow, testing strategy, correctness properties validating requirements. Write the file, then ask: *"Please review design.md. Ready for tasks?"*
 
-**→ Present for approval:**
-```
-Design for SPEC — N modules, M properties, K decisions
-  Modules: [list]
-  Properties: P1 validates R1.1,1.2 | P2 validates R2.1 | ...
-  Test command: [command]
-  Decisions: [list titles]
-Ready for tasks? (approve / revise)
-```
-
-**Generate tasks.md** — template below. Each task one session. Depends/Requirements/Properties. Order: Foundation → Core → Tests → Polish. Every requirement → ≥1 task.
-
-**→ Present for approval:**
-```
-Tasks for SPEC — N tasks across M phases
-  1.1: [title]  (depends: —)
-  1.2: [title]  (depends: 1.1)
-  2.1: E2E — [scenario]  (depends: 1.1, 1.2)
-  Coverage: all requirements traced, all properties tested
-Ready to implement? (approve / revise)
-```
+**Generate tasks.md** — template below. Each task one session. Depends/Requirements/Properties. Order: Foundation → Core → Tests → Polish. Every requirement → ≥1 task. Write the file, then ask: *"Please review tasks.md. Ready to implement?"*
 
 // turbo
 **Commit:** `git add -A && git commit -m "spec(SPEC): create requirements, design, and tasks"`
@@ -172,17 +144,7 @@ Commit: `git add -A && git commit -m "spec(SPEC): create fast-track spec"`
 2. Ask what should change (or use `/spec-audit` findings).
 3. Refinement: merge redundant requirements, separate what from how, collapse over-specified sub-requirements, merge overlapping properties, cascade renumbering, validate traceability (requirement → property → task), align spec with disk.
 4. Trace changes top-down and bottom-up. Done tasks (`[x]`): update references, do NOT uncheck.
-
-**→ Present change summary:**
-```
-Refine SPEC — changes:
-  Requirements: +N added, ~M merged, -K removed
-  Properties:  +N added, ~M renumbered
-  Tasks:       +N added, ~M updated, -K removed
-  Traceability gaps: [list or "none"]
-  Disk drift fixed: [list or "none"]
-Approve refinement? (approve / revise)
-```
+5. Ask: *"Please review the updated spec files. Approve refinement?"*
 
 // turbo
 Commit: `git add -A && git commit -m "spec(SPEC): refine — [brief]"`
