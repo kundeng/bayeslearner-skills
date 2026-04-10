@@ -611,6 +611,6 @@ observation gates in the draft.
 | File | Purpose |
 |------|---------|
 | `docs/architecture.md` | Runtime data model, deferred execution internals |
-| `.kiro/specs/09-*/escape-mdp-spec.md` | MDP hardening design spec (steering) |
+| `docs/escape-mdp-spec.md` | MDP hardening design spec (steering) |
 | `docs/robotframework-guide.html` | Robot Framework language reference |
 | `tests/golden/*.robot` | Vetted golden baselines for regression |
