@@ -37,7 +37,7 @@ Resource Name             # one test case per resource
 | artifacts | `Artifact Catalog` test case |
 | resource | one test case per resource |
 | entry URL | `[Setup] Given I start resource "name" at "${ENTRY}"` |
-| node | `And I begin rule "name"` block |
+| node | `I define rule "name"` block (body indented) |
 | parent chain | `And I declare parents "a, b"` |
 | state check | `Given url ...` / `And selector ... exists` |
 | action | `When I click/type/hover/focus/press keys/...` |
@@ -66,6 +66,14 @@ extract raw HTML → pass to `Then I extract with AI` with prompt/schema → emi
 
 **Auth flow** (protected content):
 pure action rule (type creds, click submit) → child rule scrapes after login
+
+**Observation gates** (async inter-action dependencies):
+Option 1: split rules — action rule → state-gate rule → next action rule (pure MDP)
+Option 2: `await=` — inline `await=<selector>` on the action that triggers async content
+
+**Dismiss scoping** (interactive sites):
+Only dismiss known popup patterns — never use broad selectors (`[role="dialog"]`) that match
+interactive panels the flow depends on (search bars, calendars, pickers)
 
 **Complex setup via call keyword** (multi-step interactions):
 define RF keyword with raw Browser calls → `And I call keyword` defers it to walk time

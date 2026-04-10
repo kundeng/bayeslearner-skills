@@ -202,6 +202,9 @@ table.explain tr:nth-child(even) { background: var(--bg-alt); }
     <p>A complete guide for AI coders</p>
   </div>
 
+  <div class="sidebar-part">Why This Exists</div>
+  <a class="sidebar-link" href="#t0">0. The Problem</a>
+
   <div class="sidebar-part">Part 1 &mdash; RF Fundamentals</div>
   <a class="sidebar-link" href="#t1">1. What is Robot Framework</a>
   <a class="sidebar-link" href="#t2">2. .robot File Anatomy</a>
@@ -229,12 +232,20 @@ table.explain tr:nth-child(even) { background: var(--bg-alt); }
   <a class="sidebar-link" href="#t18">18. The Rule Tree</a>
   <a class="sidebar-link" href="#t19">19. Browser Adapter Pattern</a>
   <a class="sidebar-link" href="#t20">20. Expansion Strategies</a>
+  <a class="sidebar-link" href="#t20b">20b. Record Linkage Walkthrough</a>
   <a class="sidebar-link" href="#t21">21. AI Extraction</a>
   <a class="sidebar-link" href="#t22">22. State Setup &amp; Interrupts</a>
+  <a class="sidebar-link" href="#t22b">22b. Observation Gates &amp; Zero-Sleep</a>
   <a class="sidebar-link" href="#t23">23. Hooks System</a>
   <a class="sidebar-link" href="#t24">24. Emit Patterns</a>
   <a class="sidebar-link" href="#t25">25. Multi-Resource Chaining</a>
   <a class="sidebar-link" href="#t26">26. Quality Gates &amp; Output</a>
+
+  <div class="sidebar-part">Part 5 &mdash; CLI &amp; Tooling</div>
+  <a class="sidebar-link" href="#t27">27. Unified CLI</a>
+  <a class="sidebar-link" href="#t28">28. BDD Validation</a>
+  <a class="sidebar-link" href="#t29">29. Agent Generation</a>
+  <a class="sidebar-link" href="#t30">30. E2E Test Harness</a>
 </nav>
 <div class="sidebar-backdrop" id="backdrop"></div>
 
@@ -246,6 +257,55 @@ table.explain tr:nth-child(even) { background: var(--bg-alt); }
   </div>
 
   <div class="container">
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- THE PROBLEM                                                    -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section" id="t0">
+<h2><span class="num">0</span> The Problem WiseRpaBDD Solves</h2>
+
+<h3>Web scraping is a solved problem &mdash; for one site, one time</h3>
+<p>Any developer can write a Python script that scrapes a website. The problem is what happens after:</p>
+
+<table class="explain">
+<tr><th>Pain point</th><th>What goes wrong</th></tr>
+<tr><td><strong>Variance</strong></td><td>Every site requires custom code. A Yelp scraper shares almost nothing with a Splunk docs scraper. Teams accumulate dozens of bespoke scripts, each with its own patterns, error handling, and selector conventions.</td></tr>
+<tr><td><strong>Fragility</strong></td><td>A site redesign breaks the script. Nobody remembers which selectors were chosen or why. The person who wrote it has moved on. Fixing it means reverse-engineering the original exploration all over again.</td></tr>
+<tr><td><strong>Opacity</strong></td><td>A scraping script is a black box to anyone who didn't write it. A business user cannot open <code>scrape_yelp.py</code> and understand what it collects, how it paginates, or what happens if a field is missing. They depend entirely on the developer.</td></tr>
+<tr><td><strong>Repeatability</strong></td><td>Running the scraper again on a different date, with different auth, or against a staging version requires code changes. There's no clean separation between <em>what to scrape</em> and <em>how to scrape it</em>.</td></tr>
+<tr><td><strong>Communication gap</strong></td><td>The user says "get me all the laptop prices." The developer writes 200 lines of Playwright. The user gets a JSON file and asks "where are the HDD variants?" There's no shared artifact that both parties can review <em>before</em> the scrape runs.</td></tr>
+</table>
+
+<h3>The core insight: separate the spec from the engine</h3>
+<p>WiseRpaBDD resolves this by splitting scraping into two distinct layers:</p>
+
+<table class="explain">
+<tr><th>Layer</th><th>Who owns it</th><th>What it looks like</th></tr>
+<tr><td><strong>Spec</strong> (the <code>.robot</code> file)</td><td>The user, the AI agent, or a QA analyst</td><td>Human-readable BDD steps: "When I paginate by next button up to 50 pages", "Then I extract fields ..."</td></tr>
+<tr><td><strong>Engine</strong> (<code>WiseRpaBDD.py</code>)</td><td>The framework maintainer</td><td>A generic execution engine that interprets the spec using browser automation</td></tr>
+</table>
+
+<p>The spec is <strong>site-specific but code-free</strong>. The engine is <strong>generic but powerful</strong>. A new site means a new <code>.robot</code> file, not a new Python script.</p>
+
+<h3>What this gives you</h3>
+<ul>
+  <li><strong>No variance</strong> &mdash; every scrape uses the same keywords, the same structure, the same engine. A quotes scraper and a Splunk docs scraper differ only in their selectors and rule tree, not in their code patterns.</li>
+  <li><strong>Readable specs</strong> &mdash; a business user can open a <code>.robot</code> file and understand what it does. "When I expand over elements <code>article.product_pod</code>" is self-explanatory. The <code>*** Comments ***</code> section documents the exploration evidence.</li>
+  <li><strong>Repeatable execution</strong> &mdash; the same <code>.robot</code> file produces the same results on any machine with the engine installed. Variables parameterize URLs, credentials, and page limits without code changes.</li>
+  <li><strong>Built-in quality assurance</strong> &mdash; quality gates, BDD validation, and dryrun checks catch problems before the scrape runs. The user knows upfront whether the spec is well-formed.</li>
+  <li><strong>Shared language</strong> &mdash; the <code>.robot</code> file is the contract between the user who requests data and the agent (AI or human) who builds the scraper. Both can read it, review it, and iterate on it.</li>
+</ul>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Traditional scraping: "write custom code per site." WiseRpaBDD: "write a declarative spec per site, execute it with one generic engine." The spec is the product &mdash; a portable, readable, tested extraction plan that a non-developer can run, inspect, and maintain.
+</div>
+
+<h3>The AI generation angle</h3>
+<p>Because the spec is structured and the keyword catalog is finite (~60 keywords), an AI agent can <strong>generate</strong> the spec from a natural-language requirement. The agent explores the live site, gathers selector evidence, and produces a tested <code>.robot</code> file. The user reviews and refines the spec in plain English, not in code. This is the <strong>explore &rarr; draft &rarr; review &rarr; ship</strong> workflow at the heart of the wise-rpa-bdd skill.</p>
+</div>
+
 
 <!-- ════════════════════════════════════════════════════════════════ -->
 <!-- PART 1: FUNDAMENTALS                                           -->
@@ -518,7 +578,12 @@ WISE_RPA_STEALTH=false robot --pythonpath scripts/ tests/golden/quotes-test.robo
 robot --dryrun --pythonpath scripts/ tests/golden/quotes-test.robot
 
 <span class="hl-cmt"># Filter by test name pattern</span>
-robot --test "Resource*" --pythonpath scripts/ tests/golden/quotes-test.robot</code></pre>
+robot --test "Resource*" --pythonpath scripts/ tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Or use the unified CLI (handles --pythonpath automatically):</span>
+python scripts/WiseRpaBDD.py run tests/golden/quotes-test.robot
+python scripts/WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
+python scripts/WiseRpaBDD.py validate tests/golden/quotes-test.robot</code></pre>
 
 <h3>Output files</h3>
 <p>After every run, RF produces three files in the current directory (or <code>--outputdir</code>):</p>
@@ -945,7 +1010,7 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
     self._deployment.artifacts[artifact] = ArtifactSchema(name=artifact, ...)
     <span class="hl-cmt"># Adds an artifact definition to the plan</span>
 
-<span class="hl-dec">@keyword</span>(<span class="hl-str">'And I begin rule "${rule}"'</span>)
+<span class="hl-dec">@keyword</span>(<span class="hl-str">'I define rule "${rule}"'</span>)
 <span class="hl-py">def</span> begin_rule(self, rule):
     node = RuleNode(name=rule)
     self._current_resource.rules[rule] = node
@@ -1020,6 +1085,44 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
   |-- hooks: list[HookDef]
   |-- setup_actions: list[SetupAction]
   |-- interrupt_selectors: list[str]</code></pre>
+
+<h3>Record shape: what the engine actually produces</h3>
+<p>Every extraction &mdash; whether from <code>field_specs</code>, <code>table_spec</code>, or <code>ai_extraction</code> &mdash; produces a <strong>record</strong> with a consistent shape. Understanding this shape is essential because it is the unit that flows through <code>_children</code> nesting, <code>emit</code> targets, and flattened output.</p>
+
+<table class="explain">
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>node</code></td><td><code>str</code></td><td>Name of the <code>RuleNode</code> that produced this record</td></tr>
+<tr><td><code>url</code></td><td><code>str</code></td><td>Page URL at the time of extraction</td></tr>
+<tr><td><code>data</code></td><td><code>dict</code></td><td>Extracted key-value pairs (field names from <code>field_specs</code>)</td></tr>
+<tr><td><code>extracted_at</code></td><td><code>str</code></td><td>ISO 8601 timestamp</td></tr>
+<tr><td><code>_children</code></td><td><code>dict[str, list]</code></td><td>Child rule records keyed by rule name (only present when children extract data)</td></tr>
+</table>
+
+<p>A leaf record (no children) looks like:</p>
+<pre><code>{
+  "node": "items",
+  "url": "https://example.com/page/1",
+  "data": {"title": "Widget A", "price": "$9.99"},
+  "extracted_at": "2026-04-10T14:00:00Z"
+}</code></pre>
+
+<p>A parent record that has collected child data gains a <code>_children</code> key:</p>
+<pre><code>{
+  "node": "categories",
+  "url": "https://example.com/shop",
+  "data": {"name": "Electronics", "url": "/electronics"},
+  "_children": {
+    "products": [
+      {"node": "products", "data": {"title": "Laptop X", "price": "$999"}, ...},
+      {"node": "products", "data": {"title": "Laptop Y", "price": "$1299"}, ...}
+    ]
+  }
+}</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The <code>_children</code> dictionary is how records from different rule levels link together. It preserves the parent-child relationship at the data level, mirroring the rule tree structure. The engine populates it bottom-up as child rules return records to their parents.
+</div>
 </div>
 
 <!-- ──────────── TOPIC 18 ──────────── -->
@@ -1040,10 +1143,127 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
                     <span class="hl-cmt"># Extract: quote_text, author, tags</span>
                     <span class="hl-cmt"># Emit to: love_quotes, love_quotes_flat</span></code></pre>
 
-<h3>The .robot code that builds this tree</h3>
+<h3>A 3-level rule tree</h3>
+<p>Most real scrapes need more than two levels. Consider an e-commerce catalogue with category pages, product listings, and product detail pages. The rule tree has <strong>three levels of extraction</strong>, each producing records that link to their parent:</p>
+
+<pre><code>categories               <span class="hl-cmt"># Level 1 (root): expand over ".category-card"</span>
+  |                      <span class="hl-cmt"># Extract: name, url</span>
+  |
+  +-- products           <span class="hl-cmt"># Level 2 (child): paginate + expand over ".product-card"</span>
+        |                <span class="hl-cmt"># Extract: title, price, detail_url</span>
+        |
+        +-- details      <span class="hl-cmt"># Level 3 (grandchild): open each detail_url</span>
+                         <span class="hl-cmt"># Extract: description, specs, images</span>
+                         <span class="hl-cmt"># Emit to: catalogue_nested, catalogue_flat</span></code></pre>
+
+<p>Visually, the data produced at each level forms a tree of records:</p>
+
+<pre><code>Category "Electronics"                          <span class="hl-cmt"># Level 1 record</span>
+|-- Product "Laptop X" (price: $999)            <span class="hl-cmt"># Level 2 record</span>
+|   +-- Detail: specs=["16GB RAM"], images=[3]  <span class="hl-cmt"># Level 3 record</span>
+|-- Product "Laptop Y" (price: $1299)           <span class="hl-cmt"># Level 2 record</span>
+|   +-- Detail: specs=["32GB RAM"], images=[5]  <span class="hl-cmt"># Level 3 record</span>
++-- Product "Mouse Z" (price: $49)              <span class="hl-cmt"># Level 2 record</span>
+    +-- Detail: specs=["Wireless"], images=[2]  <span class="hl-cmt"># Level 3 record</span>
+
+Category "Home &amp; Garden"                        <span class="hl-cmt"># Level 1 record</span>
+|-- Product "Lamp A" (price: $79)               <span class="hl-cmt"># Level 2 record</span>
+|   +-- Detail: specs=["LED"], images=[4]       <span class="hl-cmt"># Level 3 record</span>
++-- Product "Table B" (price: $299)             <span class="hl-cmt"># Level 2 record</span>
+    +-- Detail: specs=["Oak"], images=[6]       <span class="hl-cmt"># Level 3 record</span></code></pre>
+
+<h3>The .robot code for a 3-level tree</h3>
 <div class="annotated">
   <div class="line-group">
-    <div class="line-code"><span class="hl-kw">And I begin rule</span> "root"</div>
+    <div class="line-code"><span class="hl-kw">I define rule</span> "categories"</div>
+    <div class="line-note">Root rule. Expands over category cards on the landing page.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I expand over elements</span> ".category-card"</div>
+    <div class="line-note">Each category card becomes a scope for field extraction.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Then I extract field</span> "name" <span class="hl-kw">from</span> "h2"</div>
+    <div class="line-note">Level 1 extraction: category name goes into <code>record.data.name</code>.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I extract field</span> "url" <span class="hl-kw">from</span> "a" <span class="hl-kw">attribute</span> "href"</div>
+    <div class="line-note">Level 1 extraction: category URL. Merges into <code>context</code> for children.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">I define rule</span> "products"</div>
+    <div class="line-note">Child rule. Opens the category URL, paginates, and expands over products.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I declare parents</span> "categories"</div>
+    <div class="line-note">Links products to categories &mdash; engine walks here after each category extraction.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I open the bound field</span> "url"</div>
+    <div class="line-note">Navigates to <code>context["url"]</code> (the category URL extracted by parent).</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I paginate by next button</span> "a.next-page" <span class="hl-kw">up to</span> 10 <span class="hl-kw">pages</span></div>
+    <div class="line-note">Pagination within each category. Each page re-runs the child expansion.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">I define rule</span> "product_items"</div>
+    <div class="line-note">Grandchild of categories, child of products. Expands over product cards per page.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I declare parents</span> "products"</div>
+    <div class="line-note">Links product_items to products.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I expand over elements</span> ".product-card"</div>
+    <div class="line-note">Each product card on the current page.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Then I extract field</span> "title" <span class="hl-kw">from</span> "h3"</div>
+    <div class="line-note">Level 2 extraction: product title.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I extract field</span> "price" <span class="hl-kw">from</span> ".price"</div>
+    <div class="line-note">Level 2 extraction: product price.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I extract field</span> "detail_url" <span class="hl-kw">from</span> "a" <span class="hl-kw">attribute</span> "href"</div>
+    <div class="line-note">Level 2 extraction: detail URL. Merges into <code>context</code> for grandchild.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">I define rule</span> "details"</div>
+    <div class="line-note">Level 3 rule. Opens each product's detail page.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I declare parents</span> "product_items"</div>
+    <div class="line-note">Links details to product_items. This is level 3.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">When I open the bound field</span> "detail_url"</div>
+    <div class="line-note">Navigates to <code>context["detail_url"]</code> from the parent's extraction.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">Then I extract field</span> "description" <span class="hl-kw">from</span> ".product-description"</div>
+    <div class="line-note">Level 3 extraction: full description from the detail page.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I extract field</span> "specs" <span class="hl-kw">from</span> ".spec-list li"</div>
+    <div class="line-note">Level 3 extraction: spec list items.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I emit to artifact</span> "catalogue_nested"</div>
+    <div class="line-note">Emit at level 3. Records carry <code>_children</code> nesting all the way up.</div>
+  </div>
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">And I emit to artifact</span> "catalogue_flat"</div>
+    <div class="line-note">Flat emit. Context from all three levels is merged into a single row.</div>
+  </div>
+</div>
+
+<h3>The .robot code that builds a 2-level tree (quotes example)</h3>
+<div class="annotated">
+  <div class="line-group">
+    <div class="line-code"><span class="hl-kw">I define rule</span> "root"</div>
     <div class="line-note">Creates a <code>RuleNode(name="root")</code> with no parents &mdash; making it a root rule.</div>
   </div>
   <div class="line-group">
@@ -1055,7 +1275,7 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
     <div class="line-note">Adds <code>StateCheck(type="selector_exists", pattern=".quote")</code>.</div>
   </div>
   <div class="line-group">
-    <div class="line-code"><span class="hl-kw">And I begin rule</span> "pages"</div>
+    <div class="line-code"><span class="hl-kw">I define rule</span> "pages"</div>
     <div class="line-note">Creates a new <code>RuleNode(name="pages")</code>. Now <code>_current_rule</code> points to "pages".</div>
   </div>
   <div class="line-group">
@@ -1067,7 +1287,7 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
     <div class="line-note">Sets <code>pages.expansion = Expansion(over="pages_next", locator="li.next a", limit=5)</code>.</div>
   </div>
   <div class="line-group">
-    <div class="line-code"><span class="hl-kw">And I begin rule</span> "items"</div>
+    <div class="line-code"><span class="hl-kw">I define rule</span> "items"</div>
     <div class="line-note">Creates <code>RuleNode(name="items")</code>.</div>
   </div>
   <div class="line-group">
@@ -1161,6 +1381,61 @@ attr: str | <span class="hl-py">None</span> = <span class="hl-py">None</span></c
 </table>
 </div>
 
+<!-- ──────────── TOPIC 19b ──────────── -->
+<div class="section" id="t19b">
+<h2><span class="num">19b</span> Browser Control Hierarchy</h2>
+
+<p>The engine has a <strong>3-layer stack</strong> for browser control. Understanding which layer owns the page in each mode is essential for debugging and for writing <code>call_keyword</code> blocks.</p>
+
+<pre><code>Layer 3: RF Keywords          Click, Fill Text, Get Text, …
+         ↓ dispatches to
+Layer 2: Adapter Interface    click(), fill_text(), get_text(), …
+         ↓ implemented by
+Layer 1a: RFBrowserAdapter    → RF-Browser lib → Playwright (via gRPC to Node.js)
+Layer 1b: StealthAdapter      → Patchright (patched Playwright, in-process Python)</code></pre>
+
+<h3>Which layer owns the page?</h3>
+
+<table class="explain">
+<tr><th>Mode</th><th>Page owner</th><th>RF keywords work?</th></tr>
+<tr><td>Non-stealth (default)</td><td>Layer 1a — RF-Browser's Node.js process</td><td>Yes, via gRPC</td></tr>
+<tr><td>Stealth</td><td>Layer 1b — Patchright's in-process Python page</td><td>Only via stealth bridge</td></tr>
+</table>
+
+<h3>The call_keyword problem</h3>
+
+<p><code>And I call keyword "Login"</code> runs an RF keyword at walk time. Inside that keyword, raw RF-Browser calls (Click, Fill Text) go directly to Layer 3. In stealth mode, Layer 3 has no page — the page lives in Layer 1b.</p>
+
+<h3>The stealth bridge solution</h3>
+
+<p>The <code>_StealthBrowserBridge</code> class implements RF's dynamic library interface and delegates to the stealth adapter. When a <code>call_keyword</code> runs in stealth mode, the engine temporarily swaps the Browser library's internal instance with the bridge. RF's keyword resolution re-evaluates <code>owner.instance</code> on each keyword call (not cached), so all Browser keywords route to the stealth adapter's live page for the duration of the call.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  RF-Browser stores pages in a Node.js gRPC server, not in Python. You cannot inject a patchright page into RF-Browser's catalog. The bridge approach (instance swap) is the only viable strategy at the Python level.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 19c ──────────── -->
+<div class="section" id="t19c">
+<h2><span class="num">19c</span> Keyword Hierarchy</h2>
+
+<p>There are four levels of keyword abstraction for browser interaction, listed from highest to lowest. Prefer the highest level that can express your intent.</p>
+
+<table class="explain">
+<tr><th>Level</th><th>Syntax</th><th>When to use</th></tr>
+<tr><td><strong>1. Deferred BDD</strong></td><td><code>When I click locator "..."</code></td><td>Default for all standard actions. Parsed at define time, executed at walk time. Full engine instrumentation (AOP timing, dismiss, retry).</td></tr>
+<tr><td><strong>2. call_keyword</strong></td><td><code>And I call keyword "Login"</code></td><td>Complex multi-step flows needing raw Browser access. Stealth bridge routes calls correctly. Use for auth flows, custom interactions.</td></tr>
+<tr><td><strong>3. evaluate_js</strong></td><td><code>And I evaluate js "..."</code></td><td>DOM manipulation that no keyword expresses. Scrolling, data extraction, state queries. Auto-detects navigation.</td></tr>
+<tr><td><strong>4. browser_step</strong></td><td><code>When I browser step "Click" "..."</code></td><td>Last resort — direct RF-Browser keyword invocation. No engine wrapping.</td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Migration Path</div>
+  As the framework matures, patterns move <strong>upward</strong>: what starts as <code>evaluate_js</code> today becomes a deferred BDD keyword tomorrow. If you find yourself using <code>evaluate_js</code> for a common pattern, consider whether the engine should support it natively.
+</div>
+</div>
+
 <!-- ──────────── TOPIC 20 ──────────── -->
 <div class="section" id="t20">
 <h2><span class="num">20</span> Expansion Strategies</h2>
@@ -1226,6 +1501,414 @@ When I expand over combinations
 <div class="callout key">
   <div class="callout-title">Key Concept</div>
   For each combination, the engine finds the matching UI control by text comparison, clicks it, waits for any AJAX update, then extracts fields from the resulting page state.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 20b ──────────── -->
+<div class="section" id="t20b">
+<h2><span class="num">20b</span> Record Linkage Walkthrough</h2>
+
+<p>This topic traces exactly how records are built, linked, emitted, and stored as the engine walks a rule tree. We start with the flagship <strong>3-level e-commerce catalogue</strong> example to show record linking in full depth, then cover the existing <strong>books-catalogue</strong> and <strong>variants</strong> golden tests.</p>
+
+<!-- ── 3-Level Record Flow ── -->
+
+<h3>3-Level Record Flow: Category &rarr; Products &rarr; Details</h3>
+
+<p>Consider an e-commerce site with three levels of data: category pages list product cards; each product card links to a detail page with full specs. The rule tree:</p>
+
+<pre><code>categories          <span class="hl-cmt"># Level 1: expand over ".category-card"</span>
+  |                 <span class="hl-cmt"># Extract: name, url</span>
+  |
+  +-- products      <span class="hl-cmt"># Level 2: open_bound "url", paginate, expand ".product-card"</span>
+        |           <span class="hl-cmt"># Extract: title, price, detail_url</span>
+        |
+        +-- details <span class="hl-cmt"># Level 3: open_bound "detail_url"</span>
+                    <span class="hl-cmt"># Extract: description, specs, images</span>
+                    <span class="hl-cmt"># Emit to: catalogue_nested, catalogue_flat</span></code></pre>
+
+<h3>Step-by-step: how records link across 3 levels</h3>
+
+<p><strong>1. _walk_rule(categories)</strong> &mdash; expands over <code>.category-card</code>. Suppose 2 categories found:</p>
+
+<pre><code><span class="hl-cmt"># Element 0: ".category-card >> nth=0"</span>
+record_cat0 = {
+  "node": "categories",
+  "url": "https://shop.example.com/",
+  "data": {"name": "Electronics", "url": "/electronics"},
+  "extracted_at": "2026-04-10T10:00:00Z"
+}
+<span class="hl-cmt"># Context after categories extraction:</span>
+context = {"name": "Electronics", "url": "/electronics"}</code></pre>
+
+<p><strong>2. _walk_rule(products)</strong> &mdash; executes as child of categories. The engine:</p>
+<ul>
+  <li>Runs <code>open_bound "url"</code> &rarr; navigates to <code>context["url"]</code> = <code>/electronics</code></li>
+  <li>Paginates via <code>pages_next</code>. On page 1, expands over <code>.product-card</code></li>
+</ul>
+
+<pre><code><span class="hl-cmt"># Element 0 on page 1: ".product-card >> nth=0"</span>
+record_prod0 = {
+  "node": "products",
+  "url": "https://shop.example.com/electronics",
+  "data": {"title": "Laptop X", "price": "$999", "detail_url": "/electronics/laptop-x"},
+  "extracted_at": "2026-04-10T10:00:01Z"
+}
+<span class="hl-cmt"># Context accumulates parent + own fields:</span>
+context = {"name": "Electronics", "url": "/electronics",
+           "title": "Laptop X", "price": "$999", "detail_url": "/electronics/laptop-x"}</code></pre>
+
+<p><strong>3. _walk_rule(details)</strong> &mdash; executes as child of products. For each product:</p>
+<ul>
+  <li>Runs <code>open_bound "detail_url"</code> &rarr; navigates to <code>context["detail_url"]</code></li>
+  <li>Extracts description, specs, images from the detail page</li>
+</ul>
+
+<pre><code><span class="hl-cmt"># On /electronics/laptop-x detail page:</span>
+record_detail0 = {
+  "node": "details",
+  "url": "https://shop.example.com/electronics/laptop-x",
+  "data": {
+    "description": "High-performance laptop with 16GB RAM...",
+    "specs": ["16GB RAM", "512GB SSD", "15.6\" Display"],
+    "images": ["/img/laptop-x-1.jpg", "/img/laptop-x-2.jpg", "/img/laptop-x-3.jpg"]
+  },
+  "extracted_at": "2026-04-10T10:00:02Z"
+}
+<span class="hl-cmt"># No children on "details" → record is a leaf, returned to parent</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept: Context flows down, records flow up</div>
+  As the engine descends the tree, each rule's extracted <code>data</code> merges into a <code>context</code> dict passed to children. When children finish, their records bubble <strong>up</strong> into the parent's <code>_children</code> dict. This is the two-directional flow that links records across levels.
+</div>
+
+<h3>How <code>_children</code> nesting builds up</h3>
+
+<p>As records return from child rules, the engine attaches them to the parent record's <code>_children</code> dict, keyed by the child rule name. Here is the full nested structure after all three levels complete for the "Electronics" category:</p>
+
+<pre><code>{
+  "node": "categories",
+  "url": "https://shop.example.com/",
+  "data": {"name": "Electronics", "url": "/electronics"},
+  "_children": {
+    "products": [
+      {
+        "node": "products",
+        "url": "https://shop.example.com/electronics",
+        "data": {"title": "Laptop X", "price": "$999", "detail_url": "/electronics/laptop-x"},
+        "_children": {
+          "details": [
+            {
+              "node": "details",
+              "url": "https://shop.example.com/electronics/laptop-x",
+              "data": {
+                "description": "High-performance laptop with 16GB RAM...",
+                "specs": ["16GB RAM", "512GB SSD", "15.6\" Display"],
+                "images": ["/img/laptop-x-1.jpg", "/img/laptop-x-2.jpg", "/img/laptop-x-3.jpg"]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "node": "products",
+        "url": "https://shop.example.com/electronics",
+        "data": {"title": "Laptop Y", "price": "$1299", "detail_url": "/electronics/laptop-y"},
+        "_children": {
+          "details": [
+            {
+              "node": "details",
+              "url": "https://shop.example.com/electronics/laptop-y",
+              "data": {
+                "description": "Professional workstation with 32GB RAM...",
+                "specs": ["32GB RAM", "1TB SSD", "17\" Display"],
+                "images": ["/img/laptop-y-1.jpg", "/img/laptop-y-2.jpg"]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "node": "products",
+        "url": "https://shop.example.com/electronics",
+        "data": {"title": "Mouse Z", "price": "$49", "detail_url": "/electronics/mouse-z"},
+        "_children": {
+          "details": [
+            {
+              "node": "details",
+              "url": "https://shop.example.com/electronics/mouse-z",
+              "data": {
+                "description": "Wireless ergonomic mouse...",
+                "specs": ["Wireless", "Bluetooth 5.0"],
+                "images": ["/img/mouse-z-1.jpg"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}</code></pre>
+
+<p>The tree structure mirrors the record tree diagram:</p>
+<pre><code>Category "Electronics"
+|-- Product "Laptop X" (price: $999)
+|   +-- Detail: specs=["16GB RAM", "512GB SSD", "15.6\" Display"], images=[3]
+|-- Product "Laptop Y" (price: $1299)
+|   +-- Detail: specs=["32GB RAM", "1TB SSD", "17\" Display"], images=[2]
++-- Product "Mouse Z" (price: $49)
+    +-- Detail: specs=["Wireless", "Bluetooth 5.0"], images=[1]
+
+Category "Home &amp; Garden"
+|-- Product "Lamp A" (price: $79)
+|   +-- Detail: specs=["LED", "Dimmable"], images=[4]
++-- Product "Table B" (price: $299)
+    +-- Detail: specs=["Oak", "120cm"], images=[6]</code></pre>
+
+<h3>Flattened output: <code>structure=flat</code></h3>
+
+<p>When the artifact declares <code>structure=flat</code>, the emit step recursively walks the <code>_children</code> tree and merges all ancestor <code>data</code> dicts into each leaf record. Parent fields propagate down via context, so the flat output carries the full lineage:</p>
+
+<pre><code><span class="hl-cmt"># artifact_store["catalogue_flat"] after _write_outputs with structure=flat:</span>
+[
+  {
+    "name": "Electronics",
+    "title": "Laptop X",
+    "price": "$999",
+    "description": "High-performance laptop with 16GB RAM...",
+    "specs": ["16GB RAM", "512GB SSD", "15.6\" Display"],
+    "images": ["/img/laptop-x-1.jpg", "/img/laptop-x-2.jpg", "/img/laptop-x-3.jpg"]
+  },
+  {
+    "name": "Electronics",
+    "title": "Laptop Y",
+    "price": "$1299",
+    "description": "Professional workstation with 32GB RAM...",
+    "specs": ["32GB RAM", "1TB SSD", "17\" Display"],
+    "images": ["/img/laptop-y-1.jpg", "/img/laptop-y-2.jpg"]
+  },
+  {
+    "name": "Electronics",
+    "title": "Mouse Z",
+    "price": "$49",
+    "description": "Wireless ergonomic mouse...",
+    "specs": ["Wireless", "Bluetooth 5.0"],
+    "images": ["/img/mouse-z-1.jpg"]
+  },
+  {
+    "name": "Home &amp; Garden",
+    "title": "Lamp A",
+    "price": "$79",
+    "description": "Modern LED desk lamp...",
+    "specs": ["LED", "Dimmable"],
+    "images": ["/img/lamp-a-1.jpg", "/img/lamp-a-2.jpg", "/img/lamp-a-3.jpg", "/img/lamp-a-4.jpg"]
+  },
+  {
+    "name": "Home &amp; Garden",
+    "title": "Table B",
+    "price": "$299",
+    "description": "Solid oak dining table...",
+    "specs": ["Oak", "120cm"],
+    "images": ["/img/table-b-1.jpg", "/img/table-b-2.jpg", "/img/table-b-3.jpg",
+               "/img/table-b-4.jpg", "/img/table-b-5.jpg", "/img/table-b-6.jpg"]
+  }
+]</code></pre>
+
+<div class="callout warn">
+  <div class="callout-title">Flat vs Nested: when to use which</div>
+  Use <code>structure=flat</code> when downstream consumers expect tabular data (CSV, pandas DataFrame, SQL insert). Use <code>structure=nested</code> when you need to preserve the parent-child grouping &mdash; for example, to render a tree UI or to post-process per-category aggregates. You can emit to both from the same rule by declaring two artifacts.
+</div>
+
+<h3>Context accumulation across 3 levels</h3>
+
+<p>The <code>context</code> dict grows as the engine descends. Each level's extracted fields are added, making them available to child rules via <code>open the bound field</code> or Jinja2 template URLs:</p>
+
+<table class="explain">
+<tr><th>Level</th><th>Rule</th><th>Context after extraction</th><th>Used by child for</th></tr>
+<tr><td>1</td><td><code>categories</code></td><td><code>{"name": "Electronics", "url": "/electronics"}</code></td><td><code>open_bound "url"</code> in products</td></tr>
+<tr><td>2</td><td><code>products</code></td><td><code>{"name": "Electronics", "url": "/electronics", "title": "Laptop X", "price": "$999", "detail_url": "/electronics/laptop-x"}</code></td><td><code>open_bound "detail_url"</code> in details</td></tr>
+<tr><td>3</td><td><code>details</code></td><td><code>{"name": "Electronics", ..., "title": "Laptop X", ..., "description": "...", "specs": [...]}</code></td><td>(leaf &mdash; no children)</td></tr>
+</table>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  When writing a 3-level <code>.robot</code> file, check that each level extracts any field that a child will need via <code>open the bound field</code>. If level 2 needs a URL from level 1, level 1 must extract it. If level 3 needs a URL from level 2, level 2 must extract it. The context is cumulative, so level 3 also sees level 1's fields.
+</div>
+
+<!-- ── Existing Example 1 ── -->
+
+<h3>Example 1: books-catalogue (DFS, single resource, 2-level)</h3>
+
+<p>The rule tree:</p>
+<pre><code>root          <span class="hl-cmt"># state gate: URL contains "catalogue", article.product_pod exists</span>
+  |
+  pages       <span class="hl-cmt"># expansion: pages_next via "li.next a", limit=50</span>
+    |
+    items     <span class="hl-cmt"># expansion: elements over "article.product_pod"</span>
+              <span class="hl-cmt"># extract: title, price, star_rating, availability</span>
+              <span class="hl-cmt"># emit to: books</span></code></pre>
+
+<h3>Step-by-step record flow</h3>
+
+<p><strong>1. _walk_rule(root)</strong> &mdash; state checks pass, no extraction, no expansion. Walks child: <code>pages</code>.</p>
+
+<p><strong>2. _walk_rule(pages)</strong> &mdash; triggers <code>_expand_pages_next</code>. For each page:</p>
+
+<pre><code><span class="hl-cmt"># Page 1: engine is on /catalogue/page-1.html</span>
+<span class="hl-cmt"># _expand_pages_next creates fresh executed set, walks child "items"</span>
+
+  <span class="hl-cmt"># 3. _walk_rule(items) on page 1</span>
+  <span class="hl-cmt">#    triggers _expand_elements("article.product_pod")</span>
+  <span class="hl-cmt">#    count = 20 elements on this page</span>
+
+    <span class="hl-cmt"># DFS: process element 0 fully, then element 1, then 2...</span>
+
+    <span class="hl-cmt"># Element 0: "article.product_pod >> nth=0"</span>
+    record = _extract_from_element(items, "article.product_pod >> nth=0", url)
+    <span class="hl-cmt"># Returns:</span>
+    {
+      "node": "items",
+      "url": "https://books.toscrape.com/catalogue/page-1.html",
+      "data": {
+        "title": "A Light in the Attic",
+        "price": "£51.77",
+        "star_rating": "star-rating Three",
+        "availability": "In stock"
+      },
+      "extracted_at": "2026-04-09T10:30:00Z"
+    }
+    <span class="hl-cmt"># No children on "items" → record is complete</span>
+    <span class="hl-cmt"># Appended to records list</span>
+
+    <span class="hl-cmt"># Element 1: "article.product_pod >> nth=1"</span>
+    <span class="hl-cmt"># Same flow → second record</span>
+    <span class="hl-cmt"># ... repeat for all 20 elements</span>
+
+  <span class="hl-cmt"># items returns 20 records to pages</span>
+  <span class="hl-cmt"># pages.extend(child_data) → records list now has 20 items</span>
+
+  <span class="hl-cmt"># Emit: "items" has emit_targets=["books"]</span>
+  <span class="hl-cmt"># _emit_records("books", items, records=[20 records], url)</span>
+  <span class="hl-cmt"># Each record appended to artifact_store["books"]</span>
+
+<span class="hl-cmt"># Click "li.next a" → page 2 loads</span>
+<span class="hl-cmt"># Repeat: 20 more records extracted and emitted</span>
+<span class="hl-cmt"># ... 50 pages × 20 items = 1000 records in artifact_store["books"]</span></code></pre>
+
+<h3>The artifact store after execution</h3>
+<pre><code>artifact_store["books"] = [
+  {"node": "items", "url": ".../page-1.html", "data": {"title": "A Light in the Attic", ...}, ...},
+  {"node": "items", "url": ".../page-1.html", "data": {"title": "Tipping the Velvet", ...}, ...},
+  <span class="hl-cmt"># ... 998 more records</span>
+]
+<span class="hl-cmt"># Total: 1000 records, structure=flat → written as flat JSON array</span></code></pre>
+
+<!-- ── Existing Example 2 ── -->
+
+<h3>Example 2: variants test (BFS + multi-resource chaining)</h3>
+
+<p>This test has <strong>two resources</strong> connected by artifact consumption:</p>
+
+<pre><code><span class="hl-cmt"># Resource 1: "discover" — BFS element expansion</span>
+root → products (expand elements ".thumbnail", order=bfs, limit=6)
+    extract: url, title → emit to product_urls
+
+<span class="hl-cmt"># Resource 2: "variants" — consumes product_urls, combination expansion</span>
+detail_root → hdd_variants (expand combinations: click button.swatch values=128|256|512|1024)
+    extract: title, description, price, hdd_size → emit to variant_data</code></pre>
+
+<h3>BFS vs DFS &mdash; why it matters here</h3>
+<pre><code><span class="hl-cmt"># Resource "discover" uses BFS because children would navigate away.</span>
+<span class="hl-cmt"># If DFS: extract element 0 → walk child (clicks product link) → page changes</span>
+<span class="hl-cmt">#         → element 1's selector is now invalid (listing page is gone)</span>
+
+<span class="hl-cmt"># BFS Phase 1: extract ALL 6 elements first (stay on listing page)</span>
+extracted = [
+  (".thumbnail >> nth=0", {"data": {"url": "/product/60", "title": "Asus VivoBook"}}, ctx0),
+  (".thumbnail >> nth=1", {"data": {"url": "/product/61", "title": "Prestigio SmartBook"}}, ctx1),
+  <span class="hl-cmt"># ... 4 more</span>
+]
+
+<span class="hl-cmt"># BFS Phase 2: walk children per element (now safe to navigate)</span>
+<span class="hl-cmt"># (items has no children in this test, so phase 2 is a no-op)</span>
+
+<span class="hl-cmt"># Emit: 6 records → artifact_store["product_urls"]</span></code></pre>
+
+<h3>Cross-resource chaining: discover &rarr; variants</h3>
+<pre><code><span class="hl-cmt"># After discover completes, artifact_store["product_urls"] has 6 records.</span>
+<span class="hl-cmt"># Resource "variants" declares entry_url = "https://www.webscraper.io{url}"</span>
+<span class="hl-cmt"># artifact "variant_data" declares consumes=product_urls</span>
+
+<span class="hl-cmt"># _resolve_entry_urls expands the template per consumed record:</span>
+urls = [
+  "https://www.webscraper.io/test-sites/e-commerce/ajax/product/60",
+  "https://www.webscraper.io/test-sites/e-commerce/ajax/product/61",
+  <span class="hl-cmt"># ... 4 more</span>
+]
+
+<span class="hl-cmt"># For each URL, engine opens page and walks detail_root → hdd_variants</span>
+
+<span class="hl-cmt"># On product 60 (Asus VivoBook):</span>
+<span class="hl-cmt"># _expand_combinations: click swatch "128", extract, click "256", extract...</span>
+<span class="hl-cmt"># 4 swatches × 1 product = 4 records:</span>
+[
+  {"data": {"title": "Asus VivoBook", "hdd_size": "128", "price": "$295.99", ...}},
+  {"data": {"title": "Asus VivoBook", "hdd_size": "256", "price": "$299.99", ...}},
+  {"data": {"title": "Asus VivoBook", "hdd_size": "512", "price": "$321.94", ...}},
+  {"data": {"title": "Asus VivoBook", "hdd_size": "1024", "price": "$356.49", ...}},
+]
+
+<span class="hl-cmt"># Emitted to both variant_data (nested) and variant_data_flat (flat)</span>
+<span class="hl-cmt"># Repeat for all 6 products → 6 × 4 = 24 records total</span></code></pre>
+
+<h3>Nested vs flat output</h3>
+<pre><code><span class="hl-cmt"># structure=nested (variant_data): preserves _children hierarchy</span>
+[
+  {"node": "hdd_variants", "url": ".../product/60",
+   "data": {"title": "Asus VivoBook", "hdd_size": "128", "price": "$295.99"}},
+  ...
+]
+
+<span class="hl-cmt"># structure=flat (variant_data_flat): flattened during _write_outputs</span>
+<span class="hl-cmt"># Each record's "data" dict becomes a top-level row:</span>
+[
+  {"title": "Asus VivoBook", "hdd_size": "128", "price": "$295.99", "description": "..."},
+  {"title": "Asus VivoBook", "hdd_size": "256", "price": "$299.99", "description": "..."},
+  ...
+]</code></pre>
+
+<!-- ── Record Linking Summary ── -->
+
+<h3>Record linking summary: 3-level diagram</h3>
+
+<p>This table summarizes how records, context, and <code>_children</code> relate across a 3-level tree:</p>
+
+<table class="explain">
+<tr><th>Level</th><th>Rule</th><th>Expansion</th><th>Extracts</th><th>Context receives</th><th>_children populated by</th></tr>
+<tr><td>1</td><td><code>categories</code></td><td><code>elements</code> over <code>.category-card</code></td><td><code>name</code>, <code>url</code></td><td>(initial: empty)</td><td><code>products</code> records</td></tr>
+<tr><td>2</td><td><code>products</code></td><td><code>pages_next</code> + <code>elements</code> over <code>.product-card</code></td><td><code>title</code>, <code>price</code>, <code>detail_url</code></td><td><code>name</code>, <code>url</code> from level 1</td><td><code>details</code> records</td></tr>
+<tr><td>3</td><td><code>details</code></td><td>(none &mdash; single page per product)</td><td><code>description</code>, <code>specs</code>, <code>images</code></td><td>All of levels 1 + 2</td><td>(leaf &mdash; none)</td></tr>
+</table>
+
+<pre><code><span class="hl-cmt"># Data flow diagram:</span>
+<span class="hl-cmt">#</span>
+<span class="hl-cmt">#  context (top-down)                    records (bottom-up)</span>
+<span class="hl-cmt">#  ─────────────────                     ──────────────────</span>
+<span class="hl-cmt">#</span>
+<span class="hl-cmt">#  {} ──────────────→ categories ──────→ {name, url}</span>
+<span class="hl-cmt">#                         |                  ↑</span>
+<span class="hl-cmt">#                         |          _children["products"]</span>
+<span class="hl-cmt">#                         ↓                  |</span>
+<span class="hl-cmt">#  {name, url} ────→ products ────────→ {title, price, detail_url}</span>
+<span class="hl-cmt">#                         |                  ↑</span>
+<span class="hl-cmt">#                         |          _children["details"]</span>
+<span class="hl-cmt">#                         ↓                  |</span>
+<span class="hl-cmt">#  {name, url,      details ─────────→ {description, specs, images}</span>
+<span class="hl-cmt">#   title, price,</span>
+<span class="hl-cmt">#   detail_url} ──→</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Records flow <strong>bottom-up</strong> (leaf rules extract, parent rules collect via <code>_children</code>), while context flows <strong>top-down</strong> (parent data is available to children). The emit step happens at whatever rule declares <code>emit to artifact</code> &mdash; it does not have to be the leaf. When emitting at a higher level, all descendant records are included in the <code>_children</code> tree. When using <code>structure=flat</code>, the engine recursively flattens this tree, merging ancestor <code>data</code> into each leaf row.
 </div>
 </div>
 
@@ -1315,11 +1998,155 @@ When I expand over combinations
     ...    dismiss=button#onetrust-accept-btn-handler
     ...    dismiss=.modal-close-button</code></pre>
 
-<p>The engine calls <code>_dismiss_interrupts</code> which checks each selector and clicks it if found. This runs before rule execution on each page.</p>
+<p>The engine calls <code>_dismiss_interrupts</code> which checks each selector and clicks it if found. This runs before every action during step execution.</p>
+
+<h3>Per-rule dismiss scoping</h3>
+
+<p>Global dismiss selectors can interfere with interactive panels (calendars, guest pickers, dropdown menus). Two keywords let you scope or suppress dismiss per rule:</p>
+
+<pre><code>    <span class="hl-cmt"># Override: use ONLY these selectors for this rule</span>
+    I define rule "interactive_form"
+        And I scope interrupts
+        ...    dismiss="button.cookie-accept"
+        ...    dismiss=".promo-close"
+
+    <span class="hl-cmt"># Suppress: skip ALL dismiss for this rule</span>
+    I define rule "datepicker_interaction"
+        And I pause interrupts
+        When I click locator ".calendar-next"</code></pre>
+
+<p>When a rule declares <code>And I scope interrupts</code>, only those selectors are used for dismiss during that rule's steps. When <code>And I pause interrupts</code> is declared, no dismiss runs at all. After the rule completes, the engine returns to the global config.</p>
+
+<h3>Declarative rule options</h3>
+
+<p>Rules can declare lifecycle hooks via <code>And I set rule options</code>:</p>
+
+<pre><code>    I define rule "checkout"
+        And I set rule options
+        ...    on_enter=screenshot
+        ...    on_fail=screenshot
+        ...    timeout_ms=30000</code></pre>
+
+<table class="explain">
+<tr><th>Option</th><th>Effect</th></tr>
+<tr><td><code>on_enter=screenshot</code></td><td>Take screenshot before guard checks</td></tr>
+<tr><td><code>on_fail=screenshot</code></td><td>Take screenshot on guard failure or rule timeout</td></tr>
+<tr><td><code>timeout_ms=N</code></td><td>Abort rule after N milliseconds</td></tr>
+</table>
 
 <div class="callout warn">
   <div class="callout-title">Watch Out</div>
-  Interrupt selectors use simple <code>get_element_count</code> + <code>click</code>. If a dismiss button triggers a page reload, your extraction timing may be affected. Use <code>page_load_delay_ms</code> as a safety buffer.
+  Interrupt selectors use simple <code>get_element_count</code> + <code>click</code>. If a dismiss button triggers a page reload, your extraction timing may be affected. Use <code>page_load_delay_ms</code> as a safety buffer. Use <code>And I pause interrupts</code> on rules where dismiss would break the flow.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 22b ──────────── -->
+<div class="section" id="t22b">
+<h2><span class="num">22b</span> Observation Gates &amp; Zero-Sleep Execution</h2>
+
+<p>WiseRpaBDD models every scrape as a delayed MDP: state &rarr; action &rarr; observation. Fixed-duration waits (<code>When I wait</code>) are an anti-pattern because they paper over <em>missing observations</em>. This section covers the two observation-gate patterns that replace all sleeps, the scoping rules for dismiss selectors, and how the engine achieves zero-sleep execution internally.</p>
+
+<h3>1. The Problem: Why <code>When I wait</code> Is an Anti-Pattern</h3>
+
+<p>A <code>When I wait 3 seconds</code> step tells the engine nothing about <em>what</em> it is waiting for. It introduces three problems:</p>
+
+<ul>
+  <li><strong>Hidden observations.</strong> The MDP transition <em>s, a &rarr; o</em> is incomplete &mdash; the observation <em>o</em> is implicit ("something probably changed after 3 seconds"). The engine cannot verify the transition succeeded.</li>
+  <li><strong>Fragility.</strong> Too short and the test is flaky on slow networks; too long and the suite is needlessly slow. There is no correct fixed value.</li>
+  <li><strong>Engine violation.</strong> The engine should never call <code>time.sleep</code>. All timing is event-driven: Playwright's <code>wait_for_elements_state</code> (default 10s timeout), staleness detection, or explicit selector polling.</li>
+</ul>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Every action must declare its observation gate &mdash; the selector or condition that proves the action's effect is visible in the DOM. If you cannot name the gate, the action's MDP node is incomplete.
+</div>
+
+<h3>2. Option 1: Split Rules with State Gates</h3>
+
+<p>The purest MDP representation: each <em>s, a &rarr; o</em> transition is its own rule node. The engine's built-in <code>wait_for_elements_state</code> (10s default) handles timing at each node boundary.</p>
+
+<p><strong>Example:</strong> An Airbnb-style city autocomplete flow. Typing a city name triggers an async autocomplete dropdown. The three-rule split makes every observation explicit:</p>
+
+<pre><code>I define rule "type_city"
+    And I declare parents "expand_search"
+    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
+
+I define rule "autocomplete_ready"
+    And I declare parents "type_city"
+    And selector "[data-testid='option-0']" exists
+
+I define rule "select_city"
+    And I declare parents "autocomplete_ready"
+    When I click locator "[data-testid='option-0']"</code></pre>
+
+<p><strong>When to use:</strong> Named state transitions worth documenting &mdash; login flows, multi-step wizards, any place where the intermediate state is meaningful to a reader of the <code>.robot</code> file.</p>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  Check if an existing <code>When I wait</code> can be replaced by splitting the rule. If the wait is between "type" and "click", there is almost certainly a selector you can gate on.
+</div>
+
+<h3>3. Option 2: <code>await=</code> Inline Observation Gate</h3>
+
+<p>When splitting into separate rules adds noise without clarity, use the <code>await=</code> continuation parameter. It keeps rules grouped by user intent while still declaring every observation.</p>
+
+<p><code>await=&lt;selector&gt;</code> can be attached to any action keyword (<code>click</code>, <code>type</code>, <code>click_text</code>). The engine waits for the selector to appear in the DOM before advancing to the next action. Fallback selectors are supported via the standard <code>|</code> separator.</p>
+
+<p><strong>Example:</strong> The same Airbnb city flow, compact form:</p>
+
+<pre><code>I define rule "enter_city"
+    When I click text "Anywhere"
+    ...    await=#bigsearch-query-location-input
+    When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
+    ...    await=[data-testid='option-0']
+    When I click locator "[data-testid='option-0']"</code></pre>
+
+<p><strong>When to use:</strong> Sequences where the intermediate states are mechanical (click &rarr; wait for input to appear) and naming each one would clutter the rule tree.</p>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  Both options produce zero-sleep execution. Option 1 (split rules) is self-documenting but verbose. Option 2 (<code>await=</code>) is compact but hides observations inside continuation lines. Choose based on whether readers need to see each state.
+</div>
+
+<h3>4. Dismiss Selector Scoping</h3>
+
+<p>The dismiss mechanism (<code>I configure interrupts ... dismiss=&lt;selector&gt;</code>) runs <strong>before every action</strong> in the rule walk. This is powerful but dangerous: an overly broad selector will close interactive panels the user intentionally opened.</p>
+
+<div class="callout warn">
+  <div class="callout-title">Watch Out</div>
+  <strong>CRITICAL:</strong> <code>[role="dialog"]</code> matches search panels, date-picker calendars, and filter drawers &mdash; not just cookie banners. A dismiss selector that clicks the close button of any <code>[role="dialog"]</code> will sabotage your own flow.
+</div>
+
+<p><strong>Rules for dismiss selectors:</strong></p>
+<ul>
+  <li>Only dismiss known popup text or patterns &mdash; be as specific as possible.</li>
+  <li>Test your dismiss selectors during the explore phase with all interactive panels open.</li>
+  <li>Prefer text-based selectors that match the popup's accept/dismiss button label.</li>
+</ul>
+
+<table class="explain">
+<tr><th>Quality</th><th>Selector</th><th>Why</th></tr>
+<tr><td><strong>Good</strong></td><td><code>text="Got it"</code></td><td>Matches only the specific cookie-consent button text</td></tr>
+<tr><td><strong>Good</strong></td><td><code>button#onetrust-accept-btn-handler</code></td><td>ID-specific, cannot match anything else</td></tr>
+<tr><td><strong>Bad</strong></td><td><code>[role="dialog"] button[aria-label="Close"]</code></td><td>Matches every dialog's close button, including calendars and search panels</td></tr>
+<tr><td><strong>Bad</strong></td><td><code>.modal-overlay .close</code></td><td>Too generic &mdash; any component using modal patterns will be dismissed</td></tr>
+</table>
+
+<h3>5. Engine Internals: How Zero-Sleep Works</h3>
+
+<p>The engine achieves zero-sleep execution through four mechanisms. None use <code>time.sleep</code>.</p>
+
+<table class="explain">
+<tr><th>Mechanism</th><th>Where Used</th><th>How It Works</th></tr>
+<tr><td><strong>Staleness detection</strong></td><td>Pagination</td><td>After clicking "next page", the engine polls until the first element's text content changes from its pre-click value. This proves the new page has rendered.</td></tr>
+<tr><td><strong>Heading-text polling</strong></td><td>Calendar forward</td><td>After clicking the calendar's forward button, the engine polls until the month/year heading text differs from its pre-click value.</td></tr>
+<tr><td><strong>JS click + <code>wait_for_elements_state</code></strong></td><td>Stepper / quantity controls</td><td>Standard Playwright <code>click()</code> stability checks fail on elements that re-render during the click. The engine uses a raw JS click followed by <code>wait_for_elements_state("visible")</code> as a post-condition.</td></tr>
+<tr><td><strong>AOP instrumentation</strong></td><td>All actions</td><td>The <code>_do_action_instrumented</code> wrapper runs around every action. It handles pre-action dismiss, post-action observation gates (<code>await=</code>), and retry/recovery. Enabled by default.</td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The AOP wrapper (<code>_do_action_instrumented</code>) is the single point of control for all action timing. It runs dismiss selectors, executes the action, waits for the <code>await=</code> gate if present, and retries on failure. Every action in the rule walk passes through this wrapper &mdash; there is no path that bypasses it.
 </div>
 </div>
 
@@ -1512,6 +2339,170 @@ Resource variants
 <div class="callout key">
   <div class="callout-title">Key Concept</div>
   The WiseRpaBDD architecture turns Robot Framework's flat keyword sequence into a powerful scraping engine through four ideas: (1) deferred execution, (2) a rule tree with expansions, (3) artifact chaining with topological sort, and (4) pluggable AI extraction and hook-based transforms.
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- PART 5: CLI & TOOLING                                          -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<!-- ──────────── TOPIC 27 ──────────── -->
+<div class="section" id="t27">
+<h2><span class="num">27</span> Unified CLI</h2>
+
+<p><code>WiseRpaBDD.py</code> doubles as a command-line tool. Instead of invoking <code>robot</code> directly with <code>--pythonpath</code> flags, you can use the unified CLI:</p>
+
+<pre><code><span class="hl-cmt"># Run a suite live (full browser execution)</span>
+python WiseRpaBDD.py run tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Verify keyword resolution without launching a browser</span>
+python WiseRpaBDD.py dryrun tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Lint BDD format (no Robot Framework needed)</span>
+python WiseRpaBDD.py validate tests/golden/quotes-test.robot
+
+<span class="hl-cmt"># Generate a suite via AI agent</span>
+python WiseRpaBDD.py generate "Scrape laptop prices from webscraper.io" \
+    -o tests/generated/laptops.robot</code></pre>
+
+<h3>Commands</h3>
+<table class="explain">
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>run &lt;suite&gt; [robot-args]</code></td><td>Runs <code>robot --pythonpath scripts/ &lt;suite&gt;</code> with any extra robot arguments</td></tr>
+<tr><td><code>dryrun &lt;suite&gt; [robot-args]</code></td><td>Runs <code>robot --dryrun</code> to verify all keywords resolve (no browser, no output files)</td></tr>
+<tr><td><code>validate &lt;suite&gt; [...]</code></td><td>Checks that every executable step uses BDD prefixes (Given/When/Then/And/But). Pure Python, no RF needed.</td></tr>
+<tr><td><code>generate &lt;requirement&gt; -o &lt;path&gt;</code></td><td>Invokes an AI agent to explore a site and generate a <code>.robot</code> suite</td></tr>
+</table>
+
+<div class="callout try">
+  <div class="callout-title">Try It</div>
+  Run <code>python WiseRpaBDD.py validate tests/golden/*.robot</code> to lint all golden baselines at once. It prints one line per file (OK or error details).
+</div>
+</div>
+
+<!-- ──────────── TOPIC 28 ──────────── -->
+<div class="section" id="t28">
+<h2><span class="num">28</span> BDD Validation</h2>
+
+<p>The <code>validate_bdd</code> function is a standalone linter that checks every executable step in a <code>.robot</code> file uses a BDD prefix. It runs without Robot Framework or a browser &mdash; pure Python file parsing.</p>
+
+<h3>What it checks</h3>
+<ul>
+  <li>Every step in <code>*** Test Cases ***</code> and <code>*** Keywords ***</code> sections must start with <code>Given</code>, <code>When</code>, <code>Then</code>, <code>And</code>, or <code>But</code></li>
+  <li><code>[Setup]</code> and <code>[Teardown]</code> values must also use BDD prefixes</li>
+  <li><code>Suite Setup</code> and <code>Suite Teardown</code> in <code>*** Settings ***</code> are checked</li>
+  <li>Continuation lines (<code>...</code>), tags, documentation, and comments are skipped</li>
+</ul>
+
+<h3>Error output</h3>
+<pre><code><span class="hl-cmt"># Example validation error:</span>
+tests/generated/bad-test.robot:42: step must start with BDD prefix
+tests/generated/bad-test.robot:58: setup/teardown step must use BDD keyword</code></pre>
+
+<h3>Using in code</h3>
+<pre><code><span class="hl-py">from</span> WiseRpaBDD <span class="hl-py">import</span> validate_bdd
+<span class="hl-py">from</span> pathlib <span class="hl-py">import</span> Path
+
+errors = validate_bdd(Path(<span class="hl-str">"tests/golden/quotes-test.robot"</span>))
+<span class="hl-py">if</span> errors:
+    <span class="hl-py">for</span> e <span class="hl-py">in</span> errors:
+        print(e)
+<span class="hl-py">else</span>:
+    print(<span class="hl-str">"BDD format OK"</span>)</code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  BDD validation is the <strong>first gate</strong> in the two-gate validation strategy. It catches structural errors (missing BDD prefixes) cheaply, before the heavier <code>robot --dryrun</code> gate checks keyword resolution.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 29 ──────────── -->
+<div class="section" id="t29">
+<h2><span class="num">29</span> Agent Generation</h2>
+
+<p>The <code>generate</code> command invokes an AI agent to explore a live website and produce a <code>.robot</code> suite. The agent follows the wise-rpa-bdd skill phases (orient, explore, draft, review) autonomously.</p>
+
+<h3>Basic usage</h3>
+<pre><code>python WiseRpaBDD.py generate \
+    "Scrape all laptop names and prices from webscraper.io/test-sites/e-commerce/allinone/computers/laptops" \
+    -o tests/generated/laptops.robot</code></pre>
+
+<h3>Options</h3>
+<table class="explain">
+<tr><th>Flag</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>-o / --output</code></td><td>(required)</td><td>Output path for the generated <code>.robot</code> file</td></tr>
+<tr><td><code>--backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
+<tr><td><code>--model</code></td><td>per-backend</td><td>Override model name (e.g., <code>opus</code>, <code>gpt-5.4-mini</code>)</td></tr>
+<tr><td><code>--max-turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
+<tr><td><code>--fast</code></td><td>off</td><td>Pre-bake keyword docs into prompt, skip orient file reads</td></tr>
+</table>
+
+<h3>Agent backends</h3>
+<table class="explain">
+<tr><th>Backend</th><th>CLI tool</th><th>Default model</th><th>How it runs</th></tr>
+<tr><td><code>claude</code></td><td><code>claude</code></td><td>sonnet</td><td><code>claude --dangerously-skip-permissions -p &lt;prompt&gt;</code></td></tr>
+<tr><td><code>codex</code></td><td><code>codex</code></td><td>gpt-5.4-mini</td><td><code>codex exec --dangerously-bypass-approvals-and-sandbox</code></td></tr>
+<tr><td><code>aichat</code></td><td><code>aichat</code></td><td>(configured)</td><td><code>aichat -r coder &lt;prompt&gt;</code></td></tr>
+</table>
+
+<h3>Fast mode</h3>
+<p>With <code>--fast</code>, the keyword reference and format docs are inlined directly into the agent prompt, along with an <code>agent-browser</code> cheatsheet. The agent skips the orient phase (no file reads) and goes straight to exploration. This saves ~6 seconds of LLM turns on each generation.</p>
+
+<pre><code><span class="hl-cmt"># Fast mode includes this agent-browser cheatsheet in the prompt:</span>
+npx agent-browser open &lt;url&gt;          <span class="hl-cmt"># navigate (persistent session)</span>
+npx agent-browser snapshot -c -d 3    <span class="hl-cmt"># accessibility tree with classes</span>
+npx agent-browser get count '&lt;css&gt;'   <span class="hl-cmt"># count matching elements</span>
+npx agent-browser get text '&lt;css&gt;'    <span class="hl-cmt"># get text content</span>
+npx agent-browser get html '&lt;css&gt;'    <span class="hl-cmt"># get outer HTML</span>
+npx agent-browser eval '&lt;js&gt;'         <span class="hl-cmt"># run JS expression</span>
+npx agent-browser click '&lt;css&gt;'       <span class="hl-cmt"># click element</span></code></pre>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The generation pipeline is: <strong>prompt &rarr; agent explores live site with agent-browser &rarr; agent drafts .robot &rarr; agent runs dryrun &rarr; agent fixes and loops until clean</strong>. The human gets a tested, runnable suite.
+</div>
+</div>
+
+<!-- ──────────── TOPIC 30 ──────────── -->
+<div class="section" id="t30">
+<h2><span class="num">30</span> E2E Test Harness</h2>
+
+<p>The <code>WiseRpaBDDTest</code> class is a separate RF keyword library for testing agent-generated suites. It lives in the same <code>WiseRpaBDD.py</code> file but has a distinct purpose: invoke the AI agent with a requirement, capture the output, and validate it.</p>
+
+<h3>Test harness keywords</h3>
+<table class="explain">
+<tr><th>Keyword</th><th>What it does</th></tr>
+<tr><td><code>Generate Suite From Requirement</code></td><td>Calls the AI agent with a natural-language requirement, saves the generated <code>.robot</code> file</td></tr>
+<tr><td><code>Generated Suite Should Pass BDD Validation</code></td><td>Runs <code>validate_bdd</code> on the generated file, fails if any step lacks a BDD prefix</td></tr>
+<tr><td><code>Generated Suite Should Pass Dryrun</code></td><td>Runs <code>robot --dryrun</code> on the generated file, fails if any keyword is unresolved</td></tr>
+<tr><td><code>Generated Suite Should Match Golden Baseline</code></td><td>Compares the set of keywords used in the generated suite against a golden baseline, fails if any are missing</td></tr>
+</table>
+
+<h3>Usage in an E2E test</h3>
+<pre><code><span class="hl-sec">*** Settings ***</span>
+<span class="hl-kw">Library</span>    WiseRpaBDDTest    model=sonnet    max_turns=50    backend=claude
+
+<span class="hl-sec">*** Test Cases ***</span>
+Agent Generates Valid Quotes Suite
+    ${path}=    Generate Suite From Requirement
+    ...    Scrape quotes from quotes.toscrape.com with pagination
+    ...    output_path=tests/generated/quotes.robot
+    Generated Suite Should Pass BDD Validation
+    Generated Suite Should Pass Dryrun
+    Generated Suite Should Match Golden Baseline
+    ...    tests/golden/quotes-test.robot</code></pre>
+
+<h3>Constructor options</h3>
+<table class="explain">
+<tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>model</code></td><td><code>sonnet</code></td><td>AI model name</td></tr>
+<tr><td><code>max_turns</code></td><td>50</td><td>Max agent conversation turns</td></tr>
+<tr><td><code>backend</code></td><td><code>claude</code></td><td>Agent backend: <code>claude</code>, <code>codex</code>, or <code>aichat</code></td></tr>
+</table>
+
+<div class="callout key">
+  <div class="callout-title">Key Concept</div>
+  The E2E test harness closes the loop: it uses an AI agent to generate a suite, then validates the output with the same two-gate strategy (BDD lint + dryrun) used during development. This catches regressions in both the skill instructions and the keyword library.
 </div>
 </div>
 

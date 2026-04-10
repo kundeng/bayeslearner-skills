@@ -14,10 +14,20 @@ Suite Teardown    Then I finalize deployment
 *** Variables ***
 ${DEPLOYMENT}        oscar-films-ajax-scrape
 ${ENTRY_URL}         https://www.scrapethissite.com/pages/ajax-javascript/
+${ARTIFACT_YEARS}    year_options
 ${ARTIFACT_FILMS}    oscar_films
 
 *** Test Cases ***
 Artifact Catalog
+    # Year options — auto-discovered tab values for posthoc audit
+    Given I register artifact "${ARTIFACT_YEARS}"
+    ...    field=control    type=string    required=true
+    ...    field=value      type=string    required=true
+    And I set artifact options for "${ARTIFACT_YEARS}"
+    ...    output=true
+    ...    structure=flat
+    ...    description=Auto-discovered year tab values from AJAX page
+
     Given I register artifact "${ARTIFACT_FILMS}"
     ...    field=title           type=string    required=true
     ...    field=nominations     type=number    required=true
@@ -34,23 +44,23 @@ Resource oscar films
     ...    timeout_ms=30000
     ...    retries=2
     ...    page_load_delay_ms=2000
-    And I begin rule "root"
-    Given url contains "/pages/ajax-javascript"
-    And selector "a.year-link" exists
-    And I begin rule "year_tabs"
-    And I declare parents "root"
-    When I expand over combinations
-    ...    action=click    control="a.year-link"    values=2015|2014|2013|2012|2011|2010
-    And I begin rule "films"
-    And I declare parents "year_tabs"
-    And selector "tr.film" exists
-    When I expand over elements "tr.film"
-    Then I extract fields
-    ...    field=title           extractor=text    locator="td.film-title"
-    ...    field=nominations     extractor=text    locator="td.film-nominations"
-    ...    field=awards          extractor=text    locator="td.film-awards"
-    ...    field=best_picture    extractor=html    locator="td.film-best-picture"
-    And I emit to artifact "${ARTIFACT_FILMS}"
+    I define rule "root"
+        Given url contains "/pages/ajax-javascript"
+        And selector "a.year-link" exists
+    I define rule "year_tabs"
+        And I declare parents "root"
+        When I expand over combinations
+        ...    action=click    control="a.year-link"    values=auto    emit=year_options
+    I define rule "films"
+        And I declare parents "year_tabs"
+        And selector "tr.film" exists
+        When I expand over elements "tr.film"
+        Then I extract fields
+        ...    field=title           extractor=text    locator="td.film-title"
+        ...    field=nominations     extractor=text    locator="td.film-nominations"
+        ...    field=awards          extractor=text    locator="td.film-awards"
+        ...    field=best_picture    extractor=html    locator="td.film-best-picture"
+        And I emit to artifact "${ARTIFACT_FILMS}"
 
 Quality Gates
     And I set quality gate min records to 80

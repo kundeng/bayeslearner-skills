@@ -48,24 +48,24 @@ Resource quote_pages
     ...    page_load_delay_ms=1000
 
     # Rule: root — state gate confirming correct domain and quote presence
-    And I begin rule "root"
-    Given url matches "quotes.toscrape.com"
-    And selector ".quote" exists
+    I define rule "root"
+        Given url matches "quotes.toscrape.com"
+        And selector ".quote" exists
 
     # Rule: pages — drive next-button pagination across at most 3 pages
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "li.next a" up to 3 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "li.next a" up to 3 pages
 
     # Rule: items — expand over each div.quote, extract fields, emit
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements ".quote"
-    Then I extract fields
-    ...    field=quote_text    extractor=text       locator="span.text"
-    ...    field=author        extractor=text       locator="small.author"
-    ...    field=tags          extractor=grouped    locator="a.tag"
-    And I emit to artifact "${ARTIFACT_QUOTES}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements ".quote"
+        Then I extract fields
+        ...    field=quote_text    extractor=text       locator="span.text"
+        ...    field=author        extractor=text       locator="small.author"
+        ...    field=tags          extractor=grouped    locator="a.tag"
+        And I emit to artifact "${ARTIFACT_QUOTES}"
 
 Quality Gates
     # 3 pages × 10 quotes/page = 30 records minimum

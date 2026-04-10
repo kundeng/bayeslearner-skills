@@ -27,13 +27,14 @@ Artifact Catalog
 
 Primary Resource
     [Setup]    Given I start resource "primary" at "${ENTRY_URL}"
-    Given url contains "/"
-    And selector ".row" exists
-    When I expand over elements ".row"
-    Then I extract fields
-    ...    field=title    extractor=text    locator=".title"
-    ...    field=url      extractor=link    locator="a"
-    And I emit to artifact "${ARTIFACT_RECORDS}"
+    I define rule "root"
+        Given url contains "/"
+        And selector ".row" exists
+        When I expand over elements ".row"
+        Then I extract fields
+        ...    field=title    extractor=text    locator=".title"
+        ...    field=url      extractor=link    locator="a"
+        And I emit to artifact "${ARTIFACT_RECORDS}"
 
 Quality Gates
     And I set quality gate min records to 10
@@ -96,7 +97,7 @@ Detail Resource
 
 ## Rules
 
-**`And I begin rule "${name}"`** — Start a named block within a resource. Rules are the unit of state/action/expand/extract/emit.
+**`I define rule "${name}"`** — Start a named block within a resource. Rules are the unit of state/action/expand/extract/emit. Body lines (state checks, parents, actions, extract, emit) are indented under the rule definition.
 
 **`And I declare parents "${names}"`** — Declare parent rules (comma-separated). Root rules have no parents.
 
@@ -124,11 +125,11 @@ All actions are **deferred** — they record during test case definition and exe
 
 ### Interaction
 
-**`When I click locator "${css}"`** — Click an element. Optional: `delay_ms=<number>`
+**`When I click locator "${css}"`** — Click an element. Optional: `await=<selector>` (observation gate).
 
 **`When I double click locator "${css}"`** — Double-click an element.
 
-**`When I type "${value}" into locator "${css}"`** — Type into input (clears first).
+**`When I type "${value}" into locator "${css}"`** — Type into input (clears first). Optional: `await=<selector>`.
 
 **`When I type secret "${value}" into locator "${css}"`** — Type secret (redacted in logs).
 
@@ -146,13 +147,56 @@ All actions are **deferred** — they record during test case definition and exe
 
 **`When I upload file "${path}" to locator "${css}"`** — Upload a file to a file input.
 
-### Timing
+### Observation Gates (replacing `When I wait`)
+
+When an action triggers async content that the next action depends on, use one of two MDP-native patterns instead of `When I wait`:
+
+**Option 1 — Split rules with state gates** (zero engine changes, pure MDP):
+
+Split the actions into separate rules with a state-check rule between them. The engine's `wait_for_elements_state` (10s timeout) naturally gates the next action.
+
+```robot
+# Action: type triggers autocomplete
+I define rule "type_city"
+    When I type "${CITY}" into locator "#search-input"
+
+# Observation gate: autocomplete appeared
+I define rule "autocomplete_ready"
+    And I declare parents "type_city"
+    And selector "[data-testid='option-0']" exists
+
+# Action: click the autocomplete suggestion
+I define rule "select_city"
+    And I declare parents "autocomplete_ready"
+    When I click locator "[data-testid='option-0']"
+```
+
+**Option 2 — `await=` inline observation gate** (keeps rules grouped by intent):
+
+Add `await=<selector>` to any action. The engine waits for that selector to become visible before advancing to the next action within the same rule.
+
+```robot
+I define rule "enter_city"
+    When I type "${CITY}" into locator "#search-input"
+    ...    await=[data-testid='option-0']
+    When I click locator "[data-testid='option-0']"
+```
+
+`await=` works on `When I click locator`, `When I type`, and `When I click text`. It supports fallback selectors (`await=.opt-0 | .option:first-child`).
+
+**When to use which:**
+- **Split rules** when the observation is a meaningful state transition worth naming (e.g. "search results loaded").
+- **`await=`** when the observation is a low-level async dependency within a coherent user intent (e.g. autocomplete appearing after typing).
+
+Golden file examples: `airbnb-splitrule-test.robot` (Option 1), `airbnb-await-test.robot` (Option 2).
+
+### Timing (legacy — prefer observation gates above)
 
 **`When I scroll down`** — Scroll one viewport height.
 
 **`When I wait for idle`** — Wait for network idle.
 
-**`When I wait ${ms} ms`** — Wait a fixed duration.
+**`When I wait ${ms} ms`** — Wait a fixed duration. Prefer `await=` or split rules instead.
 
 ### Debugging
 
@@ -162,10 +206,10 @@ All actions are **deferred** — they record during test case definition and exe
 
 ```robot
 Sort By Durability
-    And I begin rule "sort_action"
-    When I click locator "th.durability a"
-    ...    delay_ms=1000
-    Given url contains "durability"
+    I define rule "sort_action"
+        When I click locator "th.durability a"
+        ...    delay_ms=1000
+        Given url contains "durability"
 ```
 
 ### Auth flow example (pure action rule)
@@ -173,44 +217,58 @@ Sort By Durability
 ```robot
 Resource protected_content
     [Setup]    Given I start resource "content" at "${LOGIN_URL}"
-    And I begin rule "login"
-    When I type "${USERNAME}" into locator "#username"
-    When I type secret "${PASSWORD}" into locator "#password"
-    When I click locator "#submit"
-    When I wait for idle
-    And I begin rule "scrape"
-    And I declare parents "login"
-    When I expand over elements ".result"
-    Then I extract fields
-    ...    field=title    extractor=text    locator="h1"
-    And I emit to artifact "${ARTIFACT}"
+    I define rule "login"
+        When I type "${USERNAME}" into locator "#username"
+        When I type secret "${PASSWORD}" into locator "#password"
+        When I click locator "#submit"
+        When I wait for idle
+    I define rule "scrape"
+        And I declare parents "login"
+        When I expand over elements ".result"
+        Then I extract fields
+        ...    field=title    extractor=text    locator="h1"
+        And I emit to artifact "${ARTIFACT}"
 ```
 
 ## Expansion
 
-**`When I expand over elements "${scope}"`** — Match elements; run child rules for each.
+**`When I expand over elements "${scope}"`** — Match elements; run child rules for each. Options:
+- `limit=<N>` — process at most N elements
+- `exclude_if=<css>` — skip elements where this child selector matches (e.g. sponsored items)
 
-**`When I expand over elements "${scope}" with order "${order}"`** — `dfs` (default, streaming) or `bfs` (collect all first).
+**`When I expand over elements "${scope}" with order "${order}"`** — `dfs` (default, streaming) or `bfs` (collect all first). Same options as above.
 
 **`When I paginate by next button "${css}" up to ${limit} pages`** — Follow next-page links.
 
 **`When I paginate by numeric control "${css}" from ${start} up to ${limit} pages`** — Click numbered page controls.
 
 **`When I expand over combinations`** — Cartesian product of filter axes:
-- `action=<type|select|checkbox> control=<css> values=<val1|val2|...>`
+- `action=<type|select|click> control=<css> values=<val1|val2|...|auto>`
+- `exclude=<pat1|pat2>` — drop values matching these strings (useful with `values=auto`)
+- `skip=<N>` — drop the first N values (e.g. placeholder "Select...")
+- `emit=<artifact>` — emit each discovered value as a `{control, value}` record to the named artifact
 
-### Variant click expansion example
+When `values=auto`, the engine discovers values from the DOM: `<option>` values for `select`, element text for `click`. Empty strings are auto-excluded for `select` actions.
+
+### Variant auto-discovery example
 
 ```robot
 Variant Prices
-    And I begin rule "variants"
-    And I declare parents "products"
-    When I expand over combinations
-    ...    action=type    control="#hdd-select"    values=128|256|512|1024
-    Then I extract fields
-    ...    field=hdd_size    extractor=text    locator=".hdd-selected"
-    ...    field=price       extractor=text    locator=".price"
-    And I emit to artifact "${ARTIFACT_VARIANTS}"
+    I define rule "variants"
+        And I declare parents "products"
+        When I expand over combinations
+        ...    action=click    control="button.swatch"    values=auto    emit=hdd_options
+        Then I extract fields
+        ...    field=hdd_size    extractor=text    locator=".hdd-selected"
+        ...    field=price       extractor=text    locator=".price"
+        And I emit to artifact "${ARTIFACT_VARIANTS}"
+```
+
+### Dropdown with placeholder skip
+
+```robot
+        When I expand over combinations
+        ...    action=select    control="#size-dropdown"    values=auto    skip=1    exclude=N/A
 ```
 
 ## Extraction
@@ -278,6 +336,38 @@ AI operates on previously extracted text, never on the live DOM. Capture with `h
 
 **`And I configure interrupts`** — Auto-dismiss overlays: `dismiss=<css>`
 
+## High-Level Interaction Keywords
+
+These keywords handle common interactive patterns declaratively, avoiding the need for `evaluate_js`.
+
+**`When I click text "${text}"`** — Click the first visible element whose text content matches exactly. Searches buttons, links, role=button, and clickable divs. Optional: `await=<selector>`.
+
+```robot
+When I click text "Got it"
+When I click text "Anywhere"
+...    await=#search-input
+When I click text "Show 500+ places"
+```
+
+**`When I add url params "${params}"`** — Add query parameters to the current URL and navigate. The engine automatically waits for page load and runs interrupt dismiss during settle.
+
+```robot
+When I add url params "price_max=3000&min_bedrooms=1&superhost=true"
+```
+
+**`When I set stepper "${locator}" to ${count}`** — Click a stepper/increment button N times.
+
+```robot
+When I set stepper "[data-testid='stepper-adults-increase-button']" to 2
+```
+
+**`And I evaluate js "${script}"`** — Defer a JavaScript expression to run on the live page. Works with both RF-Browser and stealth adapters. Supports async scripts. Use as an escape hatch when no declarative keyword exists.
+
+```robot
+And I evaluate js "() => { document.querySelector('#btn').click(); }"
+And I evaluate js "async () => { await navigateCalendar('November 2026'); }"
+```
+
 ## Browser Step & Call Keyword (passthrough)
 
 For Browser library methods not covered by the action keywords above, two passthrough mechanisms let you call any method at the right time during the rule walk.
@@ -303,14 +393,14 @@ Accept Terms And Login
 *** Test Cases ***
 Resource dashboard
     [Setup]    Given I start resource "dashboard" at "${ENTRY_URL}"
-    And I begin rule "auth"
-    And I call keyword "Accept Terms And Login"
-    And I begin rule "data"
-    And I declare parents "auth"
-    When I expand over elements ".widget"
-    Then I extract fields
-    ...    field=metric    extractor=text    locator=".value"
-    And I emit to artifact "${ARTIFACT}"
+    I define rule "auth"
+        And I call keyword "Accept Terms And Login"
+    I define rule "data"
+        And I declare parents "auth"
+        When I expand over elements ".widget"
+        Then I extract fields
+        ...    field=metric    extractor=text    locator=".value"
+        And I emit to artifact "${ARTIFACT}"
 ```
 
 ## Fallback Selectors

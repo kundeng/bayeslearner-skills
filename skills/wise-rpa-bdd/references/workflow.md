@@ -85,6 +85,89 @@ Evidence can be:
 
 The suite should be explainable from the evidence. If you cannot justify a selector or a merge key, you are drafting too early.
 
+## Async Dependencies — What to Look For During Explore
+
+Interactive sites have actions that trigger async DOM changes. During explore, identify these explicitly:
+
+| Action | What to observe | Example |
+|--------|----------------|---------|
+| Type into search | Autocomplete/dropdown appears | `[data-testid='option-0']` after typing city |
+| Click to open panel | Panel content loads | Stepper button appears after "Add guests" |
+| Click submit | Page navigates, results load | URL changes + card elements appear |
+| Click pagination | Content swaps via AJAX | First card text changes |
+| Click calendar forward | Heading re-renders | Month heading text changes |
+
+**Record each async dependency as a pair**: the action that triggers it and the selector that signals completion. These become observation gates in the draft.
+
+### Guard vs Observation — Position Determines Type
+
+State checks in a rule have two roles, determined entirely by **position**:
+
+- **Before any action** → **Guard** (Type 1 precondition). "Is the world in the state I expect?" If it fails, the rule is skipped (or aborted if `guard_policy=abort`).
+- **After an action** → **Observation** (Type 2 gate). "Has the side effect landed?" Required for correctness in async DOM.
+
+```
+I define rule "search"
+    Given url contains "airbnb.com"       # ← Guard (before actions)
+    And selector "#search-input" exists   # ← Guard (still before actions)
+    When I type "Miami" into locator "#search-input"   # ← First action
+    And selector "[data-testid='option-0']" exists      # ← Observation (after an action)
+    When I click locator "[data-testid='option-0']"     # ← Action
+```
+
+The engine routes these automatically via `_add_state_check`. You don't annotate them — just place them correctly.
+
+### Observation Gate Decision Tree
+
+Three patterns — pick based on intent:
+
+```
+Is the observation a meaningful milestone worth naming?
+├── Yes → Split rules
+└── No → Is it a low-level async dependency within one user intent?
+    ├── Yes → await= (inline)
+    └── No → Interleaved state check (observation between actions)
+```
+
+**1. Split rules** (named state transitions):
+```
+action rule → state-gate rule (And selector "..." exists) → next action rule
+```
+Use when the observation is a meaningful milestone worth naming ("search results loaded", "autocomplete ready"). Each rule can have its own retry and guard policy.
+
+**2. `await=`** (inline, within a rule):
+```
+When I type "${CITY}" into locator "#input"
+...    await=[data-testid='option-0']
+When I click locator "[data-testid='option-0']"
+```
+Use when the observation is a low-level async dependency within a single user intent. Minimal overhead, no new rule needed.
+
+**3. Interleaved state check** (observation gate between actions):
+```
+I define rule "fill_form"
+    When I type "admin" into locator "#username"
+    And selector "#password" exists        # ← observation gate
+    When I type "secret" into locator "#password"
+```
+Use when you need to verify DOM state between actions but don't need the full `await=` syntax.
+
+**Never use `When I wait`**. Every wait is a bug — it hides a missing observation.
+
+### Dismiss Selector Scoping
+
+During explore, identify popups/overlays that appear intermittently (cookie banners, pricing modals, promo overlays). For each, find the **most specific** dismiss selector.
+
+**Critical rule**: dismiss selectors must NOT match interactive panels that the flow depends on. On Airbnb, `[role="dialog"] button[aria-label="Close"]` matches the search panel, calendar, and guest picker — clicking it destroys the flow.
+
+| Good | Bad |
+|------|-----|
+| `text="Got it"` (specific text) | `[role="dialog"] button` (matches any dialog) |
+| `[data-testid="cookie-banner"] button` | `button[aria-label="Close"]` (too broad) |
+| `.promo-overlay .dismiss` | `[data-testid="modal-container"] button` (matches search panel) |
+
+During explore, test each dismiss selector against the page **while the search/form panels are open** to verify it doesn't close them.
+
 ## Repeatable Exploitation
 
 The suite is good only when another agent can:

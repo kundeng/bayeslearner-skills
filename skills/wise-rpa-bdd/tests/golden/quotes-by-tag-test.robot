@@ -55,16 +55,16 @@ Resource love_quote_pages
 
     # Rule: root — state gate confirming we are on the love tag page
     # Evidence: url contains /tag/love; div.quote present on both pages
-    And I begin rule "root"
-    Given url contains "/tag/love"
-    And selector ".quote" exists
+    I define rule "root"
+        Given url contains "/tag/love"
+        And selector ".quote" exists
 
     # Rule: pages — drive next-button pagination across all pages
     # Evidence: li.next present on p1 (href=/tag/love/page/2/), absent on p2.
     #           Limit=5 is a safety cap; engine stops naturally at page 2.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "li.next a" up to 5 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "li.next a" up to 5 pages
 
     # Rule: items — expand over each div.quote on every visited page, then extract
     # Evidence: 10 div.quote on page 1, 4 on page 2 (14 total).
@@ -72,15 +72,15 @@ Resource love_quote_pages
     #   quote_text — .text (span class="text"); typographic quotes included
     #   author     — small.author (class="author"); direct text node
     #   tags       — .tag (a class="tag"); grouped extractor; 1+ tags per quote
-    And I begin rule "items"
-    And I declare parents "pages"
-    When I expand over elements ".quote"
-    Then I extract fields
-    ...    field=quote_text    extractor=text       locator=".text"
-    ...    field=author        extractor=text       locator="small.author"
-    ...    field=tags          extractor=grouped    locator=".tag"
-    And I emit to artifact "${ARTIFACT_QUOTES}"
-    And I emit to artifact "${ARTIFACT_QUOTES_FLAT}"
+    I define rule "items"
+        And I declare parents "pages"
+        When I expand over elements ".quote"
+        Then I extract fields
+        ...    field=quote_text    extractor=text       locator=".text"
+        ...    field=author        extractor=text       locator="small.author"
+        ...    field=tags          extractor=grouped    locator=".tag"
+        And I emit to artifact "${ARTIFACT_QUOTES}"
+        And I emit to artifact "${ARTIFACT_QUOTES_FLAT}"
 
 Quality Gates
     # 2 pages: 10 + 4 = 14 records total; min 10 allows some tolerance

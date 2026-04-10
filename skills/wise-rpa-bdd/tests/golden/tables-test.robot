@@ -56,9 +56,9 @@ Resource table_scrape
 
     # Rule: root — state gate confirming we are on the correct page before acting.
     # Evidence: URL contains "test-sites/tables"; selector "table" present (2 matches).
-    And I begin rule "root"
-    Given url contains "test-sites/tables"
-    And selector "table" exists
+    I define rule "root"
+        Given url contains "test-sites/tables"
+        And selector "table" exists
 
     # Rule: each_table — expand over both <table> elements in document order.
     # Evidence: 2 plain <table> elements; no class/id distinguishes them.
@@ -67,17 +67,17 @@ Resource table_scrape
     #   # → "#" header, First Name → "First Name", Last Name → "Last Name",
     #   Username → "Username" (all confirmed from live HTML above).
     # Emit flattened by "rows" for flat output (one record per tbody row).
-    And I begin rule "each_table"
-    And I declare parents "root"
-    When I expand over elements "table"
-    Then I extract table "rows" from "table"
-    ...    header_row=0
-    ...    field=#             header="#"
-    ...    field=First Name    header="First Name"
-    ...    field=Last Name     header="Last Name"
-    ...    field=Username      header="Username"
-    And I emit to artifact "${ARTIFACT_TABLE_DATA}" flattened by "rows"
-    And I emit to artifact "${ARTIFACT_TABLE_NESTED}"
+    I define rule "each_table"
+        And I declare parents "root"
+        When I expand over elements "table"
+        Then I extract table "rows" from "table"
+        ...    header_row=0
+        ...    field=#             header="#"
+        ...    field=First Name    header="First Name"
+        ...    field=Last Name     header="Last Name"
+        ...    field=Username      header="Username"
+        And I emit to artifact "${ARTIFACT_TABLE_DATA}" flattened by "rows"
+        And I emit to artifact "${ARTIFACT_TABLE_NESTED}"
 
 Quality Gates
     # 2 tables × 3 rows each = 6 records minimum

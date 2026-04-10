@@ -55,16 +55,16 @@ Discovery Resource
     ...    retries=2
     ...    page_load_delay_ms=1000
 
-    And I begin rule "root"
-    Given url contains "science-fiction"
-    And selector "article.product_pod" exists
+    I define rule "root"
+        Given url contains "science-fiction"
+        And selector "article.product_pod" exists
 
-    And I begin rule "cards"
-    And I declare parents "root"
-    When I expand over elements "article.product_pod"
-    Then I extract fields
-    ...    field=detail_url    extractor=link    locator=h3 a
-    And I emit to artifact "${ARTIFACT_URLS}"
+    I define rule "cards"
+        And I declare parents "root"
+        When I expand over elements "article.product_pod"
+        Then I extract fields
+        ...    field=detail_url    extractor=link    locator=h3 a
+        And I emit to artifact "${ARTIFACT_URLS}"
 
 Detail Resource
     # -- Resource 2: individual book detail pages ------------------------------------------
@@ -78,19 +78,19 @@ Detail Resource
     ...    timeout_ms=30000
     ...    retries=2
     ...    page_load_delay_ms=1500
-    And I begin rule "page"
-    And selector ".product_main" exists
-    Then I extract fields
-    ...    field=title          extractor=text    locator=.product_main h1
-    ...    field=price          extractor=text    locator=.product_main p.price_color
-    ...    field=description    extractor=text    locator=#product_description ~ p
+    I define rule "page"
+        And selector ".product_main" exists
+        Then I extract fields
+        ...    field=title          extractor=text    locator=.product_main h1
+        ...    field=price          extractor=text    locator=.product_main p.price_color
+        ...    field=description    extractor=text    locator=#product_description ~ p
 
-    Then I extract table "product_info" from "table.table-striped"
-    ...    field=upc            header=UPC
-    ...    field=availability   header=Availability
-    ...    field=num_reviews    header=Number of reviews
+        Then I extract table "product_info" from "table.table-striped"
+        ...    field=upc            header=UPC
+        ...    field=availability   header=Availability
+        ...    field=num_reviews    header=Number of reviews
 
-    And I emit to artifact "${ARTIFACT_BOOKS}"
+        And I emit to artifact "${ARTIFACT_BOOKS}"
 
 Quality Gates
     And I set quality gate min records to 16

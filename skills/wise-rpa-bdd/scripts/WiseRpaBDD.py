@@ -74,6 +74,9 @@ class CombinationAxis:
     action: str  # type, select, click
     control: str  # CSS selector
     values: list[str] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)  # patterns to drop from auto-discovered values
+    skip: int = 0  # skip first N values (e.g. placeholder "Select...")
+    emit: str = ""  # artifact name to emit discovered values to
 
 
 @dataclass
@@ -92,8 +95,17 @@ class Expansion:
 class RuleNode:
     name: str
     parents: list[str] = field(default_factory=list)
-    state_checks: list[StateCheck] = field(default_factory=list)
-    actions: list[Action] = field(default_factory=list)
+    # Type 1 — Guards (preconditions): "Is the world in the expected state?"
+    # Defensive checks run before any actions.  In a perfect MDP these are
+    # redundant; they exist to catch unexpected state (wrong page, anti-bot).
+    guards: list[StateCheck] = field(default_factory=list)
+    # Type 2 — Steps: ordered list of Actions and inline StateCheck
+    # observations.  Observations between actions are synchronization gates
+    # ("has the side effect landed?"), required for correctness.
+    steps: list[Action | StateCheck] = field(default_factory=list)
+    # Policy when a guard fails: "skip" (default — skip rule + children)
+    # or "abort" (stop the entire walk — hard precondition).
+    guard_policy: str = "skip"
     expansion: Expansion | None = None
     field_specs: list[FieldSpec] = field(default_factory=list)
     table_spec: TableSpec | None = None
@@ -104,6 +116,12 @@ class RuleNode:
     children: list[RuleNode] = field(default_factory=list)
     retry_max: int = 0
     retry_delay_ms: int = 1000
+    # Per-rule interrupt scoping: override global interrupt selectors
+    interrupt_override: list[str] | None = None  # None = inherit global
+    interrupt_paused: bool = False                # True = skip dismiss for this rule
+    # Declarative rule lifecycle options
+    options: dict[str, str] = field(default_factory=dict)
+    # Recognized keys: on_enter (screenshot), on_fail (screenshot), timeout_ms (int)
 
 
 @dataclass
@@ -280,10 +298,10 @@ class _StealthAdapter:
         load = "load"
 
     def __init__(self) -> None:
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._pw: Any = None
+        self._browser: Any = None
+        self._context: Any = None
+        self._page: Any = None
         self._timeout = 30_000
 
     # -- lifecycle ----------------------------------------------------------
@@ -292,7 +310,7 @@ class _StealthAdapter:
         try:
             from patchright.sync_api import sync_playwright
         except ImportError:
-            from playwright.sync_api import sync_playwright
+            from playwright.sync_api import sync_playwright  # type: ignore[assignment]
         self._pw = sync_playwright().start()
         logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")
         self._browser = self._pw.chromium.launch(
@@ -350,10 +368,17 @@ class _StealthAdapter:
         self._page.wait_for_load_state(s, timeout=self._timeout)
 
     def wait_for_elements_state(self, selector: str, state: str = "attached",
-                                timeout: str = "10s", **_kw: Any) -> None:
-        ms = int(timeout.replace("s", "").replace("ms", "").strip())
-        if "s" in timeout and "ms" not in timeout:
-            ms *= 1000
+                                timeout: Any = "10s", **_kw: Any) -> None:
+        from datetime import timedelta
+        if isinstance(timeout, timedelta):
+            ms = int(timeout.total_seconds() * 1000)
+        elif isinstance(timeout, (int, float)):
+            ms = int(timeout)
+        else:
+            timeout_str = str(timeout)
+            ms = int(timeout_str.replace("s", "").replace("ms", "").strip())
+            if "s" in timeout_str and "ms" not in timeout_str:
+                ms *= 1000
         self._page.wait_for_selector(selector, state="attached", timeout=ms)
 
     # -- element queries ----------------------------------------------------
@@ -416,6 +441,165 @@ class _StealthAdapter:
         return self._page.evaluate(script)
 
 
+class _StealthBrowserBridge:
+    """Dynamic RF library that delegates Browser-compatible keywords to the
+    stealth adapter.  Registered at runtime so that ``call_keyword`` blocks
+    containing raw Browser calls (Click, Fill Text, …) resolve against the
+    stealth adapter's live page instead of the RF-Browser library (which has
+    no open page in stealth mode).
+
+    Only the most commonly used Browser keywords are bridged.  Add more as
+    needed.
+    """
+
+    ROBOT_LIBRARY_SCOPE = "GLOBAL"
+
+    def __init__(self, adapter: _StealthAdapter) -> None:
+        self._a = adapter
+
+    # -- Navigation --
+    def go_to(self, url: str, *_a: Any, **_kw: Any) -> None:
+        self._a.go_to(url)
+
+    def get_url(self, *_a: Any, **_kw: Any) -> str:
+        return self._a.get_url()
+
+    # -- Interaction --
+    def click(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.click(selector)
+
+    def fill_text(self, selector: str, text: str, *_a: Any, **_kw: Any) -> None:
+        self._a.fill_text(selector, text)
+
+    def type_text(self, selector: str, text: str, *_a: Any, **_kw: Any) -> None:
+        self._a.fill_text(selector, text)
+
+    def hover(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.hover(selector)
+
+    def focus(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.focus(selector)
+
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None:
+        self._a.press_keys(selector, *keys)
+
+    def check_checkbox(self, selector: str, *_a: Any, **_kw: Any) -> None:
+        self._a.click(selector)
+
+    def select_options_by(self, selector: str, attr: str, *values: str,
+                          **_kw: Any) -> None:
+        self._a.select_options_by(selector, attr, values[0] if values else "")
+
+    # -- Queries --
+    def get_text(self, selector: str, *_a: Any, **_kw: Any) -> str:
+        return self._a.get_text(selector)
+
+    def get_attribute(self, selector: str, attr: str, *_a: Any,
+                      **_kw: Any) -> str | None:
+        return self._a.get_attribute(selector, attr)
+
+    def get_element_count(self, selector: str, *_a: Any, **_kw: Any) -> int:
+        return self._a.get_element_count(selector)
+
+    # -- Wait --
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: str = "10s", **_kw: Any) -> None:
+        self._a.wait_for_elements_state(selector, state, timeout)
+
+    # -- Screenshot --
+    def take_screenshot(self, *_a: Any, filename: str = "screenshot.png",
+                        **_kw: Any) -> None:
+        self._a.take_screenshot(filename=filename)
+
+    # -- JS --
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            **_kw: Any) -> Any:
+        return self._a.evaluate_javascript(selector, *function, **_kw)
+
+    def get_keyword_names(self) -> list[str]:
+        """Dynamic library interface — return all bridged keywords."""
+        return [
+            "Go To", "Get Url",
+            "Click", "Fill Text", "Type Text", "Hover", "Focus",
+            "Press Keys", "Check Checkbox", "Select Options By",
+            "Get Text", "Get Attribute", "Get Element Count",
+            "Wait For Elements State",
+            "Take Screenshot", "Evaluate JavaScript",
+        ]
+
+    def run_keyword(self, name: str, args: list, kwargs: dict | None = None) -> Any:
+        """Dynamic library interface — dispatch keyword by name.
+
+        RF-Browser registers keywords with snake_case names internally
+        (e.g. ``fill_text``), but the display names are Title Case
+        (``Fill Text``).  The DynamicKeyword handler passes the original
+        snake_case ``_orig_name`` to ``run_keyword``, so we must handle both
+        forms.
+        """
+        method_map = {
+            # Title Case (display names)
+            "Go To": self.go_to,
+            "Get Url": self.get_url,
+            "Click": self.click,
+            "Fill Text": self.fill_text,
+            "Type Text": self.type_text,
+            "Hover": self.hover,
+            "Focus": self.focus,
+            "Press Keys": self.press_keys,
+            "Check Checkbox": self.check_checkbox,
+            "Select Options By": self.select_options_by,
+            "Get Text": self.get_text,
+            "Get Attribute": self.get_attribute,
+            "Get Element Count": self.get_element_count,
+            "Wait For Elements State": self.wait_for_elements_state,
+            "Take Screenshot": self.take_screenshot,
+            "Evaluate JavaScript": self.evaluate_javascript,
+            # snake_case (RF-Browser internal _orig_name)
+            "go_to": self.go_to,
+            "get_url": self.get_url,
+            "click": self.click,
+            "fill_text": self.fill_text,
+            "type_text": self.type_text,
+            "hover": self.hover,
+            "focus": self.focus,
+            "press_keys": self.press_keys,
+            "check_checkbox": self.check_checkbox,
+            "select_options_by": self.select_options_by,
+            "get_text": self.get_text,
+            "get_attribute": self.get_attribute,
+            "get_element_count": self.get_element_count,
+            "wait_for_elements_state": self.wait_for_elements_state,
+            "take_screenshot": self.take_screenshot,
+            "evaluate_javascript": self.evaluate_javascript,
+        }
+        method: Any = method_map.get(name)
+        if method is not None:
+            return method(*args, **(kwargs or {}))
+        raise RuntimeError(f"StealthBrowserBridge: keyword '{name}' not bridged")
+
+    def get_keyword_arguments(self, name: str) -> list[str]:
+        """Return argument spec for each keyword (required for RF dynamic API)."""
+        specs: dict[str, list[str]] = {
+            "Go To": ["url", "*args", "**kwargs"],
+            "Get Url": [],
+            "Click": ["selector", "*args", "**kwargs"],
+            "Fill Text": ["selector", "text", "*args", "**kwargs"],
+            "Type Text": ["selector", "text", "*args", "**kwargs"],
+            "Hover": ["selector", "*args", "**kwargs"],
+            "Focus": ["selector", "*args", "**kwargs"],
+            "Press Keys": ["selector", "*keys"],
+            "Check Checkbox": ["selector", "*args", "**kwargs"],
+            "Select Options By": ["selector", "attr", "*values", "**kwargs"],
+            "Get Text": ["selector", "*args", "**kwargs"],
+            "Get Attribute": ["selector", "attr", "*args", "**kwargs"],
+            "Get Element Count": ["selector", "*args", "**kwargs"],
+            "Wait For Elements State": ["selector", "state=attached", "timeout=10s", "**kwargs"],
+            "Take Screenshot": ["*args", "filename=screenshot.png", "**kwargs"],
+            "Evaluate JavaScript": ["selector", "*function", "**kwargs"],
+        }
+        return specs.get(name, ["*args", "**kwargs"])
+
+
 # ---------------------------------------------------------------------------
 # Execution engine (uses robotframework-browser)
 # ---------------------------------------------------------------------------
@@ -434,6 +618,18 @@ class ExecutionEngine:
         self.headed = headed
         self.stealth = stealth
         self._adapter: Any = None
+        self._instrument = os.environ.get(
+            "WISE_RPA_INSTRUMENT", "1"
+        ).lower() not in ("0", "false", "no")
+        self._max_run_time = int(os.environ.get("WISE_RPA_TIMEOUT", "120"))
+        self._run_start: float = 0
+        self._stealth_bridge: _StealthBrowserBridge | None = None
+        # Slow-motion mode: pause between actions for debugging/demos
+        _slow_raw = os.environ.get("WISE_RPA_SLOW", "")
+        self._slow_ms = int(_slow_raw) if _slow_raw.isdigit() else 0
+        self._slow_screenshot = os.environ.get(
+            "WISE_RPA_SLOW_SCREENSHOT", ""
+        ).lower() in ("1", "true", "yes")
 
     def _bl(self) -> Any:
         """Lazy-init the browser backend.
@@ -445,7 +641,9 @@ class ExecutionEngine:
             if self.stealth:
                 self._adapter = _StealthAdapter()
                 self._PageLoadStates = self._adapter.load_states
+                self._stealth_bridge = _StealthBrowserBridge(self._adapter)
             else:
+                pass  # _stealth_bridge already None from __init__
                 self._adapter = _get_rf_browser()
                 from Browser.utils.data_types import PageLoadStates
                 self._PageLoadStates = PageLoadStates
@@ -454,6 +652,8 @@ class ExecutionEngine:
     def run(self) -> None:
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
+
+        self._run_start = time.time()
 
         bl = self._bl()
         browser_opts: dict[str, Any] = {"headless": not self.headed}
@@ -550,10 +750,7 @@ class ExecutionEngine:
                     logger.warn(f"  Navigation failed: {e}")
                     continue
 
-                self._dismiss_interrupts(bl)
-
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
+                self._wait_page_ready(bl, page_delay)
 
                 root_rules = self._build_rule_tree(res)
                 executed: set[str] = set()
@@ -745,24 +942,69 @@ class ExecutionEngine:
                 return []
             executed.add(rule.name)
 
+        # Global timeout guard
+        if self._run_start and (time.time() - self._run_start) > self._max_run_time:
+            logger.warn(f"  Global timeout ({self._max_run_time}s) exceeded — aborting")
+            return []
+
+        t_rule = time.time() if self._instrument else 0
+
         ctx = dict(context or {})
         records: list[dict] = []
+        bl = self._bl()
 
-        # State check with retry
-        state_ok = self._check_state(rule, current_url)
-        if not state_ok and rule.retry_max > 0:
+        # on_enter hook
+        if rule.options.get("on_enter") == "screenshot":
+            try:
+                bl.take_screenshot(filename=f"on_enter_{rule.name}.png")
+            except Exception:
+                pass
+
+        # Guards (Type 1 preconditions) with retry
+        t0 = time.time() if self._instrument else 0
+        guards_ok = self._check_guards(rule, current_url)
+        if not guards_ok and rule.retry_max > 0:
             for attempt in range(1, rule.retry_max + 1):
                 logger.info(f"  Retry {attempt}/{rule.retry_max} for rule '{rule.name}'")
                 time.sleep(rule.retry_delay_ms / 1000.0)
-                self._execute_actions(rule, res, context=ctx)
-                state_ok = self._check_state(rule, current_url)
-                if state_ok:
+                self._execute_steps(rule, res, context=ctx)
+                guards_ok = self._check_guards(rule, current_url)
+                if guards_ok:
                     break
-        if not state_ok:
-            logger.warn(f"  State check FAILED for rule '{rule.name}' — skipping")
+        if self._instrument:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {rule.name}: state_check={dt:.2f}s ok={guards_ok}")
+        if not guards_ok:
+            if rule.options.get("on_fail") == "screenshot":
+                try:
+                    bl.take_screenshot(filename=f"on_fail_{rule.name}_guard.png")
+                except Exception:
+                    pass
+            if rule.guard_policy == "abort":
+                logger.warn(f"  Guard FAILED for rule '{rule.name}' — ABORTING walk")
+                raise RuntimeError(f"Guard failed (abort policy) for rule '{rule.name}'")
+            logger.warn(f"  Guard FAILED for rule '{rule.name}' — skipping")
             return records
 
-        self._execute_actions(rule, res, context=ctx)
+        # Steps (actions interleaved with Type 2 observation gates)
+        # Apply per-rule timeout if declared
+        rule_timeout_ms = rule.options.get("timeout_ms")
+        rule_deadline = (time.time() + int(rule_timeout_ms) / 1000.0) if rule_timeout_ms else None
+
+        t0 = time.time() if self._instrument else 0
+        n_actions = sum(1 for s in rule.steps if isinstance(s, Action))
+        try:
+            self._execute_steps(rule, res, context=ctx, deadline=rule_deadline)
+        except TimeoutError:
+            logger.warn(f"  Rule '{rule.name}' timed out after {rule_timeout_ms}ms")
+            if rule.options.get("on_fail") == "screenshot":
+                try:
+                    bl.take_screenshot(filename=f"on_fail_{rule.name}_timeout.png")
+                except Exception:
+                    pass
+        if self._instrument:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {rule.name}: actions={dt:.2f}s ({n_actions} actions)")
 
         # Refresh current_url after actions (click may have navigated)
         try:
@@ -770,6 +1012,7 @@ class ExecutionEngine:
         except Exception:
             pass
 
+        t0 = time.time() if self._instrument else 0
         if rule.expansion:
             records = self._handle_expansion(rule, res, current_url,
                                              executed=executed, context=ctx)
@@ -793,78 +1036,171 @@ class ExecutionEngine:
                 if child_records:
                     record["_children"] = child_records
                 records.append(record)
+        if self._instrument:
+            dt = time.time() - t0
+            phase = "expansion" if rule.expansion else "extract+children"
+            logger.warn(f"  [INSTRUMENT] {rule.name}: {phase}={dt:.2f}s records={len(records)}")
 
         for target in rule.emit_targets:
             self._emit_records(target, rule, records, current_url)
 
+        if self._instrument:
+            dt_total = time.time() - t_rule
+            if dt_total > 0.5:
+                logger.warn(f"  [INSTRUMENT] {rule.name}: TOTAL={dt_total:.2f}s")
+
         return records
 
-    def _check_state(self, rule: RuleNode, current_url: str) -> bool:
+    def _check_guards(self, rule: RuleNode, current_url: str) -> bool:
+        """Check Type 1 guards (preconditions). Returns False if any fail."""
+        if not rule.guards:
+            return True
         bl = self._bl()
-        # Use actual browser URL for state checks
+        self._dismiss_interrupts(bl)
         try:
             actual_url = bl.get_url()
             if actual_url:
                 current_url = actual_url
         except Exception:
             pass
-        for check in rule.state_checks:
-            if check.type == "url_matches":
-                if check.pattern not in current_url:
-                    return False
-            elif check.type == "url_contains":
-                if check.pattern not in current_url:
-                    return False
-            elif check.type == "url_not_contains":
-                if check.pattern in current_url:
-                    return False
-            elif check.type == "selector_exists":
-                try:
-                    count = bl.get_element_count(check.pattern)
-                    if count == 0:
-                        return False
-                except Exception:
-                    return False
-            elif check.type == "table_headers":
-                pass
+        for check in rule.guards:
+            if not self._eval_state_check(check, current_url, bl):
+                return False
         return True
 
-    def _execute_actions(self, rule: RuleNode, res: ResourceContext,
-                         context: dict[str, Any] | None = None) -> None:
-        for action in rule.actions:
+    def _eval_state_check(self, check: StateCheck, current_url: str,
+                          bl: Any) -> bool:
+        """Evaluate a single state check. Used by guards and inline observations."""
+        if check.type == "url_matches":
+            return check.pattern in current_url
+        elif check.type == "url_contains":
+            return check.pattern in current_url
+        elif check.type == "url_not_contains":
+            return check.pattern not in current_url
+        elif check.type == "selector_exists":
             try:
-                self._do_action(action, res, context=context)
+                resolved = self._resolve_fallback_selector(check.pattern, None)
+                count = bl.get_element_count(resolved)
+                if count == 0:
+                    self._dismiss_interrupts(bl)
+                    bl.wait_for_elements_state(resolved, "attached", "10s")
+                    count = bl.get_element_count(resolved)
+                return count > 0
+            except Exception:
+                return False
+        elif check.type == "table_headers":
+            return True  # placeholder
+        return True
+
+    def _get_interrupt_selectors(self, rule: RuleNode) -> list[str]:
+        """Return the effective interrupt selectors for a rule.
+
+        Per-rule scoping: rule.interrupt_paused suppresses all dismiss.
+        rule.interrupt_override replaces the global list.
+        Otherwise inherit from ctx.interrupt_selectors.
+        """
+        if rule.interrupt_paused:
+            return []
+        if rule.interrupt_override is not None:
+            return rule.interrupt_override
+        return self.ctx.interrupt_selectors
+
+    def _execute_steps(self, rule: RuleNode, res: ResourceContext,
+                       context: dict[str, Any] | None = None,
+                       deadline: float | None = None) -> None:
+        """Execute steps: actions interleaved with Type 2 observation gates."""
+        if not rule.steps:
+            return
+        bl = self._bl()
+        interrupt_sels = self._get_interrupt_selectors(rule)
+        for step in rule.steps:
+            if deadline and time.time() > deadline:
+                raise TimeoutError(f"Rule '{rule.name}' exceeded timeout")
+            # Inline observation gate (Type 2 StateCheck between actions)
+            if isinstance(step, StateCheck):
+                try:
+                    current_url = bl.get_url()
+                except Exception:
+                    current_url = ""
+                ok = self._eval_state_check(step, current_url, bl)
+                if not ok:
+                    logger.warn(f"  Observation gate failed: {step.type}={step.pattern}")
+                continue
+
+            # Action
+            action = step
+            # Dismiss interrupts before each action — popups can appear
+            # at any moment and block clicks/interactions
+            if interrupt_sels:
+                self._dismiss_interrupts_with(bl, interrupt_sels)
+            try:
+                self._do_action_instrumented(action, res, context=context)
             except Exception as e:
+                # Recovery: dismiss interrupts and retry once — a popup
+                # may have appeared between the dismiss and the action
+                if interrupt_sels:
+                    self._dismiss_interrupts_with(bl, interrupt_sels)
+                    try:
+                        self._do_action_instrumented(action, res, context=context)
+                        continue
+                    except Exception:
+                        pass
                 logger.warn(f"  Action {action.type} failed: {e}")
+
+    def _do_action_instrumented(self, action: Action, res: ResourceContext,
+                               context: dict[str, Any] | None = None) -> None:
+        """AOP wrapper: instruments _do_action with timing + error context.
+
+        Also handles slow-motion mode (WISE_RPA_SLOW=N) for debugging/demos.
+        """
+        label = f"{action.type}({(action.locator or action.value or '')[:40]})"
+        t0 = time.time()
+        try:
+            self._do_action(action, res, context=context)
+        except Exception:
+            dt = time.time() - t0
+            logger.warn(f"  [INSTRUMENT] {label} FAILED {dt:.2f}s")
+            raise
+        dt = time.time() - t0
+        if dt > 0.5:
+            logger.warn(f"  [INSTRUMENT] {label} = {dt:.2f}s")
+        # Slow-motion: pause after each action for debugging/demos
+        if self._slow_ms:
+            time.sleep(self._slow_ms / 1000.0)
+            if self._slow_screenshot:
+                try:
+                    bl = self._bl()
+                    rule_name = getattr(res, 'name', 'unknown')
+                    fname = f"slow_{rule_name}_{label}.png"
+                    bl.take_screenshot(filename=fname)
+                except Exception:
+                    pass
 
     def _do_action(self, action: Action, res: ResourceContext,
                    context: dict[str, Any] | None = None) -> None:
         bl = self._bl()
-        delay_ms = int(action.options.get("delay_ms", 0))
 
         if action.type == "click":
             bl.click(action.locator)
-            if delay_ms:
-                time.sleep(delay_ms / 1000.0)
         elif action.type == "type":
             bl.fill_text(action.locator, action.value or "")
-            if delay_ms:
-                time.sleep(delay_ms / 1000.0)
         elif action.type == "select":
             bl.select_options_by(action.locator, "value", action.value or "")
         elif action.type == "scroll":
             bl.evaluate_javascript(None, "window.scrollBy(0, window.innerHeight)")
-            time.sleep(0.5)
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.networkidle, "5s")
+            except Exception:
+                pass
         elif action.type == "wait":
             bl.wait_for_load_state(self._PageLoadStates.networkidle)
         elif action.type == "wait_ms":
-            ms = int(action.value or 0)
-            time.sleep(ms / 1000.0)
+            # Legacy — prefer await= or split rules instead
+            bl.wait_for_load_state(self._PageLoadStates.networkidle,
+                                   f"{int(action.value or 5000)}ms")
         elif action.type == "open":
             bl.go_to(action.value or "")
-            page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-            if page_delay:
-                time.sleep(page_delay / 1000.0)
+            self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
         elif action.type == "open_bound":
             # Resolve field value from context or artifact store
             field_name = action.value or ""
@@ -882,9 +1218,7 @@ class ExecutionEngine:
                         url = str(records[-1].get("data", {}).get(fld, ""))
             if url:
                 bl.go_to(url)
-                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
+                self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
         elif action.type == "hover":
             bl.hover(action.locator)
         elif action.type == "focus":
@@ -897,6 +1231,65 @@ class ExecutionEngine:
             bl.take_screenshot(filename=action.value or "screenshot.png")
         elif action.type == "upload":
             bl.upload_file(action.locator, action.value or "")
+        elif action.type == "click_text":
+            # Click by visible text. Tries Playwright's text selector first
+            # (real mouse event), falls back to JS with MouseEvent dispatch.
+            text = action.value or ""
+            clicked = False
+            # Try Playwright native text selector (exact then substring)
+            for sel in [f'text="{text}"', f'text={text}']:
+                try:
+                    count = bl.get_element_count(sel)
+                    if count > 0:
+                        bl.click(sel)
+                        clicked = True
+                        break
+                except Exception:
+                    pass
+            if not clicked:
+                # JS fallback with proper MouseEvent
+                script = (
+                    f"() => {{ const t = {json.dumps(text)}; "
+                    f"for (const el of document.querySelectorAll("
+                    f"'button, a, [role=button], div[tabindex]')) {{ "
+                    f"if (el.offsetParent !== null && el.textContent.includes(t)) "
+                    f"{{ el.dispatchEvent(new MouseEvent('click', {{bubbles:true}})); "
+                    f"return true; }} }} return false; }}"
+                )
+                result = bl.evaluate_javascript(None, script)
+                if not result:
+                    logger.warn(f"  click_text: no element found for '{text}'")
+        elif action.type == "add_url_params":
+            # Add query params to current URL and navigate
+            params = action.value or ""
+            script = (
+                f"() => {{ const u = new URL(window.location.href); "
+                f"new URLSearchParams('{params}').forEach((v, k) => "
+                f"u.searchParams.set(k, v)); "
+                f"window.location.href = u.toString(); }}"
+            )
+            try:
+                bl.evaluate_javascript(None, script)
+            except Exception:
+                pass  # navigation may destroy context
+            self._wait_page_ready(bl)
+        elif action.type == "set_stepper":
+            # Click a stepper button N times via JS to avoid Playwright's
+            # stability checks — stepper buttons re-render after each click,
+            # causing "element not stable" / "detached from DOM" errors.
+            count = int(action.value or 0)
+            locator = action.locator
+            bl.wait_for_elements_state(locator, "attached", "5s")
+            for _ in range(count):
+                click_script = (
+                    f"(() => {{ const el = document.querySelector({json.dumps(locator)}); "
+                    f"if (el) {{ el.click(); return true; }} return false; }})()"
+                )
+                bl.evaluate_javascript(None, click_script)
+                # Wait for re-render before next click
+                bl.wait_for_elements_state(locator, "attached", "2s")
+        elif action.type == "select_date":
+            self._do_select_date(bl, action)
         elif action.type == "browser_step":
             # Passthrough: call any method on the browser library
             method_name = action.value or ""
@@ -906,18 +1299,125 @@ class ExecutionEngine:
                 method(*action.args)
             else:
                 logger.warn(f"  Browser step: method '{method_name}' not found")
+        elif action.type == "evaluate_js":
+            # Run JavaScript on the live page via the adapter
+            script = action.value or ""
+            logger.info(f"  Evaluate JS: {script[:80]}{'...' if len(script) > 80 else ''}")
+            url_before = bl.get_url()
+            try:
+                bl.evaluate_javascript(None, script)
+            except Exception as e:
+                err = str(e).lower()
+                if "navigation" in err or "context" in err or "destroyed" in err or "detached" in err:
+                    logger.info("  Evaluate JS triggered navigation")
+                else:
+                    raise
+            # Detect if JS triggered a page navigation
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded, "2s")
+            except Exception:
+                pass
+            try:
+                url_after = bl.get_url()
+            except Exception:
+                url_after = ""
+            navigated = url_after != url_before
+            if not navigated:
+                # Also heuristic-detect navigation intent from script content
+                nav_hints = ("location", "navigate", "href", "assign", "replace")
+                navigated = any(h in script.lower() for h in nav_hints)
+            if navigated:
+                logger.info("  Waiting for page load after navigation...")
+                self._wait_page_ready(bl)
         elif action.type == "call_keyword":
             # Invoke an arbitrary RF keyword by name (browser is live)
-            from robot.libraries.BuiltIn import BuiltIn
             kw_name = action.value or ""
             logger.info(f"  Call keyword: {kw_name}({', '.join(str(a) for a in action.args)})")
-            BuiltIn().run_keyword(kw_name, *action.args)
+            if self.stealth and self._stealth_bridge:
+                # In stealth mode, run the keyword through the bridge which
+                # intercepts Browser library calls and routes them to the
+                # stealth adapter's live page.
+                self._run_keyword_with_bridge(kw_name, action.args)
+            else:
+                from robot.libraries.BuiltIn import BuiltIn
+                BuiltIn().run_keyword(kw_name, *action.args)
+
+        # ── Inline observation gate (await=<selector>) ───────────────
+        # After any action, if await= is declared, wait for that selector
+        # before the engine advances to the next action.  MDP: s,a→o
+        # where 'await' is the expected observation 'o'.
+        await_sel = action.options.get("await")
+        if await_sel:
+            resolved = self._resolve_fallback_selector(await_sel, None)
+            bl.wait_for_elements_state(resolved, "attached", "10s")
+
+    def _run_keyword_with_bridge(self, kw_name: str, args: tuple) -> None:
+        """Run an RF keyword in stealth mode.
+
+        Temporarily swaps the Browser library's ``_instance`` with the stealth
+        bridge so that raw Browser calls (Click, Fill Text, etc.) inside the
+        keyword resolve against the stealth adapter's live page.
+
+        How it works (RF 7.x):
+        - RF stores libraries in ``namespace._kw_store.libraries`` (OrderedDict
+          keyed by name).  Each library is a ``TestLibrary`` whose ``.instance``
+          property returns ``._instance``.
+        - Dynamic keywords call ``self.owner.instance`` every time their
+          ``.method`` property is accessed (not cached).  Swapping
+          ``lib._instance`` therefore redirects all keyword dispatch for the
+          duration of the call.
+
+        Browser control hierarchy (3-layer stack):
+          Layer 3: RF Keywords (Click, Fill Text, …) — user-facing
+          Layer 2: Adapter interface (click(), fill_text(), …)
+          Layer 1a: RFBrowserAdapter → RF-Browser lib → Playwright (via gRPC)
+          Layer 1b: StealthAdapter   → Patchright (patched Playwright, in-proc)
+        In stealth mode, Layer 1a has no page.  The bridge routes Layer 3
+        keywords to Layer 1b so ``call_keyword`` blocks work correctly.
+        """
+        from robot.libraries.BuiltIn import BuiltIn
+        bi = BuiltIn()
+        bridge = self._stealth_bridge
+        lib_entry = None
+
+        # Locate the Browser TestLibrary in RF's keyword store.
+        # RF 7.x: namespace._kw_store.libraries is an OrderedDict.
+        try:
+            ns = bi._namespace
+            libs = ns._kw_store.libraries
+            # Try direct key lookup first (most reliable)
+            for key, lib in libs.items():
+                if getattr(lib, 'name', '') == 'Browser':
+                    lib_entry = lib
+                    break
+        except Exception as e:
+            logger.warn(f"  Could not locate Browser library for stealth bridge: {e}")
+
+        if lib_entry is None:
+            # Fallback: run without bridge — keyword will use whatever is
+            # registered, which may fail in stealth mode.
+            logger.warn("  Browser library not found in keyword store — "
+                        "running call_keyword without stealth bridge")
+            bi.run_keyword(kw_name, *args)
+            return
+
+        # Swap and run
+        original_instance = lib_entry._instance
+        lib_entry._instance = bridge
+        logger.info(f"  Stealth bridge: swapped Browser instance for '{kw_name}'")
+
+        try:
+            bi.run_keyword(kw_name, *args)
+        finally:
+            lib_entry._instance = original_instance
+            logger.info(f"  Stealth bridge: restored Browser instance after '{kw_name}'")
 
     def _handle_expansion(self, rule: RuleNode, res: ResourceContext,
                           current_url: str, *,
                           executed: set[str] | None = None,
                           context: dict[str, Any] | None = None) -> list[dict]:
         exp = rule.expansion
+        assert exp is not None  # caller guarantees
         if exp.over == "elements":
             return self._expand_elements(rule, res, current_url,
                                          executed=executed, context=context)
@@ -938,16 +1438,21 @@ class ExecutionEngine:
                          context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
-        selector = exp.scope
+        assert exp is not None
+        selector = exp.scope or ""
         limit = exp.limit
         use_bfs = (exp.order == "bfs")
-        records = []
+        records: list[dict] = []
+
+        # exclude_if: skip elements where a child selector matches (e.g. sponsored items)
+        exclude_if = exp.options.get("exclude_if")
 
         try:
-            # Wait for at least one element — get_element_count is a query,
-            # not an action, so Playwright doesn't auto-wait for it.
+            # Wait for at least one element to appear (Playwright native wait)
             try:
-                bl.wait_for_elements_state(selector, "attached", timeout="10s")
+                timeout_ms = int(res.globals_.get("timeout_ms", "30000"))
+                bl.wait_for_elements_state(selector, "attached",
+                                           timeout=f"{timeout_ms}ms")
             except Exception:
                 pass  # May not appear — count will be 0
             count = bl.get_element_count(selector)
@@ -959,11 +1464,40 @@ class ExecutionEngine:
         if limit and count > limit:
             count = limit
 
+        def _should_exclude(elem_sel: str) -> bool:
+            """Check if element should be excluded based on exclude_if selector."""
+            if not exclude_if:
+                return False
+            try:
+                child_sel = f"{elem_sel} >> {exclude_if}"
+                return bl.get_element_count(child_sel) > 0
+            except Exception:
+                return False
+
+        # Fast path: batch extraction in a single JS call when possible
+        # (leaf rule with field specs, no children, no exclude_if, no table)
+        can_batch = (
+            rule.field_specs
+            and not rule.children
+            and not exclude_if
+            and not rule.table_spec
+            and not rule.ai_extraction
+        )
+        if can_batch:
+            records = self._batch_extract_from_elements(
+                rule, selector, count, current_url
+            )
+            logger.info(f"    Batch extracted {len(records)} records")
+            return records
+
         if use_bfs:
             # BFS: extract ALL elements first, then walk children per element
             extracted: list[tuple[str, dict | None, dict]] = []
             for i in range(count):
                 elem_selector = f"{selector} >> nth={i}"
+                if _should_exclude(elem_selector):
+                    logger.info(f"  Excluded element {i} by exclude_if='{exclude_if}'")
+                    continue
                 record = self._extract_from_element(rule, elem_selector, current_url)
                 elem_ctx = dict(context or {})
                 if record and record.get("data"):
@@ -986,23 +1520,26 @@ class ExecutionEngine:
             # DFS: process each element fully before next
             for i in range(count):
                 elem_selector = f"{selector} >> nth={i}"
+                if _should_exclude(elem_selector):
+                    logger.info(f"  Excluded element {i} by exclude_if='{exclude_if}'")
+                    continue
                 record = self._extract_from_element(rule, elem_selector, current_url)
 
                 elem_ctx = dict(context or {})
                 if record and record.get("data"):
                     elem_ctx.update(record["data"])
 
-                child_records: dict[str, list] = {}
+                dfs_children: dict[str, list] = {}
                 for child in rule.children:
                     child_data = self._walk_rule(child, res, elem_selector,
                                                  current_url, executed=executed,
                                                  context=elem_ctx)
                     if child_data:
-                        child_records[child.name] = child_data
+                        dfs_children[child.name] = child_data
 
                 if record is not None:
-                    if child_records:
-                        record["_children"] = child_records
+                    if dfs_children:
+                        record["_children"] = dfs_children
                     records.append(record)
 
         return records
@@ -1013,6 +1550,7 @@ class ExecutionEngine:
                            context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         next_selector = exp.locator
         limit = exp.limit
         records = []
@@ -1034,12 +1572,51 @@ class ExecutionEngine:
                 if count == 0:
                     logger.info("    No next button found, stopping pagination")
                     break
+
+                # Grab a fingerprint of the current page content so we can
+                # detect when the AJAX swap completes after clicking Next.
+                # Use the child expansion scope as the staleness anchor.
+                stale_scope = None
+                for child in rule.children:
+                    if child.expansion and child.expansion.over == "elements":
+                        stale_scope = child.expansion.scope
+                        break
+                old_text = ""
+                if stale_scope:
+                    try:
+                        old_text = bl.get_text(f"{stale_scope} >> nth=0")
+                    except Exception:
+                        pass
+
                 bl.click(next_selector)
-                bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
-                page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                if page_delay:
-                    time.sleep(page_delay / 1000.0)
-                time.sleep(0.5)
+
+                # Wait for content swap: poll until the first element's text
+                # changes (staleness) or networkidle, whichever comes first.
+                page_delay = int(res.globals_.get("page_load_delay_ms", 500))
+                timeout_s = max(page_delay, 5000) / 1000.0
+                if stale_scope and old_text:
+                    deadline = time.time() + timeout_s
+                    while time.time() < deadline:
+                        try:
+                            new_text = bl.get_text(f"{stale_scope} >> nth=0")
+                        except Exception:
+                            new_text = ""
+                        if new_text and new_text != old_text:
+                            break
+                        try:
+                            bl.wait_for_load_state(
+                                self._PageLoadStates.networkidle, "500ms")
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        bl.wait_for_load_state(
+                            self._PageLoadStates.networkidle,
+                            f"{max(page_delay, 5000)}ms")
+                    except Exception:
+                        pass
+
+                self._dismiss_interrupts(bl)
             except Exception as e:
                 logger.info(f"    Pagination ended: {e}")
                 break
@@ -1052,6 +1629,7 @@ class ExecutionEngine:
                               context: dict[str, Any] | None = None) -> list[dict]:
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         control_selector = exp.locator
         start = exp.start
         limit = exp.limit
@@ -1085,11 +1663,7 @@ class ExecutionEngine:
                     text = bl.get_text(link_sel)
                     if f"p={next_num}" in href or text.strip() == str(next_num):
                         bl.click(link_sel)
-                        bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
-                        page_delay = int(res.globals_.get("page_load_delay_ms", 0))
-                        if page_delay:
-                            time.sleep(page_delay / 1000.0)
-                        time.sleep(0.5)
+                        self._wait_page_ready(bl, int(res.globals_.get("page_load_delay_ms", 0)))
                         clicked = True
                         break
                 if not clicked:
@@ -1108,6 +1682,7 @@ class ExecutionEngine:
         """Cartesian product of combination axes."""
         bl = self._bl()
         exp = rule.expansion
+        assert exp is not None
         axes = exp.axes
         if not axes:
             return []
@@ -1130,12 +1705,46 @@ class ExecutionEngine:
                             text = bl.get_text(f"{axis.control} >> nth={i}").strip()
                             if text:
                                 vals.append(text)
-                    axis_values.append(vals)
                 except Exception as e:
                     logger.warn(f"  Auto-discover failed for {axis.control}: {e}")
-                    axis_values.append([])
+                    vals = []
             else:
-                axis_values.append(axis.values)
+                vals = list(axis.values)
+
+            # Apply skip (drop first N values, e.g. placeholder "Select...")
+            if axis.skip > 0:
+                vals = vals[axis.skip:]
+
+            # Apply exclude (drop values matching any exclude pattern)
+            if axis.exclude:
+                vals = [v for v in vals if v not in axis.exclude]
+
+            # Auto-exclude empty strings for select dropdowns
+            if axis.action == "select":
+                vals = [v for v in vals if v]
+
+            logger.info(f"  Axis {axis.control}: {len(vals)} values → {vals}")
+            axis_values.append(vals)
+
+            # Emit discovered values to artifact if configured
+            if axis.emit and axis.emit in self.ctx.artifact_store:
+                for v in vals:
+                    self.ctx.artifact_store[axis.emit].append({
+                        "node": rule.name,
+                        "url": current_url,
+                        "data": {"control": axis.control, "value": v},
+                        "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    })
+            elif axis.emit:
+                # Auto-initialize if artifact was registered but store not yet created
+                self.ctx.artifact_store[axis.emit] = []
+                for v in vals:
+                    self.ctx.artifact_store[axis.emit].append({
+                        "node": rule.name,
+                        "url": current_url,
+                        "data": {"control": axis.control, "value": v},
+                        "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    })
 
         # Cartesian product
         import itertools
@@ -1163,7 +1772,10 @@ class ExecutionEngine:
                     logger.warn(f"  Combo action {axis.action}={value} failed: {e}")
 
             # Wait for AJAX to settle after combo actions (tab clicks etc.)
-            time.sleep(2.0)
+            try:
+                bl.wait_for_load_state(self._PageLoadStates.networkidle, "5s")
+            except Exception:
+                pass
 
             # Build per-combo context
             combo_ctx = dict(context or {})
@@ -1201,6 +1813,9 @@ class ExecutionEngine:
             if table_result:
                 data.update(table_result.get("data", {}))
 
+        # Run post_extract hooks (before AI — e.g. to_markdown converts HTML first)
+        data = self._invoke_hooks("post_extract", data)
+
         if rule.ai_extraction:
             ai_result = self._run_ai_extraction(rule.ai_extraction, data)
             if ai_result:
@@ -1209,15 +1824,113 @@ class ExecutionEngine:
         if not data:
             return None
 
-        # Run post_extract hooks
-        data = self._invoke_hooks("post_extract", data)
-
         return {
             "node": rule.name,
             "url": current_url,
             "data": data,
             "extracted_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _batch_extract_from_elements(self, rule: RuleNode, scope_selector: str,
+                                    count: int, current_url: str) -> list[dict]:
+        """Extract all fields from all scope elements in ONE browser call.
+
+        Builds a JS script that iterates over scope elements and extracts
+        each field, returning the full data array. This replaces N×M
+        individual browser round-trips with a single evaluate call.
+        """
+        if not rule.field_specs:
+            return []
+
+        bl = self._bl()
+
+        # Build JS extraction logic for each field
+        field_extractors = []
+        for fs in rule.field_specs:
+            loc = fs.locator
+            if loc == ".":
+                loc_js = "el"
+            else:
+                # Handle fallback selectors — pick first that resolves
+                candidates = [c.strip() for c in loc.split(" | ")] if " | " in loc else [loc]
+                loc_parts = " || ".join(
+                    f"el.querySelector({json.dumps(c)})" for c in candidates
+                )
+                loc_js = f"({loc_parts})"
+
+            if fs.extractor == "text":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? t.textContent.trim() : ''; }})()"
+            elif fs.extractor == "attr":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? (t.getAttribute({json.dumps(fs.attr or '')}) || '') : ''; }})()"
+            elif fs.extractor == "link":
+                extract_js = (
+                    f"(() => {{ const t = {loc_js}; if (!t) return ''; "
+                    f"const h = t.getAttribute('href') || ''; "
+                    f"if (!h || h.startsWith('http') || h.startsWith('javascript:')) return h; "
+                    f"try {{ return new URL(h, window.location.href).href; }} catch {{ return h; }} }})()"
+                )
+            elif fs.extractor == "html":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? t.innerHTML : ''; }})()"
+            elif fs.extractor == "image":
+                extract_js = f"(() => {{ const t = {loc_js}; return t ? (t.getAttribute('src') || '') : ''; }})()"
+            elif fs.extractor == "number":
+                extract_js = (
+                    f"(() => {{ const t = {loc_js}; if (!t) return ''; "
+                    f"const m = t.textContent.match(/[\\d.,]+/); return m ? m[0] : ''; }})()"
+                )
+            elif fs.extractor == "grouped":
+                if loc == ".":
+                    extract_js = "[el.textContent.trim()]"
+                else:
+                    first_candidate = candidates[0] if " | " in fs.locator else fs.locator
+                    extract_js = (
+                        f"Array.from(el.querySelectorAll({json.dumps(first_candidate)}))"
+                        f".map(e => e.textContent.trim()).filter(Boolean)"
+                    )
+            else:
+                extract_js = "''"
+
+            field_extractors.append((fs.name, extract_js))
+
+        # Build the batch script
+        field_lines = ",\n".join(
+            f"        {json.dumps(name)}: {expr}" for name, expr in field_extractors
+        )
+        script = (
+            f"() => {{\n"
+            f"  const els = document.querySelectorAll({json.dumps(scope_selector)});\n"
+            f"  const results = [];\n"
+            f"  const limit = {count};\n"
+            f"  for (let i = 0; i < Math.min(els.length, limit); i++) {{\n"
+            f"    const el = els[i];\n"
+            f"    results.push({{\n{field_lines}\n    }});\n"
+            f"  }}\n"
+            f"  return results;\n"
+            f"}}"
+        )
+
+        try:
+            raw_data = bl.evaluate_javascript(None, script)
+        except Exception as e:
+            logger.warn(f"  Batch extraction failed: {e}")
+            return []
+
+        if not raw_data or not isinstance(raw_data, list):
+            return []
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        records = []
+        for item in raw_data:
+            if not item:
+                continue
+            data = self._invoke_hooks("post_extract", item)
+            records.append({
+                "node": rule.name,
+                "url": current_url,
+                "data": data,
+                "extracted_at": now_iso,
+            })
+        return records
 
     def _extract_from_element(self, rule: RuleNode, elem_selector: str,
                               current_url: str) -> dict | None:
@@ -1580,9 +2293,102 @@ class ExecutionEngine:
         except Exception:
             pass
 
+    def _do_select_date(self, bl: Any, action: Action) -> None:
+        """Navigate a datepicker to the target month, then click the day.
+
+        Works with ARIA-compliant datepickers where:
+        - Month headings are visible as h2/h3 elements
+        - A forward button advances the calendar
+        - Day buttons have aria-labels containing the date info
+        """
+        from datetime import date as dt_date
+
+        date_str = action.value or ""
+        opts = action.options
+        forward_sel = opts.get("forward", 'button[aria-label*="Move forward"]')
+        heading_sel = opts.get("heading", "h2")
+        max_clicks = int(opts.get("max_clicks", "15"))
+
+        # Parse date
+        parts = date_str.split("-")
+        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+        d = dt_date(year, month, day)
+        month_year = d.strftime("%B %Y")  # e.g. "November 2026"
+        day_str = str(day)  # no leading zero
+
+        # Wait for the calendar to be mounted (forward button visible)
+        try:
+            bl.wait_for_elements_state(forward_sel, "attached", "5s")
+        except Exception:
+            logger.warn(f"  Calendar forward button not found: {forward_sel}")
+            return
+
+        # Navigate forward until target month heading is visible
+        check_script = (
+            f"(() => {{ "
+            f"const headings = []; "
+            f"for (const h of document.querySelectorAll({json.dumps(heading_sel)})) "
+            f"{{ const t = h.textContent.trim(); headings.push(t); "
+            f"if (t === {json.dumps(month_year)}) return {{found: true, headings}}; }} "
+            f"return {{found: false, headings}}; }})()"
+        )
+        fwd_script = (
+            f"(() => {{ const btn = document.querySelector({json.dumps(forward_sel)}); "
+            f"if (btn) {{ btn.click(); return true; }} return false; }})()"
+        )
+        for click_i in range(max_clicks):
+            result = bl.evaluate_javascript(None, check_script)
+            if result and result.get("found"):
+                break
+            if self._instrument and click_i == 0:
+                logger.warn(f"  [INSTRUMENT] select_date: looking for {month_year}, visible: {result}")
+            # Snapshot current headings before clicking forward
+            old_headings = result.get("headings", []) if result else []
+            clicked_fwd = bl.evaluate_javascript(None, fwd_script)
+            if not clicked_fwd:
+                break
+            # Poll until heading text changes (calendar re-rendered)
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                new_result = bl.evaluate_javascript(None, check_script)
+                new_headings = new_result.get("headings", []) if new_result else []
+                if new_headings != old_headings:
+                    break
+
+        # Click the day button
+        # ARIA pattern: aria-label starts with "DAY, " and contains "MONTH YEAR"
+        click_script = (
+            f"(() => {{ "
+            f"for (const b of document.querySelectorAll('button')) {{ "
+            f"const l = b.getAttribute('aria-label') || ''; "
+            f"if (l.startsWith({json.dumps(day_str + ', ')}) && "
+            f"l.includes({json.dumps(month_year)})) "
+            f"{{ b.click(); return true; }} }} return false; }})()"
+        )
+        clicked = bl.evaluate_javascript(None, click_script)
+        if not clicked:
+            logger.warn(f"  Could not find day button for {date_str}")
+
+    def _wait_page_ready(self, bl: Any, page_delay_ms: int = 0) -> None:
+        """Wait for page to be ready after navigation.
+
+        Uses domcontentloaded (fast — DOM structure ready) then dismisses
+        interrupts.  Content readiness is handled downstream by each
+        rule's state check or expansion wait_for_elements_state.
+        """
+        try:
+            bl.wait_for_load_state(self._PageLoadStates.domcontentloaded)
+        except Exception:
+            pass
+        self._dismiss_interrupts(bl)
+
     def _dismiss_interrupts(self, bl: Any) -> None:
+        """Auto-dismiss overlay selectors using global config."""
+        self._dismiss_interrupts_with(bl, self.ctx.interrupt_selectors)
+
+    def _dismiss_interrupts_with(self, bl: Any, selectors: list[str]) -> None:
         """Auto-dismiss overlay selectors (cookie banners, modals)."""
-        for selector in self.ctx.interrupt_selectors:
+        for selector in selectors:
             try:
                 count = bl.get_element_count(selector)
                 if count > 0:
@@ -1618,6 +2424,14 @@ class ExecutionEngine:
                         del result[val]
                     elif key == "strip_html" and val in result:
                         result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
+                    elif key == "to_markdown" and val in result:
+                        try:
+                            from markdownify import markdownify as md
+                            result[val] = md(str(result[val]),
+                                             heading_style="ATX",
+                                             strip=["script", "style", "nav"])
+                        except ImportError:
+                            result[val] = re.sub(r"<[^>]+>", "", str(result[val]))
                     elif key == "default" and ":" in val:
                         field, default_val = val.split(":", 1)
                         if not result.get(field):
@@ -1676,7 +2490,7 @@ class ExecutionEngine:
             self.ctx.artifact_store[target].append(record)
 
     def _write_outputs(self, output_dir: str) -> None:
-        summary = {
+        summary: dict[str, Any] = {
             "deployment": self.ctx.name,
             "artifacts": {},
             "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -1823,6 +2637,7 @@ class WiseRpaBDD:
         self._deployment: DeploymentContext | None = None
         self._current_resource: ResourceContext | None = None
         self._current_rule: RuleNode | None = None
+        self._rule_has_actions: bool = False  # Tracks if current rule has actions (for guard vs observation routing)
         self._rule_stack: list[str] = []  # Track rule creation order
 
     def _record(self, name: str, *values: Any) -> None:
@@ -1953,7 +2768,7 @@ class WiseRpaBDD:
 
     # -- Rule management --
 
-    @keyword('And I begin rule "${rule}"')
+    @keyword('I define rule "${rule}"')
     def begin_rule(self, rule: str) -> None:
         self._record("begin_rule", rule)
         if not self._current_resource:
@@ -1961,6 +2776,7 @@ class WiseRpaBDD:
         node = RuleNode(name=rule)
         self._current_resource.rules[rule] = node
         self._current_rule = node
+        self._rule_has_actions = False
         self._rule_stack.append(rule)
 
     @keyword('And I declare parents "${parents}"')
@@ -1977,146 +2793,201 @@ class WiseRpaBDD:
             self._current_rule.retry_max = int(max)
             self._current_rule.retry_delay_ms = int(delay)
 
+    @keyword('And I set guard policy "${policy}"')
+    def set_guard_policy(self, policy: str) -> None:
+        """Set guard failure policy: "skip" (default) or "abort"."""
+        self._record("set_guard_policy", policy)
+        if self._current_rule:
+            self._current_rule.guard_policy = policy
+
+    @keyword("And I scope interrupts")
+    def scope_interrupts(self, *specs: str) -> None:
+        """Override global dismiss selectors for this rule only.
+
+        Usage in .robot::
+
+            I define rule "interactive_form"
+                And I scope interrupts
+                ...    dismiss="button.cookie-accept"
+                ...    dismiss=".modal-close"
+        """
+        self._record("scope_interrupts", *specs)
+        if not self._current_rule:
+            return
+        selectors: list[str] = []
+        for spec in specs:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            if k == "dismiss":
+                selectors.append(_strip_quotes(v))
+        self._current_rule.interrupt_override = selectors
+
+    @keyword("And I pause interrupts")
+    def pause_interrupts(self) -> None:
+        """Skip all dismiss for this rule's steps.
+
+        Usage in .robot::
+
+            I define rule "datepicker_interaction"
+                And I pause interrupts
+                When I click ...
+        """
+        self._record("pause_interrupts")
+        if self._current_rule:
+            self._current_rule.interrupt_paused = True
+
+    @keyword("And I set rule options")
+    def set_rule_options(self, *specs: str) -> None:
+        """Set declarative lifecycle options for the current rule.
+
+        Usage in .robot::
+
+            I define rule "checkout"
+                And I set rule options
+                ...    on_enter=screenshot
+                ...    on_fail=screenshot
+                ...    timeout_ms=30000
+        """
+        self._record("set_rule_options", *specs)
+        if not self._current_rule:
+            return
+        for spec in specs:
+            if "=" not in spec:
+                continue
+            k, v = spec.split("=", 1)
+            self._current_rule.options[k.strip()] = v.strip()
+
     # -- State checks --
+
+    def _add_state_check(self, check: StateCheck) -> None:
+        """Route a state check to guards or steps based on parse position.
+
+        Before any action in the rule → guard (Type 1: precondition).
+        After an action → step (Type 2: observation gate between actions).
+        """
+        if not self._current_rule:
+            return
+        if self._rule_has_actions:
+            self._current_rule.steps.append(check)
+        else:
+            self._current_rule.guards.append(check)
 
     @keyword('Given url contains "${pattern}"')
     def url_contains(self, pattern: str) -> None:
         self._record("url_contains", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_contains", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_contains", pattern=pattern))
 
     @keyword('Given url matches "${pattern}"')
     def url_matches(self, pattern: str) -> None:
         self._record("url_matches", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_matches", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_matches", pattern=pattern))
 
     @keyword('But url does not contain "${pattern}"')
     def url_does_not_contain(self, pattern: str) -> None:
         self._record("url_does_not_contain", pattern)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="url_not_contains", pattern=pattern)
-            )
+        self._add_state_check(StateCheck(type="url_not_contains", pattern=pattern))
 
     @keyword('And selector "${selector}" exists')
     def selector_exists(self, selector: str) -> None:
         self._record("selector_exists", selector)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="selector_exists", pattern=selector)
-            )
+        self._add_state_check(StateCheck(type="selector_exists", pattern=selector))
 
     @keyword('And table headers are "${headers}"')
     def table_headers_are(self, headers: str) -> None:
         self._record("table_headers_are", headers)
-        if self._current_rule:
-            self._current_rule.state_checks.append(
-                StateCheck(type="table_headers", pattern=headers)
-            )
+        self._add_state_check(StateCheck(type="table_headers", pattern=headers))
 
     # -- Actions --
+
+    def _add_action(self, action: Action) -> None:
+        """Append an action to the current rule's steps list."""
+        if not self._current_rule:
+            return
+        self._rule_has_actions = True
+        self._current_rule.steps.append(action)
 
     @keyword('When I open "${url}"')
     def open_url(self, url: str) -> None:
         self._record("open_url", url)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="open", value=url)
-            )
+        self._add_action(Action(type="open", value=url))
 
     @keyword('When I open the bound field "${field}"')
     def open_bound_field(self, field: str) -> None:
         self._record("open_bound_field", field)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="open_bound", value=field)
-            )
+        self._add_action(
+            Action(type="open_bound", value=field)
+        )
 
     @keyword('When I click locator "${locator}"')
     def click_locator(self, locator: str, *options: str) -> None:
         self._record("click_locator", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="click", locator=locator, options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="click", locator=locator, options=_parse_options(options))
+        )
 
     @keyword('When I type "${value}" into locator "${locator}"')
     def type_into_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("type_into_locator", value, locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="type", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="type", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword('When I type secret "${value}" into locator "${locator}"')
     def type_secret_into_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("type_secret_into_locator", "***", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="type", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="type", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword("When I scroll down")
     def scroll_down(self) -> None:
         self._record("scroll_down")
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="scroll"))
+        self._add_action(Action(type="scroll"))
 
     @keyword("When I wait for idle")
     def wait_for_idle(self) -> None:
         self._record("wait_for_idle")
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="wait"))
+        self._add_action(Action(type="wait"))
 
     @keyword("When I wait ${ms} ms")
     def wait_ms(self, ms: Any) -> None:
         self._record("wait_ms", ms)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="wait_ms", value=str(ms))
-            )
+        self._add_action(
+            Action(type="wait_ms", value=str(ms))
+        )
 
     @keyword('When I select "${value}" from locator "${locator}"')
     def select_from_locator(self, value: str, locator: str, *options: str) -> None:
         self._record("select_from_locator", value, locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="select", locator=locator, value=value,
-                       options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="select", locator=locator, value=value,
+            options=_parse_options(options))
+        )
 
     @keyword('When I check locator "${locator}"')
     def check_locator(self, locator: str, *options: str) -> None:
         self._record("check_locator", locator, *options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="click", locator=locator, options=_parse_options(options))
-            )
+        self._add_action(
+            Action(type="click", locator=locator, options=_parse_options(options))
+        )
 
     @keyword('When I hover locator "${locator}"')
     def hover_locator(self, locator: str) -> None:
         self._record("hover_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="hover", locator=locator))
+        self._add_action(Action(type="hover", locator=locator))
 
     @keyword('When I focus locator "${locator}"')
     def focus_locator(self, locator: str) -> None:
         self._record("focus_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="focus", locator=locator))
+        self._add_action(Action(type="focus", locator=locator))
 
     @keyword('When I double click locator "${locator}"')
     def dblclick_locator(self, locator: str) -> None:
         self._record("dblclick_locator", locator)
-        if self._current_rule:
-            self._current_rule.actions.append(Action(type="dblclick", locator=locator))
+        self._add_action(Action(type="dblclick", locator=locator))
 
     @keyword('When I press keys "${locator}"')
     def press_keys_locator(self, locator: str, *keys: str) -> None:
@@ -2125,27 +2996,90 @@ class WiseRpaBDD:
         Example: ``When I press keys "#search"    Enter``
         """
         self._record("press_keys", locator, *keys)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="press_keys", locator=locator, args=keys)
-            )
+        self._add_action(
+            Action(type="press_keys", locator=locator, args=keys)
+        )
 
     @keyword("When I take screenshot")
     def take_screenshot(self, *options: str) -> None:
         self._record("take_screenshot", *options)
         opts = _parse_options(options)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
-            )
+        self._add_action(
+            Action(type="screenshot", value=opts.get("filename", "screenshot.png"))
+        )
 
     @keyword('When I upload file "${path}" to locator "${locator}"')
     def upload_file_to_locator(self, path: str, locator: str) -> None:
         self._record("upload_file", path, locator)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="upload", locator=locator, value=path)
-            )
+        self._add_action(
+            Action(type="upload", locator=locator, value=path)
+        )
+
+    # -- High-level interaction keywords (reduce need for evaluate_js) --
+
+    @keyword('When I click text "${text}"')
+    def click_text(self, text: str, *options: str) -> None:
+        """Click the first visible element whose text content matches.
+
+        Uses JS to find by text, avoiding CSS limitations.
+        Example: ``When I click text "Got it"``
+        Options: await=<selector> — wait for selector after click.
+        """
+        self._record("click_text", text, *options)
+        self._add_action(
+            Action(type="click_text", value=text, args=(),
+            options=_parse_options(options))
+        )
+
+    @keyword('When I add url params "${params}"')
+    def add_url_params(self, params: str) -> None:
+        """Add query parameters to the current URL and navigate.
+
+        The engine handles navigation wait and SPA hydration automatically.
+        Example: ``When I add url params "price_max=3000&superhost=true"``
+        """
+        self._record("add_url_params", params)
+        self._add_action(
+            Action(type="add_url_params", value=params, args=())
+        )
+
+    @keyword('When I set stepper "${locator}" to ${count}')
+    def set_stepper(self, locator: str, count: str) -> None:
+        """Click a stepper/increment button N times.
+
+        Example: ``When I set stepper "[data-testid='stepper-adults']" to 2``
+        """
+        self._record("set_stepper", locator, count)
+        self._add_action(
+            Action(type="set_stepper", value=count, locator=locator, args=())
+        )
+
+    @keyword('When I select date "${date}" from datepicker')
+    def select_date_from_datepicker(self, date: str, *options: str) -> None:
+        """Navigate a datepicker forward to the target month and click the day.
+
+        The date is in YYYY-MM-DD format. The engine navigates the calendar
+        forward (clicking a forward button) until the target month heading
+        is visible, then clicks the day button matching the date.
+
+        Options (continuation rows):
+        - ``forward=<css>`` — forward navigation button (default: ``button[aria-label*="Move forward"]``)
+        - ``heading=<css>`` — month heading selector (default: ``h2``)
+        - ``back=<css>`` — backward button (not used by default)
+        - ``max_clicks=<N>`` — max forward clicks before giving up (default: 15)
+
+        Example::
+
+            When I select date "${CHECKIN}" from datepicker
+            ...    forward=button[aria-label*="Move forward"]
+            ...    heading=h2
+        """
+        opts = _parse_options(options)
+        self._record("select_date", date, *options)
+        self._add_action(
+            Action(type="select_date", value=date,
+            args=(), options=opts)
+        )
 
     # -- Browser step & call keyword (deferred passthrough) --
 
@@ -2157,10 +3091,22 @@ class WiseRpaBDD:
         Example: ``And I browser step "Press Keys" "#search" "Enter"``
         """
         self._record("browser_step", method, *args)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="browser_step", value=method, args=args)
-            )
+        self._add_action(
+            Action(type="browser_step", value=method, args=args)
+        )
+
+    @keyword('And I evaluate js "${script}"')
+    def evaluate_js(self, script: str) -> None:
+        """Defer a JavaScript expression to run on the live page.
+
+        Works with both the RF-Browser adapter and the stealth adapter.
+        Supports async scripts (async () => { ... }).
+        Example: ``And I evaluate js "document.querySelector('#btn').click()"``
+        """
+        self._record("evaluate_js", script)
+        self._add_action(
+            Action(type="evaluate_js", value=script, args=())
+        )
 
     @keyword('And I call keyword "${name}"')
     def call_keyword(self, name: str, *args: str) -> None:
@@ -2171,10 +3117,9 @@ class WiseRpaBDD:
         Example: ``And I call keyword "Login To Site"``
         """
         self._record("call_keyword", name, *args)
-        if self._current_rule:
-            self._current_rule.actions.append(
-                Action(type="call_keyword", value=name, args=args)
-            )
+        self._add_action(
+            Action(type="call_keyword", value=name, args=args)
+        )
 
     # -- Expansion --
 
@@ -2228,27 +3173,28 @@ class WiseRpaBDD:
         self._record("expand_over_combinations", *axes)
         if not self._current_rule:
             return
-        # Parse axis specs: action=type control="#sel" values=a|b|c
+        # Parse axis specs: action=type control="#sel" values=a|b|c exclude=X|Y skip=1
         parsed_axes: list[CombinationAxis] = []
         current: dict[str, str] = {}
+        def _flush_axis(cur: dict[str, str]) -> CombinationAxis:
+            return CombinationAxis(
+                action=cur["action"],
+                control=_strip_quotes(cur.get("control", "")),
+                values=cur.get("values", "").split("|"),
+                exclude=cur.get("exclude", "").split("|") if cur.get("exclude") else [],
+                skip=int(cur.get("skip", 0)),
+                emit=cur.get("emit", ""),
+            )
         for spec in axes:
             if "=" not in spec:
                 continue
             k, v = spec.split("=", 1)
             if k == "action" and current.get("action"):
-                parsed_axes.append(CombinationAxis(
-                    action=current["action"],
-                    control=_strip_quotes(current.get("control", "")),
-                    values=current.get("values", "").split("|"),
-                ))
+                parsed_axes.append(_flush_axis(current))
                 current = {}
             current[k] = v
         if current.get("action"):
-            parsed_axes.append(CombinationAxis(
-                action=current["action"],
-                control=_strip_quotes(current.get("control", "")),
-                values=current.get("values", "").split("|"),
-            ))
+            parsed_axes.append(_flush_axis(current))
         self._current_rule.expansion = Expansion(
             over="combinations", axes=parsed_axes,
         )
@@ -2387,3 +3333,433 @@ class WiseRpaBDD:
             for name, rule in res.rules.items():
                 if not rule.parents:
                     res.root_names.append(name)
+
+
+# ---------------------------------------------------------------------------
+# BDD format validation (standalone, no browser needed)
+# ---------------------------------------------------------------------------
+
+_BDD_PREFIXES = ("Given ", "When ", "Then ", "And ", "But ")
+_SECTION_RE = re.compile(r"^\*\*\* (.+) \*\*\*$")
+_CELL_SPLIT_RE = re.compile(r"\s{2,}|\t+")
+
+
+def _starts_with_bdd(text: str) -> bool:
+    return any(text.startswith(p) for p in _BDD_PREFIXES)
+
+
+def validate_bdd(path: Path) -> list[str]:
+    """Check that every executable step uses Given/When/Then/And/But."""
+    errors: list[str] = []
+    section = ""
+    for lineno, raw_line in enumerate(path.read_text().splitlines(), start=1):
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _SECTION_RE.match(stripped)
+        if match:
+            section = match.group(1).lower()
+            continue
+        if section == "settings":
+            if stripped.startswith(("Suite Setup", "Test Setup",
+                                    "Suite Teardown", "Test Teardown")):
+                parts = [p for p in _CELL_SPLIT_RE.split(stripped) if p]
+                if len(parts) >= 2 and not _starts_with_bdd(parts[1]):
+                    errors.append(f"{path}:{lineno}: setup/teardown must use BDD keyword")
+            continue
+        if section in {"test cases", "keywords"}:
+            if raw_line.startswith("    ..."):
+                continue
+            if not raw_line.startswith(" "):
+                if section == "keywords" and not _starts_with_bdd(stripped):
+                    errors.append(f"{path}:{lineno}: keyword definition must start with BDD prefix")
+                continue
+            parts = [p for p in _CELL_SPLIT_RE.split(stripped) if p]
+            if not parts:
+                continue
+            if parts[0] in {"[Setup]", "[Teardown]"}:
+                if len(parts) < 2 or not _starts_with_bdd(parts[1]):
+                    errors.append(f"{path}:{lineno}: setup/teardown step must use BDD keyword")
+                continue
+            if parts[0].startswith("["):
+                continue
+            if not _starts_with_bdd(parts[0]):
+                errors.append(f"{path}:{lineno}: step must start with BDD prefix")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Test harness RF keyword library (for e2e agent tests)
+# ---------------------------------------------------------------------------
+
+@library(scope="SUITE", auto_keywords=False)
+class WiseRpaBDDTest:
+    """RF keyword library for testing agent-generated .robot suites."""
+
+    ROBOT_LIBRARY_SCOPE = "SUITE"
+
+    def __init__(self, model: str = "sonnet", max_turns: int = 50,
+                 backend: str = "claude"):
+        self._model = model
+        self._max_turns = int(max_turns)
+        self._backend = backend
+        self._generated_path: Path | None = None
+        self._generated_content: str = ""
+
+    def _require_generated(self) -> Path:
+        if not self._generated_path:
+            raise RuntimeError("No generated suite — call 'Generate Suite From Requirement' first")
+        return self._generated_path
+
+    @keyword("Generate Suite From Requirement")
+    def generate_suite_from_requirement(self, requirement: str,
+                                         output_path: str = "") -> str:
+        """Invoke the AI agent with a requirement and capture the .robot output."""
+        import tempfile
+        if output_path:
+            out = Path(output_path)
+        else:
+            fd = tempfile.NamedTemporaryFile(suffix=".robot", delete=False)
+            fd.close()
+            out = Path(fd.name)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Invoking agent: {requirement[:80]}...")
+        _cli_generate_core(requirement, out, model=self._model,
+                           max_turns=self._max_turns, backend=self._backend)
+
+        if out.exists() and out.stat().st_size > 0:
+            self._generated_path = out
+            self._generated_content = out.read_text()
+            logger.info(f"Agent produced: {out} ({out.stat().st_size} bytes)")
+        else:
+            raise RuntimeError(f"Agent did not produce a .robot file at {out}")
+        return str(out)
+
+    @keyword("Generated Suite Should Pass BDD Validation")
+    def generated_suite_should_pass_bdd_validation(self) -> None:
+        path = self._require_generated()
+        errors = validate_bdd(path)
+        if errors:
+            raise AssertionError(
+                "BDD validation failed:\n" + "\n".join(f"  {e}" for e in errors))
+        logger.info("BDD validation: PASS")
+
+    @keyword("Generated Suite Should Pass Dryrun")
+    def generated_suite_should_pass_dryrun(self) -> None:
+        import subprocess
+        path = self._require_generated()
+        script_dir = Path(__file__).resolve().parent
+        result = subprocess.run(
+            ["robot", "--dryrun",
+             "--output", "NONE", "--log", "NONE", "--report", "NONE",
+             "--pythonpath", str(script_dir), str(path)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Dryrun failed (rc={result.returncode}):\n"
+                f"{result.stdout}\n{result.stderr}")
+        logger.info("Dryrun: PASS")
+
+    @keyword("Generated Suite Should Match Golden Baseline")
+    def generated_suite_should_match_golden_baseline(self, golden_path: str) -> None:
+        golden = Path(golden_path)
+        if not golden.exists():
+            raise FileNotFoundError(f"Golden baseline not found: {golden}")
+        golden_kw = set(re.findall(
+            r'(?:Given|When|Then|And|But)\s+(.+?)(?:\s{2,}|$)',
+            golden.read_text(), re.MULTILINE))
+        gen_kw = set(re.findall(
+            r'(?:Given|When|Then|And|But)\s+(.+?)(?:\s{2,}|$)',
+            self._generated_content, re.MULTILINE))
+        missing = golden_kw - gen_kw
+        if missing:
+            raise AssertionError(
+                f"Missing keywords from golden:\n"
+                + "\n".join(f"  - {k}" for k in sorted(missing)))
+        logger.info("Golden baseline: PASS")
+
+
+def _load_orient_cache() -> str:
+    """Load pre-baked orient material from skill docs.
+
+    Reads keyword-reference.md and format.md once at generate time so the
+    agent doesn't need to spend LLM turns reading files.
+    """
+    skill_dir = Path(__file__).resolve().parent.parent
+    parts = []
+    for name in ("references/keyword-reference.md", "references/format.md"):
+        p = skill_dir / name
+        if p.exists():
+            parts.append(f"# {name}\n{p.read_text()}")
+    return "\n\n".join(parts)
+
+
+def _build_generate_prompt(requirement: str, output: Path,
+                           fast: bool = False) -> str:
+    """Build the agent prompt for suite generation.
+
+    If fast=True, inlines the keyword reference and format docs into the
+    prompt so the agent skips orient file reads (~6s saving).
+    """
+    skill_dir = Path(__file__).resolve().parent.parent
+
+    header = f"{requirement}\n\nWrite the generated .robot suite to: {output}\n\n"
+
+    if fast:
+        orient_block = (
+            "## Pre-loaded skill reference (no need to read files)\n\n"
+            + _load_orient_cache()
+            + "\n\n"
+            "You already have the full keyword API and format docs above. "
+            "Do NOT read any files from the repo — everything you need is in this prompt. "
+            "Go straight to /rrpa-explore with agent-browser.\n\n"
+            "## agent-browser cheatsheet (use `npx agent-browser` or just `agent-browser`)\n"
+            "```\n"
+            "npx agent-browser open <url>          # navigate (persistent session)\n"
+            "npx agent-browser snapshot -c -d 3    # accessibility tree with classes\n"
+            "npx agent-browser get count '<css>'   # count matching elements\n"
+            "npx agent-browser get text '<css>'    # get text content\n"
+            "npx agent-browser get html '<css>'    # get outer HTML\n"
+            "npx agent-browser eval '<js>'         # run JS expression\n"
+            "npx agent-browser click '<css>'       # click element\n"
+            "```\n"
+            "Chain with && to reuse session.\n\n"
+        )
+    else:
+        orient_block = (
+            "1. /rrpa-orient — read references/keyword-reference.md "
+            "and references/format.md to understand available WiseRpaBDD keywords.\n"
+        )
+
+    return (
+        header
+        + "Follow the wise-rpa-bdd skill phases:\n"
+        + orient_block
+        + "2. /rrpa-explore — use `agent-browser` CLI via Bash to explore the live site. "
+        "Do NOT use curl or WebFetch. Do NOT guess selectors or URLs. "
+        "Every selector AND entry URL must come from agent-browser inspection. "
+        "For sites requiring search or login, interact with the UI to discover "
+        "the real URL (with place_id, session tokens, etc.) — never construct "
+        "URLs by guessing parameter names. "
+        "Be efficient — confirm selectors on representative pages, "
+        "do not crawl every page. agent-browser keeps a persistent session.\n"
+        "3. /rrpa-draft — draft the .robot suite using WiseRpaBDD keywords "
+        "grounded in explore evidence. Include quality gates.\n"
+        "   GENERALIZABILITY: put all dynamic values (city, dates, prices, "
+        "guest count, etc.) in *** Variables *** so users can override from "
+        "the command line with --variable. Never hardcode place_id, session "
+        "tokens, or values that change per search.\n"
+        "   KEYWORD PREFERENCE: prefer deferred BDD keywords (When I click "
+        "locator, When I type, etc.) over And I evaluate js. Use evaluate_js "
+        "only for patterns the framework can't express yet (calendar loops, "
+        "URL param navigation). Use And I configure interrupts for popup "
+        "dismissal, not inline JS dismiss hacks.\n"
+        "   CONSTRUCT PATTERNS — choose the right one for the site:\n"
+        "   - Basic (pagination): single resource, paginate by next/numeric, "
+        "extract fields per page. E.g. quotes, book listings.\n"
+        "   - Interactive (forms): state checks between actions, await= on "
+        "form submissions, And I pause interrupts on interactive panels. "
+        "E.g. search forms, login flows, date pickers.\n"
+        "   - Multi-resource (discovery→detail): resource 1 extracts URLs, "
+        "resource 2 consumes them via {field} template. E.g. product "
+        "listing → product detail pages.\n"
+        "   - Stealth (anti-bot): WISE_RPA_STEALTH=1, use call_keyword for "
+        "auth flows, avoid evaluate_js where possible — stealth adapter "
+        "routes through patchright.\n"
+        f"4. /rrpa-review — run `robot --dryrun --pythonpath {skill_dir / 'scripts'}` "
+        "to verify all keywords resolve. Fix and loop until clean.\n"
+        "5. /rrpa-re-explore (if needed) — after dryrun passes, go back to "
+        "agent-browser to verify any selectors you're unsure about, check "
+        "for popups/overlays that need interrupts, or confirm pagination "
+        "behavior. Then revise the suite and re-review. This step is "
+        "especially important for complex sites with auth flows, overlays, "
+        "or dynamically loaded content.\n"
+        "Do NOT run the suite against a live site for full scraping."
+    )
+
+
+_BACKEND_DEFAULTS = {
+    "claude": "sonnet",
+    "codex": "gpt-5.4-mini",
+    "aichat": "",
+}
+
+
+def _run_agent_cli(prompt: str, backend: str = "claude",
+                    model: str = "", max_turns: int = 50) -> int:
+    """Run an agent CLI with a prompt. All backends are subprocess calls.
+
+    Backends:
+      claude  — claude CLI (honors ~/.claude/ settings and skills)
+      codex   — OpenAI Codex CLI
+      aichat  — aichat CLI
+    """
+    import subprocess
+    import shutil
+
+    model = model or _BACKEND_DEFAULTS.get(backend, "")
+    skill_dir = Path(__file__).resolve().parent.parent
+
+    if backend == "claude":
+        exe = shutil.which("claude")
+        if not exe:
+            raise FileNotFoundError("claude CLI not found in PATH")
+        cmd = [exe, "--dangerously-skip-permissions",
+               "--model", model, "--max-turns", str(max_turns),
+               "-p", prompt]
+        return subprocess.run(cmd, cwd=str(skill_dir)).returncode
+
+    elif backend == "codex":
+        exe = shutil.which("codex")
+        if not exe:
+            raise FileNotFoundError("codex CLI not found in PATH")
+        cmd = [exe, "exec", "--dangerously-bypass-approvals-and-sandbox",
+               "-m", model, "-c", "model_reasoning_effort=low",
+               "-C", str(skill_dir), prompt]
+        return subprocess.run(cmd).returncode
+
+    elif backend == "aichat":
+        exe = shutil.which("aichat")
+        if not exe:
+            raise FileNotFoundError("aichat CLI not found in PATH")
+        cmd = [exe, "-r", "coder", prompt]
+        return subprocess.run(cmd, cwd=str(skill_dir)).returncode
+
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
+
+
+def _cli_generate_core(requirement: str, output: Path, model: str = "",
+                       max_turns: int = 50, backend: str = "claude",
+                       fast: bool = False) -> int:
+    """Core agent generation logic shared by CLI and RF keyword."""
+    prompt = _build_generate_prompt(requirement, output, fast=fast)
+    return _run_agent_cli(prompt, backend=backend, model=model,
+                          max_turns=max_turns)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+def _cli_run(args: list[str]) -> int:
+    """Run a .robot suite live (full browser execution)."""
+    import subprocess
+    script_dir = Path(__file__).resolve().parent
+    cmd = ["robot", "--pythonpath", str(script_dir)]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd).returncode
+
+
+def _cli_dryrun(args: list[str]) -> int:
+    """Run robot --dryrun to verify keyword resolution."""
+    import subprocess
+    script_dir = Path(__file__).resolve().parent
+    cmd = [
+        "robot", "--dryrun", "--pythonpath", str(script_dir),
+        "--output", "NONE", "--log", "NONE", "--report", "NONE",
+    ]
+    if args:
+        cmd.extend(args)
+    return subprocess.run(cmd).returncode
+
+
+def _cli_validate(args: list[str]) -> int:
+    """Validate BDD format of .robot files."""
+    if not args:
+        print("Usage: WiseRpaBDD.py validate <suite.robot> [...]")
+        return 1
+    rc = 0
+    for arg in args:
+        p = Path(arg)
+        if not p.exists():
+            print(f"File not found: {p}")
+            rc = 1
+            continue
+        errors = validate_bdd(p)
+        if errors:
+            for e in errors:
+                print(e)
+            rc = 1
+        else:
+            print(f"BDD format OK: {p}")
+    return rc
+
+
+def _cli_generate(args: list[str]) -> int:
+    """Generate a .robot suite via an AI agent backend."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="WiseRpaBDD.py generate")
+    parser.add_argument("requirement",
+                        help="Natural language requirement string, or path "
+                             "to a .txt/.md prompt file")
+    parser.add_argument("-o", "--output", required=True, help="Output .robot path")
+    parser.add_argument("--backend", default="claude",
+                        choices=["claude", "codex", "aichat"],
+                        help="Agent backend (default: claude)")
+    parser.add_argument("--model", default="",
+                        help="Model name (default: per-backend)")
+    parser.add_argument("--max-turns", type=int, default=50)
+    parser.add_argument("--fast", action="store_true",
+                        help="Pre-bake keyword docs into prompt (skip orient reads)")
+    parsed = parser.parse_args(args)
+
+    # Accept requirement as file path or inline string
+    req = parsed.requirement
+    req_path = Path(req)
+    if req_path.is_file():
+        req = req_path.read_text().strip()
+        print(f"Read requirement from: {req_path}")
+
+    out = Path(parsed.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        _cli_generate_core(req, out,
+                           model=parsed.model, max_turns=parsed.max_turns,
+                           backend=parsed.backend, fast=parsed.fast)
+    except ImportError as e:
+        print(f"Error: missing dependency for '{parsed.backend}' backend: {e}")
+        return 1
+
+    if out.exists() and out.stat().st_size > 0:
+        print(f"Generated: {out} ({out.stat().st_size} bytes)")
+        return 0
+    else:
+        print(f"Error: agent did not produce a .robot file at {out}")
+        return 1
+
+
+def main() -> int:
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: WiseRpaBDD.py <command> [args...]")
+        print()
+        print("Commands:")
+        print("  run       <suite.robot> [robot-args...]   Run suite live")
+        print("  dryrun    <suite.robot> [robot-args...]   Verify keyword resolution")
+        print("  validate  <suite.robot> [...]             BDD format lint")
+        print("  generate  <requirement|prompt.md> -o <output.robot> Agent-generate suite")
+        return 1
+
+    cmd = sys.argv[1]
+    rest = sys.argv[2:]
+
+    if cmd == "run":
+        return _cli_run(rest)
+    elif cmd == "dryrun":
+        return _cli_dryrun(rest)
+    elif cmd == "validate":
+        return _cli_validate(rest)
+    elif cmd == "generate":
+        return _cli_generate(rest)
+    else:
+        print(f"Unknown command: {cmd}")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

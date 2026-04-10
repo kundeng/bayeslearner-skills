@@ -48,16 +48,16 @@ Resource hockey_scrape
 
     # Rule: root — state gate confirming we are on the hockey forms page
     # Evidence: URL contains "pages/forms"; selector "tr.team" present (25 matches on page 1)
-    And I begin rule "root"
-    Given url contains "pages/forms"
-    And selector "tr.team" exists
+    I define rule "root"
+        Given url contains "pages/forms"
+        And selector "tr.team" exists
 
     # Rule: pages — drive next-button pagination across all 24 pages
     # Evidence: a[aria-label="Next"] present on pages 1-23 (href=/pages/forms/?page_num=N);
     #           absent on page 24 — engine stops naturally.
-    And I begin rule "pages"
-    And I declare parents "root"
-    When I paginate by next button "a[aria-label='Next']" up to 24 pages
+    I define rule "pages"
+        And I declare parents "root"
+        When I paginate by next button "a[aria-label='Next']" up to 24 pages
 
     # Rule: teams — expand over each tr.team on every visited page, then extract
     # Evidence: 25 tr.team rows per page (pages 1-23); 7 on page 24 → 582 total.
@@ -68,17 +68,17 @@ Resource hockey_scrape
     #   losses        — td.losses, text (e.g. "24")
     #   goals_for     — td.gf, text     (e.g. "299")
     #   goals_against — td.ga, text     (e.g. "264")
-    And I begin rule "teams"
-    And I declare parents "pages"
-    When I expand over elements "tr.team"
-    Then I extract fields
-    ...    field=team_name       extractor=text    locator=td.name
-    ...    field=year            extractor=number  locator=td.year
-    ...    field=wins            extractor=number  locator=td.wins
-    ...    field=losses          extractor=number  locator=td.losses
-    ...    field=goals_for       extractor=number  locator=td.gf
-    ...    field=goals_against   extractor=number  locator=td.ga
-    And I emit to artifact "${ARTIFACT_TEAMS}"
+    I define rule "teams"
+        And I declare parents "pages"
+        When I expand over elements "tr.team"
+        Then I extract fields
+        ...    field=team_name       extractor=text    locator=td.name
+        ...    field=year            extractor=number  locator=td.year
+        ...    field=wins            extractor=number  locator=td.wins
+        ...    field=losses          extractor=number  locator=td.losses
+        ...    field=goals_for       extractor=number  locator=td.gf
+        ...    field=goals_against   extractor=number  locator=td.ga
+        And I emit to artifact "${ARTIFACT_TEAMS}"
 
 Quality Gates
     # 24 pages × 25 items/page − 18 missing on last page = 582 total records

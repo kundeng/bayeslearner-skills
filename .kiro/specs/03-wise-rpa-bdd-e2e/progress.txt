@@ -1,0 +1,11 @@
+# Progress Log: 03-wise-rpa-bdd-e2e
+# Auto-updated by builder during ralph loop
+# Format: [TIMESTAMP] STATUS task-id — description
+# SUMMARY: 7/7 done | COMPLETE
+[2026-04-08 02:08] DONE task-1775613929-6acd — Check in 15 generated .robot files (8558723)
+[2026-04-08 03:15] DONE task-1775613942-d573 — Upgrade run-tests.py with summary table (be7f72a)
+[2026-04-08 03:15] DONE task-1775613942-e889 — Upgrade run-phase-tests.py with matching table (be7f72a)
+[2026-04-08 03:15] DONE task-1775613942-fa90 — Add AI extraction + hook rendering test coverage (be7f72a)
+[2026-04-08 02:30] DONE task-1775613942-0bb8 — Implement live browser automation in WiseRpaBDD.py (38743ad)
+[2026-04-08 05:45] DONE task-1775658728-124e — Execute 8 practice suites live + compare to baselines + write report (47996d9)
+[2026-04-08 05:45] DONE task-1775658741-ee1d — Compare RPA outputs to wise-scraper baselines (47996d9)
