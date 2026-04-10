@@ -67,7 +67,6 @@ Resource listing_search
     # Evidence: on some viewports, search bar renders compact with "Anywhere"
     I define rule "expand_search"
         When I click text "Anywhere"
-        When I wait 2000 ms
 
     # ── Action rule: type city and select autocomplete ────────────────────────
     # Evidence: input#bigsearch-query-location-input, placeholder="Search destinations"
@@ -75,7 +74,6 @@ Resource listing_search
     I define rule "enter_city"
         And I declare parents "expand_search"
         When I type "${CITY_SEARCH}" into locator "#bigsearch-query-location-input"
-        When I wait 2000 ms
         When I click locator "[data-testid='option-0']"
 
     # ── Action rule: navigate calendar and select dates ───────────────────────
@@ -97,9 +95,7 @@ Resource listing_search
     I define rule "set_guests"
         And I declare parents "set_dates"
         When I click text "Add guests"
-        When I wait 500 ms
         When I set stepper "[data-testid='stepper-adults-increase-button']" to ${ADULTS}
-        When I wait 500 ms
 
     # ── Action rule: submit search ────────────────────────────────────────────
     # Evidence: button[data-testid="structured-search-input-search-button"]

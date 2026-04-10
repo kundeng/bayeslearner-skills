@@ -574,6 +574,8 @@ class ExecutionEngine:
         self._instrument = os.environ.get(
             "WISE_RPA_INSTRUMENT", ""
         ).lower() in ("1", "true", "yes")
+        self._max_run_time = int(os.environ.get("WISE_RPA_TIMEOUT", "120"))
+        self._run_start: float = 0
 
     def _bl(self) -> Any:
         """Lazy-init the browser backend.
@@ -596,6 +598,8 @@ class ExecutionEngine:
     def run(self) -> None:
         output_dir = self.ctx.output_dir or f"output/{self.ctx.name}"
         os.makedirs(output_dir, exist_ok=True)
+
+        self._run_start = time.time()
 
         bl = self._bl()
         browser_opts: dict[str, Any] = {"headless": not self.headed}
@@ -884,6 +888,11 @@ class ExecutionEngine:
                 return []
             executed.add(rule.name)
 
+        # Global timeout guard
+        if self._run_start and (time.time() - self._run_start) > self._max_run_time:
+            logger.warn(f"  Global timeout ({self._max_run_time}s) exceeded — aborting")
+            return []
+
         t_rule = time.time() if self._instrument else 0
 
         ctx = dict(context or {})
@@ -1002,12 +1011,23 @@ class ExecutionEngine:
                          context: dict[str, Any] | None = None) -> None:
         if not rule.actions:
             return
-        # Dismiss interrupts once before the rule's actions
-        self._dismiss_interrupts(self._bl())
         for action in rule.actions:
+            # Dismiss interrupts before each action — popups can appear
+            # at any moment and block clicks/interactions
+            if self.ctx.interrupt_selectors:
+                self._dismiss_interrupts(self._bl())
             try:
                 self._do_action(action, res, context=context)
             except Exception as e:
+                # Recovery: dismiss interrupts and retry once — a popup
+                # may have appeared between the dismiss and the action
+                if self.ctx.interrupt_selectors:
+                    self._dismiss_interrupts(self._bl())
+                    try:
+                        self._do_action(action, res, context=context)
+                        continue
+                    except Exception:
+                        pass
                 logger.warn(f"  Action {action.type} failed: {e}")
 
     def _do_action(self, action: Action, res: ResourceContext,
@@ -1067,21 +1087,33 @@ class ExecutionEngine:
         elif action.type == "upload":
             bl.upload_file(action.locator, action.value or "")
         elif action.type == "click_text":
-            # Click first visible element matching text (exact, then substring)
+            # Click by visible text. Tries Playwright's text selector first
+            # (real mouse event), falls back to JS with MouseEvent dispatch.
             text = action.value or ""
-            script = (
-                f"() => {{ const t = {json.dumps(text)}; "
-                f"const els = document.querySelectorAll("
-                f"'button, a, [role=button], div[tabindex]'); "
-                f"for (const el of els) {{ "
-                f"if (el.offsetParent !== null && el.textContent.trim() === t) "
-                f"{{ el.click(); return 'exact'; }} }} "
-                f"for (const el of els) {{ "
-                f"if (el.offsetParent !== null && el.textContent.includes(t)) "
-                f"{{ el.click(); return 'contains'; }} }} "
-                f"return false; }}"
-            )
-            bl.evaluate_javascript(None, script)
+            clicked = False
+            # Try Playwright native text selector (exact then substring)
+            for sel in [f'text="{text}"', f'text={text}']:
+                try:
+                    count = bl.get_element_count(sel)
+                    if count > 0:
+                        bl.click(sel)
+                        clicked = True
+                        break
+                except Exception:
+                    pass
+            if not clicked:
+                # JS fallback with proper MouseEvent
+                script = (
+                    f"() => {{ const t = {json.dumps(text)}; "
+                    f"for (const el of document.querySelectorAll("
+                    f"'button, a, [role=button], div[tabindex]')) {{ "
+                    f"if (el.offsetParent !== null && el.textContent.includes(t)) "
+                    f"{{ el.dispatchEvent(new MouseEvent('click', {{bubbles:true}})); "
+                    f"return true; }} }} return false; }}"
+                )
+                result = bl.evaluate_javascript(None, script)
+                if not result:
+                    logger.warn(f"  click_text: no element found for '{text}'")
         elif action.type == "add_url_params":
             # Add query params to current URL and navigate
             params = action.value or ""
@@ -1097,12 +1129,12 @@ class ExecutionEngine:
                 pass  # navigation may destroy context
             self._wait_page_ready(bl)
         elif action.type == "set_stepper":
-            # Click a stepper button N times
+            # Click a stepper button N times; wait for it to appear first
             count = int(action.value or 0)
             locator = action.locator
+            bl.wait_for_elements_state(locator, "attached", "5s")
             for _ in range(count):
                 bl.click(locator)
-                time.sleep(0.2)
         elif action.type == "select_date":
             self._do_select_date(bl, action)
         elif action.type == "browser_step":
