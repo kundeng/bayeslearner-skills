@@ -2987,6 +2987,9 @@ class WiseRpaBDD:
         headed = os.environ.get("WISE_RPA_HEADED", "").lower() in _truthy
         stealth = os.environ.get("WISE_RPA_STEALTH", "").lower() not in _falsy
         resume_mode = os.environ.get("WISE_RPA_RESUME_MODE", "auto")
+        output_dir = os.environ.get("WISE_RPA_OUTPUT_DIR", "")
+        if output_dir:
+            self._deployment.output_dir = output_dir
         engine = ExecutionEngine(self._deployment, headed=headed,
                                  stealth=stealth)
         engine.run(resume_mode=resume_mode)
@@ -3976,12 +3979,10 @@ def _cli_run(args: list[str]) -> int:
         else:
             filtered_args.append(arg)
 
-    env = os.environ.copy()
-    env["WISE_RPA_RESUME_MODE"] = resume_mode
-
     # Separate robot options from suite paths (files/dirs come last)
     robot_opts = []
     suite_paths = []
+    output_dir = ""
     i = 0
     while i < len(filtered_args):
         arg = filtered_args[i]
@@ -3989,11 +3990,22 @@ def _cli_run(args: list[str]) -> int:
             robot_opts.append(arg)
             # Consume the next arg as the option's value if it exists
             if i + 1 < len(filtered_args) and not filtered_args[i + 1].startswith("--"):
+                if arg == "--outputdir":
+                    output_dir = filtered_args[i + 1]
                 robot_opts.append(filtered_args[i + 1])
                 i += 1
         else:
             suite_paths.append(arg)
         i += 1
+
+    # If no --outputdir specified, inject one so robot and engine share it
+    if not output_dir:
+        output_dir = "output"
+        robot_opts.extend(["--outputdir", output_dir])
+
+    env = os.environ.copy()
+    env["WISE_RPA_RESUME_MODE"] = resume_mode
+    env["WISE_RPA_OUTPUT_DIR"] = output_dir
 
     script_dir = Path(__file__).resolve().parent
     cmd = ["robot", "--pythonpath", str(script_dir)] + robot_opts + suite_paths
