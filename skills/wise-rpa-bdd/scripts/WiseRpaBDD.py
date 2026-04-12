@@ -506,22 +506,15 @@ def _get_rf_browser() -> Any:
     return BuiltIn().get_library_instance('Browser')
 
 
-class _StealthAdapter:
-    """Raw Playwright with playwright-stealth init scripts.
+class _BrowserAdapter:
+    """Base browser adapter interface for the execution engine.
 
-    Why this exists: robotframework-browser doesn't expose Playwright's
-    ``context.addInitScript()``, which playwright-stealth needs to patch
-    ``navigator.webdriver``, WebGL renderer, and other fingerprint vectors
-    *before* page JavaScript runs.  Sites with aggressive bot detection
-    (Yelp/DataDome, Cloudflare) require these patches.
+    Two implementations:
+      - ``_PlaywrightAdapter``: fast, uses patchright/playwright (default)
+      - ``_NodriverAdapter``: stealth, uses nodriver raw CDP (for anti-bot sites)
+
+    Use ``_make_adapter(stealth=True/False)`` factory to create the right one.
     """
-
-    _CHANNEL = "msedge"
-    _ARGS = ["--disable-blink-features=AutomationControlled"]
-    _DEFAULTS = {
-        "locale": "en-US",
-        "timezone_id": "America/New_York",
-    }
 
     class load_states:
         """Enum-like for wait_for_load_state — mirrors RF-Browser's PageLoadStates."""
@@ -530,13 +523,87 @@ class _StealthAdapter:
         load = "load"
 
     def __init__(self) -> None:
+        self._timeout = 30_000
+
+    # -- lifecycle --
+    def new_browser(self, *, headless: bool = True) -> None: ...
+    def new_context(self, **kw: Any) -> None: ...
+    def new_page(self, url: str = "about:blank") -> None: ...
+    def close_context(self) -> None: ...
+    def close_browser(self, _which: str = "ALL") -> None: ...
+
+    # -- settings --
+    def set_browser_timeout(self, timeout: str) -> None:
+        self._timeout = int(timeout.replace("ms", "").strip())
+
+    # -- navigation --
+    def go_to(self, url: str, **_kw: Any) -> None: ...
+    def get_url(self) -> str: ...
+
+    # -- wait --
+    def wait_for_load_state(self, state: Any, **_kw: Any) -> None: ...
+
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: Any = "10s", **_kw: Any) -> None: ...
+
+    # -- element queries --
+    def get_element_count(self, selector: str) -> int: ...
+    def get_text(self, selector: str, **_kw: Any) -> str: ...
+    def get_attribute(self, selector: str, attr: str, **_kw: Any) -> str | None: ...
+    def get_property(self, selector: str, prop: str, **_kw: Any) -> Any: ...
+
+    # -- interactions --
+    def click(self, selector: str, **_kw: Any) -> None: ...
+    def fill_text(self, selector: str, text: str, **_kw: Any) -> None: ...
+    def select_options_by(self, selector: str, _attr: str, value: str,
+                          **_kw: Any) -> None: ...
+    def hover(self, selector: str, **_kw: Any) -> None: ...
+    def focus(self, selector: str, **_kw: Any) -> None: ...
+    def dblclick(self, selector: str, **_kw: Any) -> None: ...
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None: ...
+    def take_screenshot(self, *, filename: str = "screenshot.png",
+                        **_kw: Any) -> None: ...
+    def upload_file(self, selector: str, path: str, **_kw: Any) -> None: ...
+
+    # -- JS evaluation --
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            arg: Any = None, all_elements: bool = False,
+                            **_kw: Any) -> Any: ...
+
+    @staticmethod
+    def _parse_timeout(timeout: Any) -> int:
+        """Parse timeout to milliseconds from various formats."""
+        from datetime import timedelta
+        if isinstance(timeout, timedelta):
+            return int(timeout.total_seconds() * 1000)
+        if isinstance(timeout, (int, float)):
+            return int(timeout)
+        s = str(timeout).strip()
+        if s.endswith("ms"):
+            return int(s[:-2])
+        if s.endswith("s"):
+            return int(s[:-1]) * 1000
+        return int(s)
+
+
+# ---------------------------------------------------------------------------
+# Playwright adapter — fast, default engine
+# ---------------------------------------------------------------------------
+
+class _PlaywrightAdapter(_BrowserAdapter):
+    """Playwright/patchright browser adapter.  Fast batch CDP, stealth patches
+    via playwright-stealth init scripts."""
+
+    _CHANNEL = "msedge"
+    _ARGS = ["--disable-blink-features=AutomationControlled"]
+    _DEFAULTS = {"locale": "en-US", "timezone_id": "America/New_York"}
+
+    def __init__(self) -> None:
+        super().__init__()
         self._pw: Any = None
         self._browser: Any = None
         self._context: Any = None
         self._page: Any = None
-        self._timeout = 30_000
-
-    # -- lifecycle ----------------------------------------------------------
 
     def new_browser(self, *, headless: bool = True) -> None:
         try:
@@ -544,17 +611,16 @@ class _StealthAdapter:
         except ImportError:
             from playwright.sync_api import sync_playwright  # type: ignore[assignment]
         self._pw = sync_playwright().start()
-        logger.info(f"  Stealth adapter: {'patchright' if 'patchright' in type(self._pw).__module__ else 'playwright'}")
+        label = "patchright" if "patchright" in type(self._pw).__module__ else "playwright"
+        logger.info(f"  Browser adapter: {label}")
         self._browser = self._pw.chromium.launch(
             headless=headless, channel=self._CHANNEL, args=self._ARGS,
         )
 
     def new_context(self, **kw: Any) -> None:
         from playwright_stealth import Stealth
-        # RF-Browser uses camelCase; Playwright uses snake_case
         _remap = {"userAgent": "user_agent", "timezoneId": "timezone_id"}
         pw_kw = {_remap.get(k, k): v for k, v in kw.items()}
-        # Apply stealth defaults, let caller override
         merged = {**self._DEFAULTS, **pw_kw}
         self._context = self._browser.new_context(**merged)
         Stealth().apply_stealth_sync(self._context)
@@ -567,8 +633,8 @@ class _StealthAdapter:
     def close_context(self) -> None:
         if self._context:
             self._context.close()
-            self._context = None
-            self._page = None
+        self._context = None
+        self._page = None
 
     def close_browser(self, _which: str = "ALL") -> None:
         if self._browser:
@@ -578,14 +644,10 @@ class _StealthAdapter:
             self._pw.stop()
             self._pw = None
 
-    # -- settings -----------------------------------------------------------
-
     def set_browser_timeout(self, timeout: str) -> None:
-        self._timeout = int(timeout.replace("ms", "").strip())
+        super().set_browser_timeout(timeout)
         if self._page:
             self._page.set_default_timeout(self._timeout)
-
-    # -- navigation ---------------------------------------------------------
 
     def go_to(self, url: str, **_kw: Any) -> None:
         self._page.goto(url, timeout=self._timeout)
@@ -593,27 +655,14 @@ class _StealthAdapter:
     def get_url(self) -> str:
         return self._page.url
 
-    # -- wait ---------------------------------------------------------------
-
     def wait_for_load_state(self, state: Any, **_kw: Any) -> None:
         s = state if isinstance(state, str) else str(state).split(".")[-1]
         self._page.wait_for_load_state(s, timeout=self._timeout)
 
     def wait_for_elements_state(self, selector: str, state: str = "attached",
                                 timeout: Any = "10s", **_kw: Any) -> None:
-        from datetime import timedelta
-        if isinstance(timeout, timedelta):
-            ms = int(timeout.total_seconds() * 1000)
-        elif isinstance(timeout, (int, float)):
-            ms = int(timeout)
-        else:
-            timeout_str = str(timeout)
-            ms = int(timeout_str.replace("s", "").replace("ms", "").strip())
-            if "s" in timeout_str and "ms" not in timeout_str:
-                ms *= 1000
+        ms = self._parse_timeout(timeout)
         self._page.wait_for_selector(selector, state="attached", timeout=ms)
-
-    # -- element queries ----------------------------------------------------
 
     def get_element_count(self, selector: str) -> int:
         return self._page.locator(selector).count()
@@ -626,8 +675,6 @@ class _StealthAdapter:
 
     def get_property(self, selector: str, prop: str, **_kw: Any) -> Any:
         return self._page.locator(selector).first.evaluate(f"el => el.{prop}")
-
-    # -- interactions -------------------------------------------------------
 
     def click(self, selector: str, **_kw: Any) -> None:
         self._page.locator(selector).first.click(timeout=self._timeout)
@@ -660,8 +707,6 @@ class _StealthAdapter:
     def upload_file(self, selector: str, path: str, **_kw: Any) -> None:
         self._page.locator(selector).first.set_input_files(path)
 
-    # -- JS evaluation ------------------------------------------------------
-
     def evaluate_javascript(self, selector: str | None, *function: str,
                             arg: Any = None, all_elements: bool = False,
                             **_kw: Any) -> Any:
@@ -671,6 +716,323 @@ class _StealthAdapter:
         elif selector:
             return self._page.locator(selector).first.evaluate(script)
         return self._page.evaluate(script)
+
+
+# ---------------------------------------------------------------------------
+# Nodriver adapter — stealth, for anti-bot sites (DataDome, etc.)
+# ---------------------------------------------------------------------------
+
+class _NodriverAdapter(_BrowserAdapter):
+    """Nodriver (raw CDP) browser adapter.  Zero Playwright artifacts, invisible
+    to DataDome/Cloudflare.  Async internally, sync bridge for RF."""
+
+    _EDGE_BINS = [
+        "/usr/bin/microsoft-edge",
+        "/usr/bin/microsoft-edge-stable",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._browser: Any = None
+        self._page: Any = None
+        self._loop: Any = None
+        self._loop_thread: Any = None
+        self._warmed_origins: set[str] = set()
+
+    # -- async bridge -------------------------------------------------------
+
+    def _run(self, coro: Any) -> Any:
+        """Run an async coroutine synchronously via the dedicated loop."""
+        import concurrent.futures
+        future = concurrent.futures.Future()  # type: ignore[type-arg]
+
+        async def _wrap() -> None:
+            try:
+                future.set_result(await coro)
+            except Exception as exc:
+                future.set_exception(exc)
+
+        self._loop.call_soon_threadsafe(
+            lambda: self._loop.create_task(_wrap()))
+        return future.result(timeout=self._timeout / 1000 + 10)
+
+    def _start_loop(self) -> None:
+        import asyncio, threading
+        self._loop = asyncio.new_event_loop()
+        t = threading.Thread(
+            target=lambda: (asyncio.set_event_loop(self._loop),
+                            self._loop.run_forever()),
+            daemon=True)
+        t.start()
+        self._loop_thread = t
+
+    # -- Playwright >> selector translation ---------------------------------
+
+    def _select(self, selector: str) -> Any:
+        """Select first element, handling Playwright ``>>`` syntax."""
+        import re
+        parts = [p.strip() for p in selector.split(" >> ")] if " >> " in selector else [selector]
+        current: Any = self._page
+        for i, part in enumerate(parts):
+            # text= selector
+            m = re.match(r'^text[=]"?(.+?)"?$', part)
+            if m:
+                current = self._run(
+                    (current if hasattr(current, 'find') else self._page)
+                    .find(m.group(1), best_match=True))
+                continue
+            # nth=N
+            m = re.match(r'^nth=(\d+)$', part)
+            if m:
+                idx = int(m.group(1))
+                current = current[idx] if isinstance(current, list) and idx < len(current) else None
+                continue
+            # CSS
+            if isinstance(current, list):
+                current = current[0] if current else None
+            if current is None:
+                return None
+            # If next part is nth, select all; otherwise select first
+            if i + 1 < len(parts) and parts[i + 1].startswith("nth="):
+                parent = self._page if i == 0 else current
+                current = self._run(parent.select_all(part) if hasattr(parent, 'select_all')
+                                    else parent.query_selector_all(part)) or []
+            else:
+                current = self._run(current.query_selector(part) if hasattr(current, 'query_selector')
+                                    else current.select(part))
+            if current is None:
+                return None
+        return current if not isinstance(current, list) else (current[0] if current else None)
+
+    def _eval(self, script: str) -> Any:
+        """Evaluate JS, auto-wrapping function expressions as IIFE."""
+        s = script.strip()
+        if s.startswith("() =>") or s.startswith("function"):
+            s = f"({s})()"
+        result = self._run(self._page.evaluate(s))
+        if hasattr(result, 'exception_id'):
+            import sys
+            print(f"[nodriver eval ERROR] {result}", file=sys.stderr)
+            return 0 if 'length' in script else None
+        return self._unwrap_cdp(result)
+
+    @staticmethod
+    def _unwrap_cdp(val: Any) -> Any:
+        """Unwrap CDP RemoteObject typed wrappers to plain Python values."""
+        if isinstance(val, dict):
+            if "type" in val and "value" in val and len(val) <= 3:
+                return _NodriverAdapter._unwrap_cdp(val["value"])
+            return {k: _NodriverAdapter._unwrap_cdp(v) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_NodriverAdapter._unwrap_cdp(v) for v in val]
+        return val
+
+    # -- lifecycle ----------------------------------------------------------
+
+    @classmethod
+    def _find_edge_binary(cls) -> str | None:
+        import shutil
+        for c in cls._EDGE_BINS:
+            if shutil.which(c) or os.path.isfile(c):
+                return c
+        return None
+
+    def new_browser(self, *, headless: bool = True) -> None:
+        import nodriver
+        edge_bin = self._find_edge_binary()
+        if not edge_bin:
+            raise RuntimeError("Nodriver stealth mode requires Edge or Chrome")
+        self._start_loop()
+
+        async def _launch() -> Any:
+            return await nodriver.start(headless=headless,
+                                        browser_executable_path=edge_bin)
+
+        self._browser = self._run(_launch())
+        logger.info(f"  Stealth adapter: nodriver ({os.path.basename(edge_bin)})")
+
+    def new_context(self, **kw: Any) -> None:
+        pass  # nodriver has no separate context
+
+    def new_page(self, url: str = "about:blank") -> None:
+        if url != "about:blank":
+            self._page = self._run(self._browser.get(url))
+        else:
+            tabs = self._browser.tabs
+            self._page = tabs[0] if tabs else self._run(self._browser.get("about:blank"))
+
+    def close_context(self) -> None:
+        self._page = None
+
+    def close_browser(self, _which: str = "ALL") -> None:
+        if self._browser:
+            self._browser.stop()
+            self._browser = None
+        if self._loop:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._loop = None
+
+    # -- navigation ---------------------------------------------------------
+
+    def go_to(self, url: str, **_kw: Any) -> None:
+        from urllib.parse import urlparse
+        origin = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        if origin not in self._warmed_origins:
+            self._warmed_origins.add(origin)
+            logger.info(f"  Stealth warmup: visiting {origin}")
+            self._page = self._run(self._browser.get(origin))
+        self._page = self._run(self._browser.get(url))
+
+    def get_url(self) -> str:
+        return self._eval("window.location.href")
+
+    # -- wait ---------------------------------------------------------------
+
+    def wait_for_load_state(self, state: Any, **_kw: Any) -> None:
+        pass  # nodriver auto-waits on navigation
+
+    def wait_for_elements_state(self, selector: str, state: str = "attached",
+                                timeout: Any = "10s", **_kw: Any) -> None:
+        ms = self._parse_timeout(timeout)
+        base_css = selector.split(" >> ")[0].strip()
+        self._run(self._page.wait_for(base_css, timeout=ms / 1000))
+
+    # -- element queries ----------------------------------------------------
+
+    def get_element_count(self, selector: str) -> int:
+        import json, re
+        if " >> " not in selector:
+            m = re.match(r'^text[=]"?(.+?)"?$', selector)
+            if m:
+                els = self._run(self._page.find_all(m.group(1)))
+                return len(els) if els else 0
+            return self._eval(
+                f"document.querySelectorAll({json.dumps(selector)}).length")
+        # Complex selector with >>
+        parts = [p.strip() for p in selector.split(" >> ")]
+        js_parts = []
+        for p in parts:
+            m = re.match(r'^nth=(\d+)$', p)
+            if m:
+                idx = int(m.group(1))
+                if js_parts:
+                    last = js_parts.pop()
+                    js_parts.append(f"[{last}[{idx}]]")
+            else:
+                js_parts.append(f"document.querySelectorAll({json.dumps(p)})")
+        if len(js_parts) == 1:
+            return self._eval(f"{js_parts[0]}.length")
+        parent_js = js_parts[0]
+        for jp in js_parts[1:-1]:
+            parent_js = jp.replace("document.querySelectorAll",
+                                   f"{parent_js}[0].querySelectorAll")
+        child_css = parts[-1]
+        m = re.match(r'^nth=(\d+)$', child_css)
+        if m:
+            total = self._eval(f"{parent_js}.length")
+            return 1 if int(m.group(1)) < (total or 0) else 0
+        return self._eval(
+            f"({parent_js}[0]||document).querySelectorAll("
+            f"{json.dumps(child_css)}).length") or 0
+
+    def get_text(self, selector: str, **_kw: Any) -> str:
+        el = self._select(selector)
+        return el.text if el else ""
+
+    def get_attribute(self, selector: str, attr: str, **_kw: Any) -> str | None:
+        el = self._select(selector)
+        return el.attrs.get(attr) if el else None
+
+    def get_property(self, selector: str, prop: str, **_kw: Any) -> Any:
+        import json
+        css = selector.split(" >> ")[0]
+        return self._eval(f"(document.querySelector({json.dumps(css)})||{{}}).{prop}")
+
+    # -- interactions -------------------------------------------------------
+
+    def click(self, selector: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.click())
+
+    def fill_text(self, selector: str, text: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.clear_input())
+            self._run(el.send_keys(text))
+
+    def select_options_by(self, selector: str, _attr: str, value: str,
+                          **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.select_option(value))
+
+    def hover(self, selector: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.mouse_move())
+
+    def focus(self, selector: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.click())
+
+    def dblclick(self, selector: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.click())
+            self._run(el.click())
+
+    def press_keys(self, selector: str, *keys: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            for key in keys:
+                self._run(el.send_keys(key))
+
+    def take_screenshot(self, *, filename: str = "screenshot.png",
+                        **_kw: Any) -> None:
+        self._run(self._page.save_screenshot(filename))
+
+    def upload_file(self, selector: str, path: str, **_kw: Any) -> None:
+        el = self._select(selector)
+        if el:
+            self._run(el.send_file(path))
+
+    # -- JS evaluation ------------------------------------------------------
+
+    def evaluate_javascript(self, selector: str | None, *function: str,
+                            arg: Any = None, all_elements: bool = False,
+                            **_kw: Any) -> Any:
+        import json as _json, re as _re
+        script = " ".join(function)
+        css, nth = selector, None
+        if selector and " >> " in selector:
+            parts = [p.strip() for p in selector.split(" >> ")]
+            css = parts[0]
+            m = _re.match(r'^nth=(\d+)$', parts[-1]) if len(parts) > 1 else None
+            nth = int(m.group(1)) if m else None
+        if selector and all_elements:
+            el_js = f"document.querySelectorAll({_json.dumps(css)})"
+            return self._eval(f"Array.from({el_js}).map(el => ({script})(el))")
+        elif selector:
+            target = (f"document.querySelectorAll({_json.dumps(css)})[{nth}]"
+                      if nth is not None
+                      else f"document.querySelector({_json.dumps(css)})")
+            return self._eval(f"({script})({target})")
+        return self._eval(script)
+
+
+# Keep backward-compatible name used by the engine
+_StealthAdapter = _NodriverAdapter
+
+
+def _make_adapter(stealth: bool) -> _BrowserAdapter:
+    """Factory: create the right browser adapter based on stealth flag."""
+    if stealth:
+        return _NodriverAdapter()
+    return _PlaywrightAdapter()
 
 
 class _StealthBrowserBridge:
@@ -868,19 +1230,29 @@ class ExecutionEngine:
     def _bl(self) -> Any:
         """Lazy-init the browser backend.
 
-        Returns the RF-Browser library instance directly when stealth is off,
-        or a ``_StealthAdapter`` (raw Playwright + playwright-stealth) when on.
+        Uses ``_make_adapter()`` to create the right adapter:
+          - stealth=True  → ``_NodriverAdapter`` (raw CDP, anti-bot)
+          - stealth=False → ``_PlaywrightAdapter`` (fast patchright)
+
+        When stealth is off AND RF-Browser library is available, uses that
+        directly for maximum compatibility with ``call_keyword`` blocks.
         """
         if self._adapter is None:
             if self.stealth:
-                self._adapter = _StealthAdapter()
+                self._adapter = _make_adapter(stealth=True)
                 self._PageLoadStates = self._adapter.load_states
                 self._stealth_bridge = _StealthBrowserBridge(self._adapter)
             else:
-                pass  # _stealth_bridge already None from __init__
-                self._adapter = _get_rf_browser()
-                from Browser.utils.data_types import PageLoadStates
-                self._PageLoadStates = PageLoadStates
+                # Try RF-Browser first (full Playwright, fastest)
+                try:
+                    self._adapter = _get_rf_browser()
+                    from Browser.utils.data_types import PageLoadStates
+                    self._PageLoadStates = PageLoadStates
+                except Exception:
+                    # Fallback to our own Playwright adapter
+                    self._adapter = _make_adapter(stealth=False)
+                    self._PageLoadStates = self._adapter.load_states
+                    self._stealth_bridge = _StealthBrowserBridge(self._adapter)
         return self._adapter
 
     def run(self, resume_mode: str = "auto") -> None:
@@ -3880,9 +4252,9 @@ def _build_generate_prompt(requirement: str, output: Path,
         "   - Multi-resource (discovery→detail): resource 1 extracts URLs, "
         "resource 2 consumes them via {field} template. E.g. product "
         "listing → product detail pages.\n"
-        "   - Stealth (anti-bot): WISE_RPA_STEALTH=1, use call_keyword for "
-        "auth flows, avoid evaluate_js where possible — stealth adapter "
-        "routes through patchright.\n"
+        "   - Stealth (anti-bot): WISE_RPA_STEALTH=1 (default), uses nodriver "
+        "(raw CDP, no Playwright artifacts). For DataDome/Cloudflare sites. "
+        "Set WISE_RPA_STEALTH=0 for Playwright (faster, no anti-bot bypass).\n"
         f"4. /rrpa-review — run `robot --dryrun --pythonpath {skill_dir / 'scripts'}` "
         "to verify all keywords resolve. Fix and loop until clean.\n"
         "5. /rrpa-re-explore (if needed) — after dryrun passes, go back to "

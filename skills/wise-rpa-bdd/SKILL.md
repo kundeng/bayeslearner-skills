@@ -21,7 +21,8 @@ flowchart LR
 
 **Key capabilities:** declarative BDD specs as executable rule DAGs, MDP-modeled
 execution with guards and observation gates, write-ahead checkpoint/resume,
-AOP aspect registry (timing, slow-motion, checkpoint), stealth browser adapter,
+AOP aspect registry (timing, slow-motion, checkpoint), dual browser engine
+(Playwright for speed, nodriver for anti-bot stealth),
 AI extraction pipeline, multi-resource chaining, and agent-generated suites
 validated against golden baselines.
 
