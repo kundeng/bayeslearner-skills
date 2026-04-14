@@ -4029,12 +4029,14 @@ class WiseRpaBDD:
 # ---------------------------------------------------------------------------
 
 _BDD_PREFIXES = ("Given ", "When ", "Then ", "And ", "But ")
+_STRUCTURAL_PREFIXES = ("I define rule ",)
 _SECTION_RE = re.compile(r"^\*\*\* (.+) \*\*\*$")
 _CELL_SPLIT_RE = re.compile(r"\s{2,}|\t+")
 
 
 def _starts_with_bdd(text: str) -> bool:
-    return any(text.startswith(p) for p in _BDD_PREFIXES)
+    return (any(text.startswith(p) for p in _BDD_PREFIXES)
+            or any(text.startswith(p) for p in _STRUCTURAL_PREFIXES))
 
 
 def validate_bdd(path: Path) -> list[str]:
@@ -4057,12 +4059,13 @@ def validate_bdd(path: Path) -> list[str]:
                 if len(parts) >= 2 and not _starts_with_bdd(parts[1]):
                     errors.append(f"{path}:{lineno}: setup/teardown must use BDD keyword")
             continue
-        if section in {"test cases", "keywords"}:
-            if raw_line.startswith("    ..."):
+        if section == "keywords":
+            # User-defined keywords may contain raw RF steps — skip validation
+            continue
+        if section == "test cases":
+            if stripped.startswith("..."):
                 continue
             if not raw_line.startswith(" "):
-                if section == "keywords" and not _starts_with_bdd(stripped):
-                    errors.append(f"{path}:{lineno}: keyword definition must start with BDD prefix")
                 continue
             parts = [p for p in _CELL_SPLIT_RE.split(stripped) if p]
             if not parts:
@@ -4115,7 +4118,7 @@ class WiseRpaBDDTest:
         out.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Invoking agent: {requirement[:80]}...")
-        _cli_generate_core(requirement, out, model=self._model,
+        _cli_create_core(requirement, out, model=self._model,
                            max_turns=self._max_turns, backend=self._backend)
 
         if out.exists() and out.stat().st_size > 0:
@@ -4318,27 +4321,239 @@ def _run_agent_cli(prompt: str, backend: str = "claude",
         raise ValueError(f"Unknown backend: {backend}")
 
 
-def _cli_generate_core(requirement: str, output: Path, model: str = "",
-                       max_turns: int = 50, backend: str = "claude",
-                       fast: bool = False) -> int:
-    """Core agent generation logic shared by CLI and RF keyword."""
+def _cli_create_core(requirement: str, output: Path, model: str = "",
+                     max_turns: int = 50, backend: str = "claude",
+                     fast: bool = False) -> int:
+    """Core agent creation logic shared by CLI and RF keyword."""
     prompt = _build_generate_prompt(requirement, output, fast=fast)
     return _run_agent_cli(prompt, backend=backend, model=model,
                           max_turns=max_turns)
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI — Endow phase
+# ---------------------------------------------------------------------------
+
+_SUITE_SEED = """\
+*** Settings ***
+Documentation     {description}
+Library           WiseRpaBDD
+Suite Setup       Given I start deployment "${{DEPLOYMENT}}"
+Suite Teardown    Then I finalize deployment
+
+*** Variables ***
+${{DEPLOYMENT}}       {name}
+${{ARTIFACT}}         records
+
+# --- Requirement ---
+# {requirement}
+# ------------------
+
+*** Test Cases ***
+# To be generated: WiseRpaBDD.py generate {name}/
+"""
+
+
+def _cli_init(args: list[str]) -> int:
+    """Scaffold a new project with an optional requirement seed."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="WiseRpaBDD.py init")
+    parser.add_argument("name", help="Project name (becomes directory name)")
+    parser.add_argument("requirement", nargs="?", default="",
+                        help="Requirement prompt (inline string or path to .txt/.md)")
+    parsed = parser.parse_args(args)
+
+    project = Path(parsed.name)
+    if project.exists():
+        print(f"Error: directory already exists: {project}")
+        return 1
+
+    # Read requirement from file if path given
+    req = parsed.requirement
+    if req:
+        req_path = Path(req)
+        if req_path.is_file():
+            req = req_path.read_text().strip()
+            print(f"Read requirement from: {req_path}")
+
+    project.mkdir(parents=True)
+    (project / "evidence").mkdir()
+    (project / "output").mkdir()
+
+    # Save requirement as standalone file for generate to pick up
+    if req:
+        (project / "requirement.md").write_text(req + "\n")
+
+    desc = req.split("\n")[0][:80] if req else parsed.name
+    suite = _SUITE_SEED.format(name=parsed.name, description=desc,
+                               requirement=req.replace("\n", "\n# ") if req else "(none)")
+    (project / "suite.robot").write_text(suite)
+
+    print(f"Created project: {project}/")
+    print(f"  suite.robot       seed suite")
+    if req:
+        print(f"  requirement.md    requirement prompt")
+    print(f"  evidence/         for explore snapshots")
+    print(f"  output/           for run output")
+    print()
+    hint_path = f'"{project}/"' if " " in str(project) else f"{project}/"
+    print(f"Next: WiseRpaBDD.py generate {hint_path}")
+    return 0
+
+
+def _cli_doctor(args: list[str]) -> int:
+    """Validate environment: check all required tools are installed."""
+    if args and (args[0] in ("--help", "-h")):
+        print("Usage: WiseRpaBDD.py doctor")
+        print()
+        print("Checks that all required tools and libraries are installed.")
+        return 0
+
+    import shutil
+    import subprocess as sp
+
+    checks: list[tuple[str, bool, str]] = []
+
+    # Python version
+    import sys
+    py_ok = sys.version_info >= (3, 11)
+    checks.append((f"Python {sys.version_info.major}.{sys.version_info.minor}",
+                    py_ok, "Requires Python >= 3.11"))
+
+    # robotframework
+    try:
+        import robot  # type: ignore
+        checks.append((f"robotframework {robot.version.VERSION}", True, ""))
+    except ImportError:
+        checks.append(("robotframework", False, "uv pip install robotframework"))
+
+    # robotframework-browser
+    try:
+        import Browser  # type: ignore  # noqa: N811
+        checks.append(("robotframework-browser", True, ""))
+    except ImportError:
+        checks.append(("robotframework-browser", False,
+                        "uv pip install robotframework-browser && rfbrowser init"))
+
+    # nodriver
+    try:
+        import nodriver  # type: ignore
+        checks.append(("nodriver", True, ""))
+    except ImportError:
+        checks.append(("nodriver", False, "uv pip install nodriver"))
+
+    # patchright
+    try:
+        import patchright  # type: ignore
+        checks.append(("patchright", True, ""))
+    except ImportError:
+        checks.append(("patchright", False, "uv pip install patchright"))
+
+    # agent-browser
+    ab_ok = False
+    ab = shutil.which("agent-browser")
+    if ab:
+        ab_ok = True
+    else:
+        try:
+            r = sp.run(["npx", "agent-browser", "--version"],
+                        capture_output=True, text=True, timeout=15)
+            ab_ok = r.returncode == 0
+        except (FileNotFoundError, sp.TimeoutExpired):
+            ab_ok = False
+    checks.append(("agent-browser", ab_ok,
+                    "npm install -g @anthropic-ai/agent-browser"))
+
+    # report
+    ok_all = True
+    for name, ok, hint in checks:
+        mark = "\033[32m✓\033[0m" if ok else "\033[31m✗\033[0m"
+        line = f"  {mark} {name}"
+        if not ok:
+            line += f"  — {hint}"
+            ok_all = False
+        print(line)
+
+    if ok_all:
+        print("\nEnvironment ready. Run: WiseRpaBDD.py init <name> [requirement]")
+    else:
+        # Collect install commands for missing deps
+        pip_pkgs = []
+        npm_pkgs = []
+        for name, ok, hint in checks:
+            if ok or not hint:
+                continue
+            if "uv pip" in hint:
+                # extract package name from "uv pip install <pkg>"
+                pkg = hint.split("uv pip install ")[-1].split(" &&")[0]
+                pip_pkgs.append(pkg)
+            elif "npm install" in hint:
+                npm_pkgs.append(hint)
+
+        print()
+        if pip_pkgs:
+            print(f"  Fix:  uv pip install {' '.join(pip_pkgs)}")
+        if npm_pkgs:
+            for cmd in npm_pkgs:
+                print(f"  Fix:  {cmd}")
+        print()
+        print("Then re-run: WiseRpaBDD.py doctor")
+    return 0 if ok_all else 1
+
+
+# ---------------------------------------------------------------------------
+# CLI — Explore phase (explore + create in one flow)
+# ---------------------------------------------------------------------------
+
+def _explore_url(url: str, evidence_dir: Path) -> Path | None:
+    """Explore a URL via agent-browser and save evidence. Returns evidence path."""
+    import subprocess as sp
+    from datetime import datetime
+    from urllib.parse import urlparse
+
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    domain = urlparse(url).netloc.replace(":", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    print(f"Exploring {url} ...")
+    r = sp.run(["npx", "agent-browser", "open", url],
+               capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        print(f"Error opening URL: {r.stderr.strip()}")
+        return None
+
+    print("Capturing accessibility snapshot ...")
+    r = sp.run(["npx", "agent-browser", "snapshot", "-c", "-d", "3"],
+               capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        print(f"Error capturing snapshot: {r.stderr.strip()}")
+        return None
+
+    snapshot = r.stdout.strip()
+    out_file = evidence_dir / f"{domain}_{ts}.txt"
+    out_file.write_text(snapshot)
+    print(f"Evidence saved: {out_file} ({len(snapshot)} chars)")
+
+    sp.run(["npx", "agent-browser", "close"],
+           capture_output=True, text=True, timeout=10)
+    return out_file
+
+
+# ---------------------------------------------------------------------------
+# CLI — Exploit phase
 # ---------------------------------------------------------------------------
 
 def _cli_run(args: list[str]) -> int:
-    """Run a .robot suite live (full browser execution).
-
-    Flags consumed before passing to robot:
-      --fresh   Ignore existing checkpoint, start clean
-      --resume  Require checkpoint, error if none exists
-      (default) Auto-resume if checkpoint exists
-    """
+    """Run a .robot suite live (full browser execution)."""
+    if not args or args == ["--help"] or args == ["-h"]:
+        print("Usage: WiseRpaBDD.py run <suite.robot> [--fresh|--resume] [robot-args...]")
+        print()
+        print("  --fresh   Ignore existing checkpoint, start clean")
+        print("  --resume  Require checkpoint, error if none exists")
+        print("  (default) Auto-resume if checkpoint exists")
+        print()
+        print("All other flags are passed through to robot.")
+        return 0 if "--help" in args or "-h" in args else 1
     import subprocess
 
     resume_mode = "auto"
@@ -4384,49 +4599,59 @@ def _cli_run(args: list[str]) -> int:
     return subprocess.run(cmd, env=env).returncode
 
 
-def _cli_dryrun(args: list[str]) -> int:
-    """Run robot --dryrun to verify keyword resolution."""
+def _cli_check(args: list[str]) -> int:
+    """BDD lint + keyword dryrun in one pass."""
     import subprocess
-    script_dir = Path(__file__).resolve().parent
-    cmd = [
-        "robot", "--dryrun", "--pythonpath", str(script_dir),
-        "--output", "NONE", "--log", "NONE", "--report", "NONE",
-    ]
-    if args:
-        cmd.extend(args)
-    return subprocess.run(cmd).returncode
+    if not args or args == ["--help"] or args == ["-h"]:
+        print("Usage: WiseRpaBDD.py check <suite.robot> [...]")
+        print()
+        print("Runs BDD format lint, then robot --dryrun if lint passes.")
+        return 0 if "--help" in args or "-h" in args else 1
 
+    # Collect .robot files from args (skip flags)
+    robot_files = [a for a in args if not a.startswith("--")]
 
-def _cli_validate(args: list[str]) -> int:
-    """Validate BDD format of .robot files."""
-    if not args:
-        print("Usage: WiseRpaBDD.py validate <suite.robot> [...]")
-        return 1
+    # Phase 1: BDD format lint
+    print("── BDD lint ──")
     rc = 0
-    for arg in args:
+    for arg in robot_files:
         p = Path(arg)
         if not p.exists():
-            print(f"File not found: {p}")
+            print(f"  File not found: {p}")
             rc = 1
             continue
         errors = validate_bdd(p)
         if errors:
             for e in errors:
-                print(e)
+                print(f"  {e}")
             rc = 1
         else:
-            print(f"BDD format OK: {p}")
-    return rc
+            print(f"  ✓ {p}")
+
+    if rc != 0:
+        print("\nBDD lint failed — fix errors above before dryrun.")
+        return rc
+
+    # Phase 2: keyword resolution dryrun
+    print("\n── Dryrun ──")
+    script_dir = Path(__file__).resolve().parent
+    cmd = [
+        "robot", "--dryrun", "--pythonpath", str(script_dir),
+        "--output", "NONE", "--log", "NONE", "--report", "NONE",
+    ] + args
+    dr_rc = subprocess.run(cmd).returncode
+    if dr_rc == 0:
+        print("  ✓ All keywords resolved")
+    return dr_rc
 
 
 def _cli_generate(args: list[str]) -> int:
-    """Generate a .robot suite via an AI agent backend."""
+    """Agent explores site + generates .robot suite for a project."""
     import argparse
     parser = argparse.ArgumentParser(prog="WiseRpaBDD.py generate")
-    parser.add_argument("requirement",
-                        help="Natural language requirement string, or path "
-                             "to a .txt/.md prompt file")
-    parser.add_argument("-o", "--output", required=True, help="Output .robot path")
+    parser.add_argument("project", help="Project directory (from init)")
+    parser.add_argument("--requirement", "-r", default="",
+                        help="Override requirement (inline string or path to file)")
     parser.add_argument("--backend", default="claude",
                         choices=["claude", "codex", "aichat"],
                         help="Agent backend (default: claude)")
@@ -4437,20 +4662,35 @@ def _cli_generate(args: list[str]) -> int:
                         help="Pre-bake keyword docs into prompt (skip orient reads)")
     parsed = parser.parse_args(args)
 
-    # Accept requirement as file path or inline string
-    req = parsed.requirement
-    req_path = Path(req)
-    if req_path.is_file():
-        req = req_path.read_text().strip()
-        print(f"Read requirement from: {req_path}")
+    project = Path(parsed.project)
+    if not project.is_dir():
+        print(f"Error: not a project directory: {project}")
+        print(f"Run: WiseRpaBDD.py init {project}")
+        return 1
 
-    out = Path(parsed.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve requirement: CLI override > project/requirement.md
+    req = parsed.requirement
+    if req:
+        req_path = Path(req)
+        if req_path.is_file():
+            req = req_path.read_text().strip()
+            print(f"Read requirement from: {req_path}")
+    else:
+        req_file = project / "requirement.md"
+        if req_file.is_file():
+            req = req_file.read_text().strip()
+            print(f"Using project requirement: {req_file}")
+        else:
+            print(f"Error: no requirement found. Pass --requirement or "
+                  f"create {req_file}")
+            return 1
+
+    out = project / "suite.robot"
 
     try:
-        _cli_generate_core(req, out,
-                           model=parsed.model, max_turns=parsed.max_turns,
-                           backend=parsed.backend, fast=parsed.fast)
+        _cli_create_core(req, out,
+                         model=parsed.model, max_turns=parsed.max_turns,
+                         backend=parsed.backend, fast=parsed.fast)
     except ImportError as e:
         print(f"Error: missing dependency for '{parsed.backend}' backend: {e}")
         return 1
@@ -4465,28 +4705,40 @@ def _cli_generate(args: list[str]) -> int:
 
 def main() -> int:
     import sys
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
+        print("WiseRpaBDD — BDD-driven browser automation (RPA + scraping)")
+        print()
         print("Usage: WiseRpaBDD.py <command> [args...]")
         print()
-        print("Commands:")
-        print("  run       <suite.robot> [--fresh|--resume] [robot-args...]")
-        print("            Run suite live (auto-resumes from checkpoint if exists)")
-        print("  dryrun    <suite.robot> [robot-args...]   Verify keyword resolution")
-        print("  validate  <suite.robot> [...]             BDD format lint")
-        print("  generate  <requirement|prompt.md> -o <output.robot> Agent-generate suite")
-        return 1
+        print("  doctor                                    Check & setup environment")
+        print("  init      <name> [requirement]            Scaffold project + seed suite")
+        print("  generate  <project/> [-r requirement]     Agent explores + generates suite")
+        print("  check     <suite.robot> [...]             BDD lint + keyword dryrun")
+        print("  run       <suite.robot> [--fresh|--resume] Run suite live")
+        print()
+        print("Getting started:")
+        print("  1. WiseRpaBDD.py doctor        # check environment, install deps")
+        print("  2. WiseRpaBDD.py init my-project \"Scrape quotes from toscrape.com\"")
+        print("  3. WiseRpaBDD.py generate my-project/")
+        print("  4. WiseRpaBDD.py check my-project/suite.robot")
+        print("  5. WiseRpaBDD.py run my-project/suite.robot")
+        return 0 if "--help" in sys.argv or "-h" in sys.argv else 1
 
     cmd = sys.argv[1]
     rest = sys.argv[2:]
 
-    if cmd == "run":
-        return _cli_run(rest)
-    elif cmd == "dryrun":
-        return _cli_dryrun(rest)
-    elif cmd == "validate":
-        return _cli_validate(rest)
-    elif cmd == "generate":
-        return _cli_generate(rest)
+    dispatch = {
+        "init": _cli_init,
+        "doctor": _cli_doctor,
+        "generate": _cli_generate,
+        "create": _cli_generate,  # alias
+        "check": _cli_check,
+        "run": _cli_run,
+    }
+
+    handler = dispatch.get(cmd)
+    if handler:
+        return handler(rest)
     else:
         print(f"Unknown command: {cmd}")
         return 1
