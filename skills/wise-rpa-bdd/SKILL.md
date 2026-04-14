@@ -21,7 +21,8 @@ flowchart LR
 
 **Key capabilities:** declarative BDD specs as executable rule DAGs, MDP-modeled
 execution with guards and observation gates, write-ahead checkpoint/resume,
-AOP aspect registry (timing, slow-motion, checkpoint), stealth browser adapter,
+AOP aspect registry (timing, slow-motion, checkpoint), dual browser engine
+(Playwright for speed, nodriver for anti-bot stealth),
 AI extraction pipeline, multi-resource chaining, and agent-generated suites
 validated against golden baselines.
 
@@ -33,16 +34,24 @@ production browser runtime right now.
 
 ---
 
-## 1 — Phases
+## 1 — Phases (E3: Endow → Explore → Exploit)
 
-| Phase | Verb | What happens | Output |
-|-------|------|-------------|--------|
-| orient | `/rrpa-orient` | Read this doc — understand harness, keywords, patterns | Mental model |
-| explore | `/rrpa-explore` | Visit live site via `agent-browser`, test selectors | Confirmed selectors, DOM evidence |
-| draft | `/rrpa-draft` | Write `.robot` suite grounded in evidence | `.robot` file |
-| review | `/rrpa-review` | `robot --dryrun`, fix, loop back to draft | Clean dryrun |
-| re-explore | `/rrpa-re-explore` | Verify uncertain selectors, check for popups | Revised evidence |
-| ship | `/rrpa-ship` | Package suite + keyword library + docs | Ready-to-run layout |
+| Phase | CLI | Skill verb | What happens | Output |
+|-------|-----|------------|-------------|--------|
+| Endow | `doctor` | `/rrpa-orient` | Validate environment (RF, drivers, agent-browser) | Green checks |
+| Endow | `init` | `/rrpa-orient` | Scaffold project + seed suite from requirement | Project dir |
+| Explore | `generate` | `/rrpa-explore` + `/rrpa-draft` | Agent explores site + generates `.robot` suite | `suite.robot` |
+| Exploit | `check` | `/rrpa-review` | BDD lint + keyword dryrun | Pass/fail |
+| Exploit | `run` | `/rrpa-ship` | Execute suite live (auto-resume from checkpoint) | `output/` artifacts |
+
+```bash
+# Typical workflow
+WiseRpaBDD.py doctor
+WiseRpaBDD.py init my-project "Scrape product catalog from example.com/products"
+WiseRpaBDD.py generate my-project/
+WiseRpaBDD.py check my-project/suite.robot
+WiseRpaBDD.py run my-project/suite.robot
+```
 
 ### agent-browser quick reference
 
