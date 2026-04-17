@@ -62,10 +62,12 @@ Example:
 ## Starting a session
 
 1. Read this file.
-2. Read `[primary spec or steering doc]`.
-3. Check recent changes with `[git command or status check]`.
-4. Confirm the next work item from `[spec, tracker, or handoff]`.
-5. If the human is away, continue from the next incomplete work item.
+2. Read the feature ledger at `[path, e.g., .kiro/FEATURES.md]` if present —
+   this is the source of truth for what exists right now.
+3. Read `[primary spec or steering doc]`.
+4. Check recent changes with `[git command or status check]`.
+5. Confirm the next work item from `[spec, tracker, or handoff]`.
+6. If the human is away, continue from the next incomplete work item.
 
 ## Commands
 
@@ -126,10 +128,11 @@ After substantial work, update the project's canonical artifacts.
 
 Typical development categories:
 
-1. requirements, designs, or specs
+1. requirements, designs, or specs (frozen on ship — mark SUPERSEDED / OBSOLETE, do not rewrite history)
 2. tasks, milestones, or workstreams
-3. feature status or verification status
-4. project knowledge or documentation
+3. project-level feature ledger (living inventory of features by status)
+4. feature status or verification status
+5. project knowledge or documentation
 
 Typical analysis categories:
 
