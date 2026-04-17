@@ -3,7 +3,7 @@ name: workflow-guardrails
 description: "Umbrella skill for agent work discipline across development, analysis, and documentation: inspect the repo before restructuring, keep durable truth in repo artifacts instead of chat memory, co-evolve specs/design/steering/user docs with code, apply sound coding patterns, verify work honestly, avoid shortcuts, work efficiently with subagents without hallucinating, and keep moving through the next concrete work item when the human is away. References cover coding patterns, AI-authored code review, and artifact co-evolution. Trigger when the user asks for workflow discipline, coding patterns, doc/artifact maintenance, code review of AI-authored code, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, specs, continuity, or tooling boundaries."
 metadata:
   author: kundeng
-  version: "1.5.0"
+  version: "1.6.0"
 ---
 
 # Workflow Guardrails
@@ -23,6 +23,7 @@ Before substantive changes:
 3. Identify what must be maintained:
    - specs, requirements, designs
    - tasks, milestones, workstreams
+   - project-level feature inventory or status ledger
    - feature status or verification status
    - project knowledge or documentation
    - analysis runs, assumptions, or result summaries
@@ -50,6 +51,12 @@ Before substantive changes:
 - If the user names maintenance categories, treat them as required structure.
 - Co-evolve specs, design docs, steering docs, and user docs with code — not
   after it. Surgical edits, not rewrites. See `refs/ai-artifact-update.md`.
+- A project-level feature ledger (a living kanban of features across all specs,
+  by status) is recommended for any project with more than a handful of specs.
+  Individual specs record *why we built X*; the ledger answers *what exists
+  right now and in what state*. Prefer a structure that an agent can later
+  parse into a hierarchy or graph. Do not prescribe format here — the owning
+  workflow skill (e.g., `spec-driven-dev`) defines the concrete layout.
 
 ### 3. No Shortcutting
 

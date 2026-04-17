@@ -15,7 +15,15 @@ Typical layers an AI-authored project maintains:
 
 - **Spec artifacts** — `requirements.md`, `design.md`, `tasks.md` under
   `.kiro/specs/NN-name/`, or a single `spec.md` for fast-track. Owned by the
-  `spec-driven-dev` skill.
+  `spec-driven-dev` skill. Each spec has a lifecycle state (DRAFT → ACTIVE →
+  SHIPPED → SUPERSEDED / OBSOLETE).
+- **Feature ledger** — project-level living inventory of features across all
+  specs, by status. Answers *what exists now*. Structure should be
+  hierarchy-graphable. Owned by `spec-driven-dev`; file typically at
+  `.kiro/FEATURES.md`.
+- **Snapshots** — dated, frozen copies of the feature ledger + architecture
+  state at release boundaries. Typically at `.kiro/snapshots/YYYY-MM-NN.md`.
+  Not edited after creation.
 - **Steering docs** — `.kiro/steering/product.md`, `structure.md`, `tech.md`.
   Read-only during a task; updated deliberately when the project mode changes.
 - **Project steering file** — `CLAUDE.md`, `AGENTS.md`. Tells future agents how
@@ -57,6 +65,32 @@ Typical layers an AI-authored project maintains:
   then trace downward — does any existing property or task become obsolete?
 - Never uncheck a completed task to "re-do" it. Add a new task with a
   reference back.
+- **Freeze on ship.** Once a spec's status is `SHIPPED`, stop editing it except
+  to add forward links to supersedes/superseded-by entries or correct factual
+  errors. Retroactively rewriting shipped specs destroys the record of why
+  decisions were made. New reality goes in the feature ledger and in new specs.
+
+### Feature ledger (spec-driven-dev, typically .kiro/FEATURES.md)
+
+- **Update on every state change.** When a task ships, deprecates, or removes
+  a feature, update the feature's row in the ledger in the same session.
+- **Append, don't rewrite.** Status transitions are edits in place; entries
+  for obsolete or superseded features stay in the ledger so future readers see
+  what existed and why it's gone.
+- **Cross-link to specs.** Every feature entry points to the spec that owns it.
+  Supersession and dependency edges point by stable feature id.
+- **Drift sweep.** Periodically (release, milestone, or quarterly) audit the
+  ledger against code: flag orphans (in code, not in ledger) and ghosts (in
+  ledger, not in code). Produce a dated snapshot after each sweep.
+
+### Snapshots (.kiro/snapshots/)
+
+- **Write once, never edit.** A snapshot is a frozen copy of reality at a
+  point in time. Edits defeat its purpose.
+- Include: feature ledger state, shipped-spec index, architectural summary,
+  date.
+- Reference the snapshot from the next release's planning docs, not the
+  other way around.
 
 ### Steering docs (.kiro/steering/)
 
@@ -118,6 +152,10 @@ Typical layers an AI-authored project maintains:
   than what exists. Gets worse every iteration.
 - **Silent obsolescence.** Code removed, but the section of the doc that
   describes it is left behind. The next reader assumes it still works.
+- **Ledger drift.** Feature ships but `.kiro/FEATURES.md` isn't updated, or
+  a feature stays as ACTIVE in the ledger after its code was removed.
+- **Spec zombie editing.** Agent edits a shipped spec to match new reality
+  rather than creating a successor and marking the old one SUPERSEDED.
 - **Taskfile drift.** Code lands but `tasks.md` never gets the checkbox, or
   checkboxes are flipped without the code actually landing.
 - **Design-as-docs.** Agent edits `design.md` to match the code instead of

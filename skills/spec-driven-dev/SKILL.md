@@ -1,9 +1,9 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development: plan → go → review loop. Use for planning features, implementing from specs, refining specs, resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
+description: "Spec-driven development: plan → go → review loop with spec lifecycle states and a project-level feature ledger. Use for planning features, implementing from specs, refining specs, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, feature ledger, FEATURES.md, spec-ledger, spec-snapshot, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
 metadata:
   author: kundeng
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 ## Spec-Driven Development
@@ -16,6 +16,120 @@ Specs live in `.kiro/specs/<NN-name>/`. Numeric prefixes for ordering (`01-auth`
 **Detection:** `spec.md` → fast-track. `requirements.md` → full ceremony. Never mix both.
 **Small work:** Add to an existing spec as tasks, or create a fast-track spec.
 **Upgrade:** Fast-track → full when >20 tasks or traceability needed: Context → requirements.md, Decisions → design.md, Tasks → tasks.md.
+
+### Spec Lifecycle
+
+Every spec has a status. Write it in the first line of the top-level spec file
+(`spec.md` or `requirements.md`) as `Status: <STATE>` (plus a `Since:` date).
+
+| State | Meaning | Editable? |
+|-------|---------|-----------|
+| DRAFT | Being planned, not yet approved | Yes |
+| ACTIVE | Approved, implementation in progress | Yes (scope adjustments flow through `/spec-plan refine`) |
+| SHIPPED | All required tasks done; spec describes what was built | **Frozen.** Only forward-links to SUPERSEDED-BY or factual corrections |
+| SUPERSEDED | Replaced by a newer spec; points forward to it | **Frozen.** Same rule |
+| OBSOLETE | Feature removed; the spec is historical only | **Frozen.** Same rule |
+
+**Freeze on ship.** Once a spec is SHIPPED, do not retroactively edit it to
+match new reality. Retroactive edits destroy the record of why each decision
+was made. New reality goes into a new spec and into the feature ledger.
+
+**Successor pattern.** When a shipped feature needs rework, create a new spec
+(`NN-name-v2` or `NN-different-name`). Mark the old spec `SUPERSEDED` and add
+a `Superseded-by:` line pointing to the new spec. Update the feature ledger to
+reflect the transition.
+
+### Feature Ledger
+
+A project-level living inventory of features across all specs, organized by
+status. It is the source of truth for *what exists right now*; specs remain
+the source of truth for *why each decision was made*.
+
+**Location:** `.kiro/FEATURES.md` (sibling of `specs/` and `steering/`).
+**Read first.** New agents should read this before any individual spec.
+**Updated continuously.** Every time a task ships, deprecates, or removes a
+feature, the corresponding ledger entry must be updated in the same session.
+
+**Structure** is hierarchy-graphable so agents can later parse it into a
+tree or DAG:
+
+- H2 headers are domain paths: `## auth`, `## api/v2`, `## data/ingest`.
+  Nested domains use slash notation in the header.
+- H3 headers are feature ids (stable slugs): `### email-login`.
+- A backticked status tag follows the feature id: `` `ACTIVE` ``.
+- Metadata follows as bold-key bullets (graph-parseable).
+
+**Template:**
+
+```markdown
+# Feature Ledger
+
+Living inventory of features. Read this before any individual spec.
+Each H2 is a domain (slash-nested), each H3 is a feature id with a status
+tag; metadata bullets define graph edges.
+
+**Status values:** DRAFT, PLANNED, IN-PROGRESS, BLOCKED, ACTIVE, DEPRECATED,
+SUPERSEDED, OBSOLETE
+
+Last drift sweep: [YYYY-MM-DD]
+
+## auth
+
+### email-login `ACTIVE`
+
+- **spec**: 01-auth
+- **since**: 2025-08-14
+- **supersedes**: [password-auth]
+- **depends-on**: [session-management]
+- **description**: Email + password login with session cookies.
+
+### magic-link `ACTIVE`
+
+- **spec**: 01-auth
+- **since**: 2025-10-03
+- **description**: Passwordless one-time-link login via email.
+
+### password-auth `SUPERSEDED`
+
+- **spec**: 01-auth
+- **since**: 2025-08-14
+- **until**: 2026-01-20
+- **superseded-by**: [email-login]
+- **description**: Original password-only flow, replaced by email-login.
+
+## api/v2
+
+### bulk-export `IN-PROGRESS`
+
+- **spec**: 05-bulk-export
+- **target**: 2026-Q2
+- **depends-on**: [session-management]
+- **description**: CSV/JSON export endpoint for user data.
+```
+
+**Graph model** (for downstream tools):
+
+- Domain hierarchy: from H2 path.
+- Feature id: H3 header, unique per project.
+- Parent feature (subfeatures): `**parent**: <id>` bullet.
+- Spec edges: `**spec**: <spec-id>`.
+- Supersession edges: `**supersedes**` / `**superseded-by**`.
+- Dependency edges: `**depends-on**`.
+- Lifecycle edges: derived from status transitions recorded in the ledger's
+  `since` / `until` fields.
+
+**Append, don't rewrite.** Status transitions edit the row in place; obsolete
+and superseded entries stay in the ledger. Never delete feature history.
+
+### Snapshots
+
+A snapshot is a dated, frozen copy of the ledger + architectural summary
+at a release or milestone boundary. Written once, never edited.
+
+- **Location:** `.kiro/snapshots/YYYY-MM-NN-<label>.md`.
+- **Contents:** date, labeled milestone, ledger state (copied), active specs
+  list, architectural summary, any decisions since the last snapshot.
+- **Cadence:** release boundary, quarter, or after a major drift sweep.
 
 ### Spec Resolution
 
@@ -96,12 +210,14 @@ stateDiagram-v2
 
 ### Rules
 
-1. **Read before acting** — all spec files + steering docs if they exist.
+1. **Read before acting** — feature ledger (`.kiro/FEATURES.md`) first, then all spec files + steering docs if they exist.
 2. **Re-anchor when uncertain** — re-read spec if next action could deviate.
 3. **Respect dependencies** — never skip ahead.
 4. **Tests are separate tasks.**
 5. **Commit per task** — `feat(<spec>/<task>): [description]`
 6. **Minimal changes** — only what the task requires.
+7. **Respect spec lifecycle** — never edit a SHIPPED / SUPERSEDED / OBSOLETE spec except for forward links or factual fixes. Create a successor spec instead.
+8. **Update the ledger on ship** — every feature transition (added, shipped, deprecated, removed) is reflected in `.kiro/FEATURES.md` in the same session.
 
 ---
 
@@ -165,7 +281,7 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 **This is a loop — do NOT stop after one task.** Keep cycling build→self-review→build until: all tasks done, human feedback needed, or stuck on repeated failures. Optional count limits tasks per session.
 
 **Build phase:**
-1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md.
+1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md. Also read `.kiro/FEATURES.md` if present.
 2. **Pick next task** — first `[ ]` with all deps satisfied. Only optional left → STOP.
 3. **Announce** — "Starting task [ID]: [TITLE]"
 4. **Implement** — read relevant code first. Test tasks: Red-Green-Refactor. Implementation tasks: write code, run existing tests.
@@ -173,13 +289,15 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 // turbo
 6. **Lint** if configured.
 7. **Update** — mark task `[x]`.
+8. **Update the feature ledger** — if the task ships, deprecates, supersedes, or removes a feature, update the corresponding entry in `.kiro/FEATURES.md`. Add new features as `IN-PROGRESS` → `ACTIVE` when fully shipped. Never delete prior entries; mark them SUPERSEDED / OBSOLETE with a forward link.
 // turbo
-8. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
+9. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
 
 **Self-review phase** (every 3 tasks or after a BLOCKED):
-9. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
-10. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
-11. **Report checkpoint:**
+10. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
+11. **Ledger consistency check** — features marked ACTIVE in `.kiro/FEATURES.md` must correspond to shipped tasks; features marked IN-PROGRESS must have an open task. Fix inconsistencies inline.
+12. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
+13. **Report checkpoint:**
 ```
 Checkpoint: SPEC — N/TOTAL tasks done
   Completed this session:
@@ -197,7 +315,7 @@ Checkpoint: SPEC — N/TOTAL tasks done
 
 ### `/spec-task <name> <task>`
 
-Single task build. Same as `/spec-go` build steps 1–8 for one task. Verify deps first — if unmet, STOP. When run by a subagent in a parallel worktree, **never modify spec files** — only write code, tests, docs. Orchestrator updates status after merge.
+Single task build. Same as `/spec-go` build steps 1–9 for one task. Verify deps first — if unmet, STOP. When run by a subagent in a parallel worktree, **never modify spec files or the feature ledger** — only write code, tests, docs. Orchestrator updates status and ledger after merge.
 
 **→ Report:**
 ```
@@ -211,12 +329,13 @@ Task [ID] complete: [title]
 
 ### `/spec-audit <name>`
 
-Read requirements.md, design.md, tasks.md. Run checks:
+Read requirements.md, design.md, tasks.md, and the feature ledger. Run checks:
 1. **Traceability** — orphan requirements, orphan properties, broken references
 2. **Redundancy** — duplicates, subset properties, implementation details in requirements
 3. **Stale language** — future tense on done tasks, checked goals with unchecked subs
 4. **Spec↔disk drift** — design directory vs actual repo
 5. **Doc sync** — README/docs vs spec
+6. **Ledger sync** — features referenced in this spec must appear in the ledger with consistent status; shipped tasks must correspond to ACTIVE ledger entries
 
 **→ Print report:**
 ```
@@ -241,20 +360,63 @@ Suggest `/spec-plan SPEC refine`.
 
 ### `/spec-status`
 
-Discover all specs in `.kiro/specs/`. Read tasks, count status marks, compute completion.
+Discover all specs in `.kiro/specs/`. Read tasks, count status marks, compute completion. Also read each spec's `Status:` lifecycle line and report it.
 
 **→ Print dashboard:**
 ```
 SPEC STATUS
-  01-auth:
-    Progress: ████████░░ 5/7 (71%)
-    Status:   1.1✓ 1.2✓ 1.3~ 2.1✓ 2.2✓ 3.1○ 3.2○*
+  01-auth [SHIPPED]:
+    Progress: ███████████ 7/7 (100%)
+    Status:   1.1✓ 1.2✓ 1.3✓ 2.1✓ 2.2✓ 3.1✓ 3.2✓
     Blocked:  none
-  02-api-layer:
+  02-api-layer [ACTIVE]:
     Progress: ██░░░░░░░░ 1/5 (20%)
     Status:   1.1✓ 1.2○ 2.1○ 2.2○ 3.1○*
     Blocked:  none
+  03-legacy-export [SUPERSEDED → 05-bulk-export]:
+    Progress: ███████ 3/5 (historical)
 ```
+
+### `/spec-ledger [audit | add <feature> <spec> | update <feature> <status> | drift-sweep]`
+
+Manage the project feature ledger at `.kiro/FEATURES.md`.
+
+- **No args:** print the ledger grouped by status.
+- **`audit`:** check every feature entry against code and specs. Flag:
+  - ghost features (ACTIVE in ledger but not in code)
+  - orphan features (in code but missing from ledger)
+  - lifecycle mismatches (SHIPPED spec with non-ACTIVE feature)
+  - broken supersession chains (superseded-by points to missing id)
+- **`add <feature-id> <spec-id>`:** append a new feature entry as `PLANNED`
+  or `IN-PROGRESS` (depending on task state), under the appropriate domain H2.
+- **`update <feature-id> <STATUS>`:** transition a feature. Sets `until:` for
+  DEPRECATED / SUPERSEDED / OBSOLETE; prompts for `superseded-by:` if needed.
+- **`drift-sweep`:** run `audit`, resolve non-ambiguous entries automatically,
+  report the ambiguous ones, then stamp `Last drift sweep: <date>` in the
+  ledger header.
+
+Never delete prior entries. Status transitions edit in place; superseded and
+obsolete entries remain as historical record.
+
+// turbo
+Commit: `git add .kiro/FEATURES.md && git commit -m "feat(ledger): <change summary>"`
+
+### `/spec-snapshot [<label>]`
+
+Freeze a dated copy of the feature ledger + architecture summary at
+`.kiro/snapshots/YYYY-MM-NN[-label].md`.
+
+1. Run `/spec-ledger audit` first and resolve non-ambiguous drift.
+2. Copy the current ledger into the snapshot.
+3. Add an architecture summary: active specs list (with status), core module
+   layout, key decisions since the previous snapshot.
+4. Stamp the snapshot date and label (e.g., `2026-04-17-q2-release`).
+5. Update the ledger's `Last drift sweep:` line to the snapshot date.
+
+Snapshots are write-once. Never edit a prior snapshot.
+
+// turbo
+Commit: `git add .kiro/snapshots/ .kiro/FEATURES.md && git commit -m "snapshot(<label>): freeze state"`
 
 ### `/spec-merge <name>`
 
@@ -279,6 +441,12 @@ Print the Core Loop diagram and command table from this skill, then ask what the
 
 ```markdown
 # Requirements Document
+
+Status: DRAFT
+Since: [YYYY-MM-DD]
+Features: [feature-id, feature-id]
+<!-- Status values: DRAFT, ACTIVE, SHIPPED, SUPERSEDED, OBSOLETE -->
+<!-- Once SHIPPED, this file is frozen except for forward links or factual fixes. -->
 
 ## Introduction
 <!-- What this spec covers and why -->
@@ -442,6 +610,12 @@ This is the single working scratchpad for all three hats: **planner** (Context +
 
 ```markdown
 # [SPEC NAME]
+
+Status: DRAFT
+Since: [YYYY-MM-DD]
+Features: [feature-id, feature-id]
+<!-- Status values: DRAFT, ACTIVE, SHIPPED, SUPERSEDED, OBSOLETE -->
+<!-- Once SHIPPED, this file is frozen except for forward links or factual fixes. -->
 
 ## Context
 <!-- Why this work exists, who it's for, what success looks like. -->
