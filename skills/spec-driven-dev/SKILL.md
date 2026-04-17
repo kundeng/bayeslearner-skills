@@ -1,9 +1,9 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development: plan → go → review loop with spec lifecycle states and a project-level feature ledger. Use for planning features, implementing from specs, refining specs, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, feature ledger, FEATURES.md, spec-ledger, spec-snapshot, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
+description: "Spec-driven development: plan → go → review loop with spec lifecycle states and a project-level feature ledger. Use for planning features, implementing from specs, refining specs, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, feature ledger, FEATURES.md, spec-ledger, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
 metadata:
   author: kundeng
-  version: "2.1.0"
+  version: "2.1.1"
 ---
 
 ## Spec-Driven Development
@@ -121,15 +121,11 @@ Last drift sweep: [YYYY-MM-DD]
 **Append, don't rewrite.** Status transitions edit the row in place; obsolete
 and superseded entries stay in the ledger. Never delete feature history.
 
-### Snapshots
-
-A snapshot is a dated, frozen copy of the ledger + architectural summary
-at a release or milestone boundary. Written once, never edited.
-
-- **Location:** `.kiro/snapshots/YYYY-MM-NN-<label>.md`.
-- **Contents:** date, labeled milestone, ledger state (copied), active specs
-  list, architectural summary, any decisions since the last snapshot.
-- **Cadence:** release boundary, quarter, or after a major drift sweep.
+**No separate snapshots needed.** A spec that is no longer the current one —
+`SHIPPED`, `SUPERSEDED`, or `OBSOLETE` — is itself a dated record of what was
+built then and why. Combined with the ledger's `since` / `until` fields and
+git history on the ledger file, the project's state at any past point is
+reconstructible without a separate snapshot artifact.
 
 ### Spec Resolution
 
@@ -396,27 +392,12 @@ Manage the project feature ledger at `.kiro/FEATURES.md`.
   ledger header.
 
 Never delete prior entries. Status transitions edit in place; superseded and
-obsolete entries remain as historical record.
+obsolete entries remain as historical record. Point-in-time reconstruction
+comes from the frozen shipped specs + git history on `FEATURES.md` — no
+separate snapshot artifact is maintained.
 
 // turbo
 Commit: `git add .kiro/FEATURES.md && git commit -m "feat(ledger): <change summary>"`
-
-### `/spec-snapshot [<label>]`
-
-Freeze a dated copy of the feature ledger + architecture summary at
-`.kiro/snapshots/YYYY-MM-NN[-label].md`.
-
-1. Run `/spec-ledger audit` first and resolve non-ambiguous drift.
-2. Copy the current ledger into the snapshot.
-3. Add an architecture summary: active specs list (with status), core module
-   layout, key decisions since the previous snapshot.
-4. Stamp the snapshot date and label (e.g., `2026-04-17-q2-release`).
-5. Update the ledger's `Last drift sweep:` line to the snapshot date.
-
-Snapshots are write-once. Never edit a prior snapshot.
-
-// turbo
-Commit: `git add .kiro/snapshots/ .kiro/FEATURES.md && git commit -m "snapshot(<label>): freeze state"`
 
 ### `/spec-merge <name>`
 
