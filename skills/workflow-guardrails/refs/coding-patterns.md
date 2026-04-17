@@ -1,16 +1,8 @@
----
-name: coding-patterns
-description: "Use this skill for language-aware coding discipline: sound design heuristics, boundary validation, honest testing, safe concurrency, and a short list of Python and TypeScript dos-and-donts. Trigger when writing or reviewing code, refactoring, adding tests, or when the user asks for coding patterns, anti-patterns, clean-code guidance, or Python/TypeScript best practices."
-metadata:
-  author: kundeng
-  version: "0.1.0"
----
-
 # Coding Patterns
 
-This skill is a concise playbook for agents writing or reviewing code. It
-complements `workflow-guardrails` (which governs process and discipline) with
-language-aware advice on design, testing, and idioms.
+Reference for `workflow-guardrails`: language-aware coding discipline —
+design heuristics, boundary discipline, honest testing, refactoring rules,
+and a short list of Python / TypeScript dos and donts.
 
 Scope:
 
@@ -19,7 +11,7 @@ Scope:
 - Python dos and donts
 - TypeScript / JavaScript dos and donts
 
-Non-scope:
+Out of scope:
 
 - deep style guides, lint rule catalogs, or full framework tutorials
 - anything already enforced by the project's linter, formatter, or type checker
@@ -30,9 +22,9 @@ Non-scope:
   forces complexity.
 - **Rule of three.** Do not abstract on the second occurrence. Abstract on the
   third, and only when the shared shape is actually stable.
-- **Separation of concerns.** Keep business logic separate from I/O,
-  transport, and framework glue. If one function renders HTML, talks to a
-  database, and emits metrics, split it.
+- **Separation of concerns.** Keep business logic separate from I/O, transport,
+  and framework glue. If one function renders HTML, talks to a database, and
+  emits metrics, split it.
 - **Composition over inheritance.** Reach for inheritance only when there is a
   real is-a relationship with stable behavior.
 - **Layered structure.** Favor a clear handler/API -> service -> repository
@@ -44,8 +36,8 @@ Non-scope:
 
 - Validate inputs at the trust boundary (user input, API payloads, file data,
   inter-service calls). Do not sprinkle validation through the interior.
-- Fail fast with specific errors at the boundary. Do not swallow errors to
-  keep the happy path clean.
+- Fail fast with specific errors at the boundary. Do not swallow errors to keep
+  the happy path clean.
 - Keep the boundary's contract explicit: types, required fields, allowed
   ranges, error shapes.
 - Centralize cross-cutting concerns (retries, timeouts, logging, auth) in one
@@ -53,9 +45,9 @@ Non-scope:
 
 ## Testing Patterns
 
-- Test the real boundary, not a hallucinated one. If a function hits a
-  database, decide consciously whether to exercise the database (integration)
-  or the contract only (unit with a fake).
+- Test the real boundary, not a hallucinated one. If a function hits a database,
+  decide consciously whether to exercise the database (integration) or the
+  contract only (unit with a fake).
 - Test sad paths and edge cases, not just the happy path. Include: empty
   inputs, oversized inputs, invalid types, timeouts, partial failures.
 - Do not write empty tests, placeholder assertions, or tests that only check
@@ -65,13 +57,13 @@ Non-scope:
   correct.
 - Prefer fakes or in-memory implementations over mocks when the collaborator
   has meaningful behavior worth exercising.
-- For UI or browser flows, use real E2E or integration tooling (Agent
-  Browser, Playwright, Cypress) and inspect real rendered state.
+- For UI or browser flows, use real E2E or integration tooling (Agent Browser,
+  Playwright, Cypress) and inspect real rendered state.
 
 ## Refactoring Rules
 
-- Keep behavior identical while refactoring; prove it with tests that ran
-  green before and after.
+- Keep behavior identical while refactoring; prove it with tests that ran green
+  before and after.
 - Do not mix a refactor with a behavior change in the same commit.
 - Refactor toward: removed duplication, clearer ownership, smaller public
   surface, easier-to-verify next task.
@@ -86,8 +78,8 @@ Do:
 - Prefer f-strings and explicit formatting over `%` or `str.format` chains.
 - Use `dataclasses`, `TypedDict`, `pydantic`, or `attrs` for structured data
   instead of untyped dicts at boundaries.
-- Use type hints on public functions and on any function whose argument
-  shapes are not obvious from context.
+- Use type hints on public functions and on any function whose argument shapes
+  are not obvious from context.
 - Centralize retries and timeouts (e.g., a `tenacity` policy or a wrapper
   class), not copy-pasted loops.
 - Prefer `pathlib.Path` over raw string path manipulation.
@@ -101,8 +93,8 @@ Do not:
 - Mutate default mutable arguments (`def f(x=[])`). Use `None` and construct
   inside the body.
 - Re-raise exceptions as bare `raise Exception(...)` and lose the stack.
-- Mix config, side effects, and import-time work at module top level; prefer
-  a small `main()` or factory function.
+- Mix config, side effects, and import-time work at module top level; prefer a
+  small `main()` or factory function.
 - Overuse inheritance for code reuse where a helper function or composition
   would do.
 
@@ -110,16 +102,16 @@ Do not:
 
 Do:
 
-- Turn on `strict` (including `strictNullChecks`, `noImplicitAny`) and keep
-  it on. Treat type errors as build failures.
+- Turn on `strict` (including `strictNullChecks`, `noImplicitAny`) and keep it
+  on. Treat type errors as build failures.
 - Parse and validate external data at the boundary (e.g., `zod`, `valibot`,
   `io-ts`) and narrow it into a typed domain model.
-- Model absence with `undefined` or `null` deliberately; pick one per
-  interface and stick with it.
-- Use discriminated unions for state shapes (`type Result = { kind: "ok",
-  value } | { kind: "err", error }`).
-- Await every promise or explicitly mark it ignored. Unawaited promises are
-  a common source of silent failures.
+- Model absence with `undefined` or `null` deliberately; pick one per interface
+  and stick with it.
+- Use discriminated unions for state shapes
+  (`type Result = { kind: "ok", value } | { kind: "err", error }`).
+- Await every promise or explicitly mark it ignored. Unawaited promises are a
+  common source of silent failures.
 - Prefer `const` and immutable patterns; reach for `let` only with a reason.
 
 Do not:
@@ -134,16 +126,16 @@ Do not:
   typed error.
 - Rely on truthy/falsy checks for optional-but-meaningful values like `0`,
   `""`, or `false`. Check against `undefined` or `null` explicitly.
-- Export mutable module-level state from library code. Wrap it in a factory
-  or class if it must exist.
+- Export mutable module-level state from library code. Wrap it in a factory or
+  class if it must exist.
 
 ## Concurrency and Async
 
 - Do not hold a lock across an `await` or network call unless you mean to.
 - Make timeouts explicit on every outbound network call.
 - Cancel or clean up background tasks when the owning scope ends.
-- Do not fire-and-forget tasks in long-running services without a registry
-  that can observe and shut them down.
+- Do not fire-and-forget tasks in long-running services without a registry that
+  can observe and shut them down.
 
 ## Anti-Patterns
 
@@ -156,14 +148,3 @@ Do not:
 - Sync-in-async bugs, unawaited promises, unbounded retry loops.
 - Inheritance hierarchies used for code reuse rather than real subtype
   relationships.
-
-## How to Use This Skill
-
-1. Before writing new code, scan the relevant section (Python or TS) and the
-   Design Heuristics.
-2. When reviewing a diff, use Boundary Discipline, Testing Patterns, and the
-   language section as a checklist.
-3. When refactoring, apply Refactoring Rules alongside the project's
-   `workflow-guardrails` rules.
-4. Do not import this entire skill into every prompt; cite only the section
-   that applies to the current work.
