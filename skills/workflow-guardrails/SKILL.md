@@ -1,73 +1,163 @@
 ---
 name: workflow-guardrails
-description: "Use this skill for cross-cutting execution discipline that applies regardless of domain: inspect the repo before restructuring, distinguish repo knowledge from agent memory, avoid changing editor or IDE config without permission, avoid throwaway scripts once a structured workflow is underway, and stop to re-anchor before changing project conventions, persistence layout, or artifact semantics. Trigger when the user asks for best practices, workflow discipline, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, spec, or tooling boundaries."
+description: "Use this skill for agent execution discipline on development and analysis projects: inspect the repo before restructuring, keep durable truth in repo artifacts instead of chat memory, maintain specs/tasks/status docs, verify work honestly, avoid shortcuts, and keep moving through the next concrete work item when the human is away. Trigger when the user asks for workflow discipline, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, specs, continuity, or tooling boundaries."
 metadata:
   author: kundeng
-  version: "1.0.0"
+  version: "1.4.0"
 ---
 
 # Workflow Guardrails
 
-Use this skill for agent operating discipline that is independent of the task domain.
+Use this skill for agent operating discipline on real development, analysis,
+and hybrid projects.
 
-This skill is not about what to build. It is about how to avoid predictable
-execution mistakes while building it.
+The point is simple: keep the project's durable artifacts current, use sound
+engineering judgment, and do not fake progress.
 
 ## First Actions
 
-Before making substantive changes:
+Before substantive changes:
 
-1. Inspect the existing repo structure, key docs, and current conventions.
-2. Identify whether the project already has a workflow in progress: specs,
-   artifact layout, notebooks, pipeline runners, or established docs.
-3. Classify what is stable versus what is live:
+1. Inspect the repo, key docs, and current conventions.
+2. Determine the mode: development, analysis, or hybrid.
+3. Identify what must be maintained:
+   - specs, requirements, designs
+   - tasks, milestones, workstreams
+   - feature status or verification status
+   - project knowledge or documentation
+   - analysis runs, assumptions, or result summaries
+4. Classify what is stable vs live:
    - repo knowledge vs agent memory
-   - given inputs vs live pulls
+   - frozen inputs vs live pulls
    - durable workflow code vs one-off exploration
-4. State the first boundary-sensitive change before making it.
+   - current repo state vs stale notes or stale runtime state
+5. Read the canonical steering file, usually `CLAUDE.md`, if it exists.
+6. State the first boundary-sensitive change before making it.
 
-Do not start by rewriting structure from memory or habit.
-
-## Guardrails
+## Core Rules
 
 ### 1. Repo First
 
-- Prefer what is already on disk over generic assumptions.
-- Check whether the project already has specs, knowledge docs, runners,
-  notebooks, or artifact conventions before inventing new ones.
-- If an existing convention is weak, describe the delta before changing it.
+- Prefer repo truth over memory or habit.
+- Reuse the repo's structure before inventing a new one.
+- If you change a weak convention, explain the delta first.
 
-### 2. Do Not Edit Local Tooling Without Permission
+### 2. Maintain the Real Artifacts
 
-- Do not edit `.vscode/`, IDE settings, local editor config, or personal shell
-  config unless the user asked for that explicitly.
-- If a local tooling change seems necessary, propose it first and explain why it
-  is not purely project code.
+- Keep the project's planning and status artifacts current as part of the work.
+- Do not leave specs, tasks, milestones, feature status, or analysis records
+  behind while code moves ahead.
+- If the user names maintenance categories, treat them as required structure.
 
-### 3. Separate Repo Knowledge From Agent Memory
+### 3. No Shortcutting
 
-- Project knowledge that should survive across agents belongs in repo docs.
-- Agent memory is for agent-specific preferences, feedback, or user working style.
-- Do not move project facts into agent memory just because they are evolving.
+- Do not take shortcuts just to make tests pass, satisfy a checklist, or claim
+  progress.
+- Do not hardcode around the bug, mock away the real boundary, weaken the test,
+  or skip the failing path unless the user explicitly wants that tradeoff.
+- Do not ask subagents to optimize for appearances over correctness either.
+- If the fast path reduces truthfulness, durability, or coverage, it is the
+  wrong path.
 
-### 4. Distinguish Input Classes
+### 4. Verification Must Be Real
 
-- User-provided or deliberately frozen snapshots are not the same as live pulls.
-- The first extraction from a live system is a run artifact unless the project
-  explicitly promotes it to a stable input.
-- Do not silently relabel artifact classes midstream.
+- Do not write empty tests, placeholder assertions, or symbolic coverage.
+- Match the verification surface to the risk:
+  - unit tests for local logic
+  - integration tests for module and system boundaries
+  - end-to-end tests for user workflows
+- When the project has a UI or browser workflow, prefer meaningful E2E or
+  integration coverage with available tools such as Agent Browser or Playwright.
+- Inspect real rendered/runtime state before asserting against dynamic flows;
+  discover selectors and boundaries from reality, not assumption.
+- Record honest verification status. Do not mark work done if the verification
+  does not support that claim.
 
-### 5. No Throwaway Path After Structure Exists
+### 5. Recon Before Action
+
+- Inspect the current state before editing, automating, or restructuring.
+- For runtime or UI work, check the live page, process, or data before
+  scripting against it.
+- For code work, read the file, the caller, and the nearest test before
+  changing behavior.
+- Act only after the picture of reality is concrete.
+
+### 6. Use Existing Helpers First
+
+- Treat project scripts, runners, and helper modules as black boxes until
+  they prove insufficient.
+- Read their source only when you need to customize them, debug them, or
+  confirm an unclear contract.
+- Do not ingest large helper files into context just to restate what they
+  already do.
+
+### 7. Merge, Don't Clobber
+
+- When updating `CLAUDE.md`, `AGENTS.md`, config files, settings, or steering
+  docs, preserve existing structure and content.
+- Add, refine, or replace the specific sections that need changing.
+- Never rewrite a shared steering file wholesale just to impose a new style.
+
+### 8. No Throwaway Path After Structure Exists
 
 - Early exploration can be ad hoc.
-- Once the task has crossed into a structured workflow, stop using inline
-  throwaway scripts as the main execution path.
-- Put computation in the project's real execution surface: modules, runners,
-  notebooks, scripts, or pipelines already implied by the workflow.
+- Once the workflow is structured, move computation into the real execution
+  surface: modules, runners, notebooks, scripts, or pipelines already implied
+  by the project.
 
-### 6. Stop and Re-Anchor Before Convention Changes
+### 9. Code and Design Quality Matter
 
-Pause and re-anchor before changing:
+- Follow existing architecture and style before inventing new ones.
+- Prefer modular, dry changes when refactoring removes duplication, clarifies
+  ownership, or makes the next milestone easier to verify.
+- Do not do drifty cleanup unrelated to the active workstream.
+- For product work, apply sound design judgment to flows, naming, structure,
+  and interaction quality.
+
+### 10. Keep Handoffs Durable
+
+- For substantial work, leave one durable handoff.
+- Record: objective, status, open tasks, active milestone, blockers, exact next
+  action, files changed, files to read next.
+- Do not end with "continue from here" when you can name the next work unit.
+
+### 11. Resume Deliberately
+
+- Treat resume as retrieval plus re-anchoring, not magic continuity.
+- If multiple candidate sessions or notes compete, compare cwd, topic, recency,
+  and unfinished action before choosing.
+- Summarize imported context instead of dumping raw transcript by default.
+- Re-anchor on current repo state before new edits.
+
+### 12. Loop Forward When the Human Is Away
+
+- If a canonical queue exists, keep moving through the next concrete work item.
+- Drive from incomplete milestones, next tasks, failing tests, known bugs, or
+  named follow-up items.
+- Real loop work includes implementation, verification, bug fixing,
+  maintainability refactors, and artifact maintenance.
+- Stop for real blockers only: missing decisions, missing credentials, missing
+  data, or exhausted queue.
+- Document stop conditions when automation or scheduled prompts are involved.
+
+### 13. Work Efficiently Without Cheating
+
+- Prefer concurrency when independent work is available: parallel tool calls,
+  subagents for isolated research or mechanical batches, a two-agent split
+  (planner/executor, coder/reviewer) when the task benefits from it.
+- Use subagents to protect the main context window from large searches, long
+  logs, or speculative exploration; bring back summaries, not transcripts.
+- Do not let parallelism become a shortcut to hallucination. Every claim a
+  subagent returns must be verifiable; do not restate its conclusions without
+  checking files, tests, or real state.
+- Do not fabricate plausible output when a tool call would answer the
+  question; run the tool.
+- Efficiency is real work done per unit time. Faster wrong answers are not
+  efficient.
+
+### 14. Re-Anchor Before Boundary Changes
+
+Pause and re-check the repo before changing:
 
 - folder layout
 - artifact semantics
@@ -75,36 +165,47 @@ Pause and re-anchor before changing:
 - persistence strategy
 - where knowledge lives
 - the main execution entry point
+- steering file structure
 
-When one of these changes is on the table, re-check the repo and explain the
-reason for the new convention before editing files.
+### 15. Keep Naming Honest
+
+- Do not reuse labels for different concepts.
+- Fix misleading mental models before layering more workflow on top.
+- If the user corrects a recurring omission, encode that into the durable
+  workflow.
+
+## CLAUDE.md Reference
+
+This skill includes `claude.template` as a reference implementation for a
+project-specific `CLAUDE.md`.
+
+Do not copy it blindly. Inspect the repo, then synthesize a steering file that:
+
+- defines startup order
+- states project mode
+- names the artifacts that must be maintained
+- sets verification expectations
+- warns against shortcuts
+- supports self-directed looping
+- stays short enough that future agents will read it
 
 ## Anti-Patterns
 
-- Editing IDE config to make imports work before fixing the project packaging.
-- Treating live query results as immutable source inputs by default.
-- Building the real workflow with one-off inline scripts, then backfilling a runner later.
-- Moving specs or docs only after the user points out the mismatch.
-- Splitting project knowledge between repo docs and agent memory without a clear rule.
-- Renaming directories to match a preferred framework without first checking what already exists.
+- letting code move while specs or status docs drift
+- weakening tests to get green output
+- hardcoding around the real failure path
+- asking subagents to optimize for speed over truth
+- restating a subagent's summary as fact without verifying its sources
+- fabricating plausible output in place of running a tool
+- treating stale summaries as source of truth
+- waiting idly when the next work item is already defined
 
 ## Correction Pattern
 
-When you notice you crossed a boundary incorrectly:
+When you cross a boundary incorrectly:
 
-1. Say exactly what boundary was crossed.
-2. Revert or contain the mistake if practical.
+1. Name the mistake.
+2. Revert or contain it if practical.
 3. Restate the correct model.
-4. Continue from the corrected workflow, not from the shortcut.
-
-Short example:
-
-- Wrong: save live extracts into a folder meant for frozen inputs.
-- Correct: save them under a run-specific artifact path, then promote only if
-  the snapshot is meant to become a stable reusable input.
-
-## Use With Other Skills
-
-This skill should remain general. It does not replace domain or workflow
-skills. It keeps execution disciplined while those skills provide the actual
-task-specific workflow.
+4. Update the durable workflow so future sessions do not repeat it.
+5. Continue from the corrected path.

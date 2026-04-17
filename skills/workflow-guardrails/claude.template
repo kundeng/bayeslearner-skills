@@ -1,0 +1,218 @@
+# CLAUDE.md - Reference Implementation
+
+This file is a reference implementation, not a copy-paste template.
+
+The agent should inspect the repo first, then write a project-specific
+`CLAUDE.md` that matches the real workflow.
+
+## What `CLAUDE.md` is for
+
+`CLAUDE.md` is the steering file for the project. It should be short, durable,
+and operational.
+
+It should answer:
+
+- what to read first
+- whether the project is development, analysis, or hybrid
+- how to run and verify the project
+- what artifacts must stay current
+- how the agent should keep moving when the human is away
+- what the current handoff state is
+
+It should not become a dumping ground for all project knowledge.
+
+## Suggested structure
+
+1. project purpose
+2. project mode
+3. starting a session
+4. commands
+5. work discipline
+6. work efficiency
+7. verification standards
+8. architecture pointers
+9. what to maintain
+10. loop behavior when the human is away
+11. what not to put in this file
+12. session handoff
+
+---
+
+# CLAUDE.md - How to Work on This Project
+
+## Project purpose
+
+- `[one sentence description]`
+- `[app, library, analysis repo, automation repo, or hybrid system]`
+
+## Project mode
+
+Choose one and state the consequence:
+
+- development
+- analysis
+- hybrid
+
+Example:
+
+- Development: maintain code, specs, tasks, milestones, feature status, and verification.
+- Analysis: maintain questions, assumptions, runs, findings, and decisions.
+- Hybrid: maintain both, but keep them clearly separated.
+
+## Starting a session
+
+1. Read this file.
+2. Read `[primary spec or steering doc]`.
+3. Check recent changes with `[git command or status check]`.
+4. Confirm the next work item from `[spec, tracker, or handoff]`.
+5. If the human is away, continue from the next incomplete work item.
+
+## Commands
+
+List only the commands needed for normal development, testing, and execution.
+
+```bash
+[install command]
+[dev command]
+[test command]
+[lint command]
+[build command]
+```
+
+## Work discipline
+
+- Every substantial change should trace to `[spec, task, notebook, issue, or workstream]`.
+- Keep the project's durable artifacts current as part of the work.
+- Do not let code move while specs, milestones, status, or analysis records go stale.
+- Recon before action: inspect the real file, live state, or caller before changing behavior.
+- Use existing helpers and runners as black boxes first; read their source only when you must customize or debug.
+- Merge, don't clobber: when updating this file, configs, or steering docs, preserve existing structure.
+- Do not take shortcuts to satisfy tests, checklists, or milestone optics.
+- Do not ask subagents to take shortcuts either.
+- Before ending substantial work, update the session handoff below.
+
+## Work efficiency
+
+- Run independent tool calls in parallel; avoid serial waits that do not share data.
+- Delegate isolated research, mechanical batches, or large searches to subagents; bring back summaries, not transcripts.
+- Use a two-agent split (planner/executor or coder/reviewer) when the task cleanly separates roles.
+- Verify subagent claims against files, tests, or live state before acting on them.
+- Never fabricate output in place of running a tool. If a tool call would answer the question, run it.
+
+## Verification standards
+
+- Do not add empty tests or symbolic assertions.
+- Use verification that exercises real behavior.
+- Match the surface to the risk:
+  - unit for local logic
+  - integration for boundaries
+  - end-to-end for user workflows
+- When a UI or browser flow exists, use real E2E or integration tooling such as Agent Browser or Playwright.
+- Inspect real rendered/runtime state before automating dynamic flows; discover selectors and boundaries from reality, not assumption.
+- Do not hardcode around the failure, weaken the test, or skip the real path just to get green results.
+- Record honest verification status in `[status doc or tracker]`.
+
+## Architecture pointers
+
+- `[path]` - `[what lives here]`
+- `[path]` - `[what lives here]`
+- `[path]` - `[what lives here]`
+
+Keep this section shallow. Point to deeper docs instead of duplicating them.
+
+## What to maintain
+
+After substantial work, update the project's canonical artifacts.
+
+Typical development categories:
+
+1. requirements, designs, or specs
+2. tasks, milestones, or workstreams
+3. feature status or verification status
+4. project knowledge or documentation
+
+Typical analysis categories:
+
+1. question or hypothesis
+2. assumptions and data provenance
+3. runs, experiments, or result artifacts
+4. findings and next decision
+
+Project-specific list:
+
+1. `[artifact path]` - `[what to update]`
+2. `[artifact path]` - `[what to update]`
+3. `CLAUDE.md` - refresh the handoff below
+
+## Loop behavior when the human is away
+
+- Continue from the next incomplete milestone, task, failing test, known bug, or named follow-up item.
+- Real progress includes implementation, verification, bug fixing, maintainability refactors, and artifact maintenance.
+- Prefer refactors that reduce duplication, improve module boundaries, or make the next task easier to verify.
+- Stop only for real blockers: missing decisions, missing credentials, missing data, or exhausted queue.
+- Update the handoff before stopping.
+
+## What not to put in this file
+
+- deep architecture details -> `[spec or architecture doc]`
+- domain-specific schemas or long knowledge dumps -> `[domain doc]`
+- full milestone history -> `[specs, tickets, or changelog]`
+- implementation patterns already visible in code -> code and tests
+
+## Session handoff
+
+Keep this brief and exact.
+
+Suggested fields:
+
+- date
+- current objective
+- current status
+- open tasks
+- active milestone or workstream
+- blockers or decisions
+- files changed recently
+- files to read first next time
+- exact next action
+
+Example:
+
+### Session handoff ([YYYY-MM-DD])
+
+#### Current objective
+- `[what the project is trying to accomplish]`
+
+#### Current status
+- `[what is working and what is not]`
+
+#### Open tasks
+- `[task]`
+- `[task]`
+
+#### Active milestone or workstream
+- `[name or path]`
+
+#### Blockers or decisions
+- `[blocker or pending decision]`
+
+#### Files changed recently
+- `[path]`
+- `[path]`
+
+#### Files to read first next time
+- `[path]`
+- `[path]`
+
+#### Exact next action
+- `[next concrete work unit; do not say "continue from here"]`
+
+## Authoring guidance
+
+When creating a real `CLAUDE.md` from this reference:
+
+1. Inspect the repo before writing.
+2. Prefer repo truth over memory.
+3. Use exact repo paths, commands, and doc names.
+4. Remove placeholders once real facts are known.
+5. Make maintenance, verification, anti-shortcut rules, and looping behavior explicit.
+6. Keep the final file short enough that future agents will actually read it.
