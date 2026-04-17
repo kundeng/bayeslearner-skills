@@ -1,9 +1,9 @@
 ---
 name: workflow-guardrails
-description: "Use this skill for agent execution discipline on development and analysis projects: inspect the repo before restructuring, keep durable truth in repo artifacts instead of chat memory, maintain specs/tasks/status docs, verify work honestly, avoid shortcuts, and keep moving through the next concrete work item when the human is away. Trigger when the user asks for workflow discipline, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, specs, continuity, or tooling boundaries."
+description: "Umbrella skill for agent work discipline across development, analysis, and documentation: inspect the repo before restructuring, keep durable truth in repo artifacts instead of chat memory, co-evolve specs/design/steering/user docs with code, apply sound coding patterns, verify work honestly, avoid shortcuts, work efficiently with subagents without hallucinating, and keep moving through the next concrete work item when the human is away. References cover coding patterns, AI-authored code review, and artifact co-evolution. Trigger when the user asks for workflow discipline, coding patterns, doc/artifact maintenance, code review of AI-authored code, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, specs, continuity, or tooling boundaries."
 metadata:
   author: kundeng
-  version: "1.4.0"
+  version: "1.5.0"
 ---
 
 # Workflow Guardrails
@@ -48,6 +48,8 @@ Before substantive changes:
 - Do not leave specs, tasks, milestones, feature status, or analysis records
   behind while code moves ahead.
 - If the user names maintenance categories, treat them as required structure.
+- Co-evolve specs, design docs, steering docs, and user docs with code — not
+  after it. Surgical edits, not rewrites. See `refs/ai-artifact-update.md`.
 
 ### 3. No Shortcutting
 
@@ -188,6 +190,40 @@ Do not copy it blindly. Inspect the repo, then synthesize a steering file that:
 - warns against shortcuts
 - supports self-directed looping
 - stays short enough that future agents will read it
+
+## References
+
+Load these on demand when the relevant kind of work is active:
+
+- [`refs/coding-patterns.md`](refs/coding-patterns.md) — language-aware coding
+  discipline: design heuristics, boundary discipline, testing patterns,
+  refactoring rules, Python and TypeScript dos and donts. Consult when writing
+  or reviewing a diff.
+- [`refs/ai-code-review.md`](refs/ai-code-review.md) — four-pass coherence
+  audit protocol for AI-authored codebases (constitutional layer, ground-truth
+  extraction, intent reconciliation, coherence assessment). Heavier than a PR
+  review; reach for it when code, docs, and intent have visibly drifted.
+- [`refs/ai-artifact-update.md`](refs/ai-artifact-update.md) — how to keep
+  specs, design docs, steering docs, user docs, and analysis records honest as
+  code evolves. Surgical edits, not rewrites. Names the owning skill for each
+  artifact type.
+
+## Related Skills
+
+This skill sets the umbrella discipline; specialized skills own concrete
+workflows. Route to the owning skill when that kind of work is substantial:
+
+- `spec-driven-dev` — spec waves (`requirements.md` / `design.md` / `tasks.md`
+  or fast-track `spec.md`) under `.kiro/specs/`, with `/spec-plan`, `/spec-go`,
+  `/spec-audit`, `/spec-status` commands and steering docs at `.kiro/steering/`.
+- `doc-coauthoring` — structured authoring of user-facing docs through Context
+  Gathering → Refinement → Reader Testing.
+- `analytic-workbench` — notebook-first analysis flows: question, assumptions,
+  runs, findings, promotion to reusable pipelines.
+- `design2spec` — design-to-spec handoff from mockups or visual designs.
+
+Use this skill's discipline alongside those; do not duplicate their protocols
+here.
 
 ## Anti-Patterns
 
