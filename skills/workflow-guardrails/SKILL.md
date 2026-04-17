@@ -3,7 +3,7 @@ name: workflow-guardrails
 description: "Umbrella skill for agent work discipline across development, analysis, and documentation: inspect the repo before restructuring, keep durable truth in repo artifacts instead of chat memory, co-evolve specs/design/steering/user docs with code, apply sound coding patterns, verify work honestly, avoid shortcuts, work efficiently with subagents without hallucinating, and keep moving through the next concrete work item when the human is away. References cover coding patterns, AI-authored code review, and artifact co-evolution. Trigger when the user asks for workflow discipline, coding patterns, doc/artifact maintenance, code review of AI-authored code, project hygiene, execution guardrails, repo normalization, or when a task risks drifting across architecture, storage, specs, continuity, or tooling boundaries."
 metadata:
   author: kundeng
-  version: "1.6.0"
+  version: "1.7.0"
 ---
 
 # Workflow Guardrails
@@ -55,8 +55,8 @@ Before substantive changes:
   by status) is recommended for any project with more than a handful of specs.
   Individual specs record *why we built X*; the ledger answers *what exists
   right now and in what state*. Prefer a structure that an agent can later
-  parse into a hierarchy or graph. Do not prescribe format here — the owning
-  workflow skill (e.g., `spec-driven-dev`) defines the concrete layout.
+  parse into a hierarchy or graph. Do not prescribe format here — leave that
+  to whatever workflow owns specs and tasks in this project.
 
 ### 3. No Shortcutting
 
@@ -212,25 +212,15 @@ Load these on demand when the relevant kind of work is active:
   review; reach for it when code, docs, and intent have visibly drifted.
 - [`refs/ai-artifact-update.md`](refs/ai-artifact-update.md) — how to keep
   specs, design docs, steering docs, user docs, and analysis records honest as
-  code evolves. Surgical edits, not rewrites. Names the owning skill for each
-  artifact type.
+  code evolves. Surgical edits, not rewrites.
 
-## Related Skills
+## Umbrella Role
 
-This skill sets the umbrella discipline; specialized skills own concrete
-workflows. Route to the owning skill when that kind of work is substantial:
-
-- `spec-driven-dev` — spec waves (`requirements.md` / `design.md` / `tasks.md`
-  or fast-track `spec.md`) under `.kiro/specs/`, with `/spec-plan`, `/spec-go`,
-  `/spec-audit`, `/spec-status` commands and steering docs at `.kiro/steering/`.
-- `doc-coauthoring` — structured authoring of user-facing docs through Context
-  Gathering → Refinement → Reader Testing.
-- `analytic-workbench` — notebook-first analysis flows: question, assumptions,
-  runs, findings, promotion to reusable pipelines.
-- `design2spec` — design-to-spec handoff from mockups or visual designs.
-
-Use this skill's discipline alongside those; do not duplicate their protocols
-here.
+This skill sets cross-cutting discipline; it does not implement specific
+workflows. When a project has a structured workflow for specs, docs, analysis,
+or design handoff, that workflow's own skill owns the protocol. Use this
+skill's principles alongside whatever workflow is active — do not duplicate
+workflow-specific protocols here.
 
 ## Anti-Patterns
 

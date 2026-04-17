@@ -2,8 +2,8 @@
 
 Reference for `workflow-guardrails`: how an agent should keep project artifacts
 — specs, design docs, steering docs, user docs, analysis records — honest as
-the code evolves. This is the failure mode individual workflow skills do not
-catch because each skill focuses on its own flow; drift happens *between* them.
+the code evolves. This is the failure mode that individual workflow skills do
+not catch because each focuses on its own flow; drift happens *between* them.
 
 Use this when code has just landed or is about to land, and one or more of
 these artifacts may need to move too. Keep updates surgical. Merge, don't
@@ -13,27 +13,23 @@ clobber.
 
 Typical layers an AI-authored project maintains:
 
-- **Spec artifacts** — `requirements.md`, `design.md`, `tasks.md` under
-  `.kiro/specs/NN-name/`, or a single `spec.md` for fast-track. Owned by the
-  `spec-driven-dev` skill. Each spec has a lifecycle state (DRAFT → ACTIVE →
-  SHIPPED → SUPERSEDED / OBSOLETE).
-- **Feature ledger** — project-level living inventory of features across all
-  specs, by status. Answers *what exists now*. Structure should be
-  hierarchy-graphable. Owned by `spec-driven-dev`; file typically at
-  `.kiro/FEATURES.md`.
-- **Snapshots** — dated, frozen copies of the feature ledger + architecture
-  state at release boundaries. Typically at `.kiro/snapshots/YYYY-MM-NN.md`.
-  Not edited after creation.
-- **Steering docs** — `.kiro/steering/product.md`, `structure.md`, `tech.md`.
-  Read-only during a task; updated deliberately when the project mode changes.
+- **Spec artifacts** — e.g. `requirements.md`, `design.md`, `tasks.md` under a
+  per-spec directory, or a single `spec.md` for fast-track. Each spec has a
+  lifecycle state (DRAFT → ACTIVE → SHIPPED → SUPERSEDED / OBSOLETE). Once a
+  spec is no longer the current one, it becomes a dated, frozen record of what
+  was built then and why.
+- **Feature ledger** — a project-level living inventory of features across all
+  specs, grouped by status. Answers *what exists right now and in what state*.
+  Prefer a structure an agent can later parse into a hierarchy or graph.
+- **Steering docs** — project-level docs that capture mission, structure, and
+  tech decisions (e.g. `product.md`, `structure.md`, `tech.md`). Read-only
+  during a task; updated deliberately when consensus actually shifts.
 - **Project steering file** — `CLAUDE.md`, `AGENTS.md`. Tells future agents how
   to work in this repo.
 - **Design records / ADRs** — decisions with rationale, living next to the
-  spec's `design.md` Decisions section or as standalone files.
-- **User-facing docs** — READMEs, tutorials, user guides, reference pages. Owned
-  by the `doc-coauthoring` skill when substantial.
-- **Analysis records** — question, assumptions, runs, findings. Owned by the
-  `analytic-workbench` skill.
+  owning spec or as standalone files.
+- **User-facing docs** — READMEs, tutorials, user guides, reference pages.
+- **Analysis records** — question, assumptions, runs, findings.
 - **Handoff state** — the session-handoff section of `CLAUDE.md` or a dedicated
   handoff file.
 
@@ -46,65 +42,58 @@ Typical layers an AI-authored project maintains:
   Do not rewrite a whole document to reflect a small delta.
 - **Describe what the code does now, not what you hoped for.** Aspirational
   prose rots fastest.
-- **Route through the owning skill.** When a user-doc rewrite is substantial,
-  hand off to `doc-coauthoring`. When a spec changes shape, hand off to
-  `spec-driven-dev`. The umbrella rule is to keep artifacts honest; the owning
-  skill knows the specific protocol.
+- **Route through the owning workflow.** When a substantive update belongs to
+  a structured workflow (spec management, user-doc authoring, analysis flow,
+  design handoff), let that workflow's protocol carry the change. The umbrella
+  rule is to keep artifacts honest; the owning workflow knows the specifics.
 
 ## Per-Artifact Update Rules
 
-### Spec artifacts (spec-driven-dev)
+### Spec artifacts
 
-- When a task is implemented: mark its checkbox `[x]` in `tasks.md`, append to
-  the Log (fast-track) or note in Decisions (full ceremony), and verify that
-  `design.md` still matches the shape of what shipped. Do not mark `[x]`
-  without re-reading design.
+- When a task is implemented: mark its checkbox `[x]`, append to the spec's
+  Log or Decisions section, and verify that the design section still matches
+  the shape of what shipped. Do not mark `[x]` without re-reading design.
 - When the design actually changes: add a new Decision entry with Context,
   Options, Chosen, Rationale. Do not silently edit an earlier decision.
-- When requirements shift: add or revise an EARS clause in `requirements.md`,
-  then trace downward — does any existing property or task become obsolete?
+- When requirements shift: add or revise the requirement clause, then trace
+  downward — does any existing property or task become obsolete?
 - Never uncheck a completed task to "re-do" it. Add a new task with a
   reference back.
-- **Freeze on ship.** Once a spec's status is `SHIPPED`, stop editing it except
-  to add forward links to supersedes/superseded-by entries or correct factual
-  errors. Retroactively rewriting shipped specs destroys the record of why
-  decisions were made. New reality goes in the feature ledger and in new specs.
+- **Freeze on ship.** Once a spec's status is `SHIPPED`, stop editing it
+  except to add forward links (SUPERSEDED-BY) or correct factual errors.
+  Retroactively rewriting shipped specs destroys the record of why decisions
+  were made. New reality goes into a successor spec and into the feature
+  ledger — the shipped spec itself becomes the dated snapshot of that slice
+  of history.
 
-### Feature ledger (spec-driven-dev, typically .kiro/FEATURES.md)
+### Feature ledger
 
 - **Update on every state change.** When a task ships, deprecates, or removes
-  a feature, update the feature's row in the ledger in the same session.
+  a feature, update the corresponding ledger entry in the same session.
 - **Append, don't rewrite.** Status transitions are edits in place; entries
-  for obsolete or superseded features stay in the ledger so future readers see
-  what existed and why it's gone.
-- **Cross-link to specs.** Every feature entry points to the spec that owns it.
-  Supersession and dependency edges point by stable feature id.
+  for obsolete or superseded features stay in the ledger so future readers
+  see what existed and why it's gone.
+- **Cross-link to specs.** Every feature entry points to the spec that owns
+  it. Supersession and dependency edges point by stable feature id.
 - **Drift sweep.** Periodically (release, milestone, or quarterly) audit the
   ledger against code: flag orphans (in code, not in ledger) and ghosts (in
-  ledger, not in code). Produce a dated snapshot after each sweep.
+  ledger, not in code). Stamp the sweep date in the ledger header.
 
-### Snapshots (.kiro/snapshots/)
+### Steering docs
 
-- **Write once, never edit.** A snapshot is a frozen copy of reality at a
-  point in time. Edits defeat its purpose.
-- Include: feature ledger state, shipped-spec index, architectural summary,
-  date.
-- Reference the snapshot from the next release's planning docs, not the
-  other way around.
-
-### Steering docs (.kiro/steering/)
-
-- `structure.md`: update when repo layout changes (new top-level directory,
-  moved package, renamed convention). Do not update for routine file moves.
-- `tech.md`: update when a framework, language version, or tooling decision
-  changes. Include the reason.
-- `product.md`: update only when the product's mission or scope actually shifts,
-  not for tactical changes. If you are editing it weekly, something is wrong.
+- Repo-layout steering (structure / conventions): update when the layout
+  actually changes. Do not update for routine file moves.
+- Tech-stack steering: update when a framework, language version, or tooling
+  decision changes. Include the reason.
+- Product / mission steering: update only when the product's mission or scope
+  actually shifts, not for tactical changes. If you are editing it weekly,
+  something is wrong.
 
 ### Steering file (CLAUDE.md / AGENTS.md)
 
-- Merge, don't clobber. Preserve existing structure and only replace or add the
-  section that needs changing.
+- Merge, don't clobber. Preserve existing structure and only replace or add
+  the section that needs changing.
 - Update the session handoff after substantial work. Next session reads this
   first.
 - Keep it short enough that future agents will actually read it. If it grows
@@ -113,22 +102,22 @@ Typical layers an AI-authored project maintains:
 
 ### Design records / ADRs
 
-- Written once, not revised. If a decision is superseded, add a new record and
-  mark the old one Superseded-by.
+- Written once, not revised. If a decision is superseded, add a new record
+  and mark the old one Superseded-by.
 - Reference the code: file paths, function names, endpoint paths. A decision
   that cannot be traced to code is not actionable.
 
 ### User-facing docs
 
-- Verify behavior before editing — run the code path, check the current output,
-  read the tests. Do not trust an earlier draft of the doc as a source of truth
-  for current behavior.
-- For substantial work, hand off to `doc-coauthoring`: its Context Gathering →
-  Refinement → Reader Testing flow catches more than a one-shot edit.
+- Verify behavior before editing — run the code path, check the current
+  output, read the tests. Do not trust an earlier draft of the doc as a
+  source of truth for current behavior.
+- For substantial work, prefer a structured authoring workflow (context
+  gathering → refinement → reader testing) over a one-shot edit.
 - Images without alt-text are invisible to the next agent that reads the doc
   through an LLM. Add alt-text or flag for the user.
 
-### Analysis records (analytic-workbench)
+### Analysis records
 
 - Keep each notebook tied to a question. An orphan notebook with no stated
   question is a liability.
@@ -146,35 +135,24 @@ Typical layers an AI-authored project maintains:
 
 ## Common Failure Modes
 
-- **Wholesale rewrite.** Agent rewrites the entire document to reflect a small
-  change, destroying prior structure, voice, and cross-references.
-- **Aspirational prose.** Doc describes what the agent intends to build rather
-  than what exists. Gets worse every iteration.
+- **Wholesale rewrite.** Agent rewrites the entire document to reflect a
+  small change, destroying prior structure, voice, and cross-references.
+- **Aspirational prose.** Doc describes what the agent intends to build
+  rather than what exists. Gets worse every iteration.
 - **Silent obsolescence.** Code removed, but the section of the doc that
   describes it is left behind. The next reader assumes it still works.
-- **Ledger drift.** Feature ships but `.kiro/FEATURES.md` isn't updated, or
-  a feature stays as ACTIVE in the ledger after its code was removed.
+- **Ledger drift.** Feature ships but the ledger isn't updated, or a feature
+  stays as ACTIVE in the ledger after its code was removed.
 - **Spec zombie editing.** Agent edits a shipped spec to match new reality
   rather than creating a successor and marking the old one SUPERSEDED.
-- **Taskfile drift.** Code lands but `tasks.md` never gets the checkbox, or
+- **Taskfile drift.** Code lands but the task checkbox never flips, or
   checkboxes are flipped without the code actually landing.
-- **Design-as-docs.** Agent edits `design.md` to match the code instead of
-  adding a Decision, erasing the history of why the change happened.
+- **Design-as-docs.** Agent edits the design section to match the code
+  instead of adding a Decision, erasing the history of why the change
+  happened.
 - **Doc generated from stale summary.** Agent writes user-facing docs from a
-  subagent summary rather than from reading the code. Summary was plausible;
-  the code has moved.
-- **Steering file bloat.** Every session adds a paragraph to `CLAUDE.md`. Six
-  months later no one reads it.
+  subagent summary rather than from reading the code. The summary was
+  plausible; the code has moved.
+- **Steering file bloat.** Every session adds a paragraph to `CLAUDE.md`.
+  Six months later no one reads it.
 - **Broken cross-links.** File renamed, references in other docs not updated.
-
-## Cross-Skill Routing
-
-When an artifact update is substantial, route to the skill that owns it:
-
-- Spec wave work → `spec-driven-dev` (`/spec-plan refine`, `/spec-audit`)
-- User-facing docs → `doc-coauthoring`
-- Analysis artifacts → `analytic-workbench`
-- Design handoff from a visual / mockup → `design2spec`
-
-This reference covers the *cross-cutting* discipline: co-evolution, surgical
-edits, honest descriptions. The per-skill protocols handle the specifics.
