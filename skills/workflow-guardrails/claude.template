@@ -1,0 +1,313 @@
+# CLAUDE.md - Reference Implementation for a Project Steering File
+
+This file is a reference implementation, not a verbatim template.
+
+A Claude agent should read this file to understand the intended shape of a
+project-specific `CLAUDE.md`, then inspect the actual repo and synthesize a
+version that fits the project's real workflow.
+
+Use placeholders where needed, but prefer concrete repo-derived values over
+generic filler once you know the project.
+
+## What `CLAUDE.md` is for
+
+`CLAUDE.md` is the project's steering file. It should give the agent the
+minimum durable context needed to start work correctly without duplicating the
+entire spec or architecture docs.
+
+It should answer:
+
+- what to read first
+- whether this is a development project, analysis project, or hybrid
+- how to run and verify the project
+- what workflow rules matter here
+- what the canonical docs and entry points are
+- what artifacts must be maintained as work progresses
+- what must be updated during or after work
+- what the current handoff state is
+
+It should not try to be the full project spec.
+
+## Suggested structure
+
+The generated `CLAUDE.md` should usually include these sections:
+
+1. project purpose and scope
+2. project mode
+3. starting a session
+4. commands
+5. environment or tooling rules
+6. work discipline
+7. verification standards
+8. architecture pointers
+9. key project rules
+10. what to maintain
+11. loop behavior when the human is away
+12. what not to put in this file
+13. current session handoff
+
+Drop sections that do not fit the repo. Add sections only when they are part of
+the actual workflow.
+
+---
+
+# CLAUDE.md - How to Work on This Project
+
+## Project purpose
+
+Briefly state what this project is and what this repo contains.
+
+Example placeholder:
+
+- `[one sentence project description]`
+- `[what kind of system this is: app, library, analysis repo, automation repo, etc.]`
+
+## Project mode
+
+State whether this repo is mainly:
+
+- development
+- analysis
+- hybrid
+
+Explain the consequence briefly.
+
+Examples:
+
+- Development project: maintain code, specs, milestones, feature status, and verification.
+- Analysis project: maintain questions, assumptions, run artifacts, experiment summaries, and conclusions.
+- Hybrid project: maintain both engineering and analysis artifacts, and keep them clearly separated.
+
+## Starting a session
+
+List the read-first order. Keep it short and mechanical.
+
+Example:
+
+1. Read this file.
+2. Read `[primary spec or steering doc path]`.
+3. Check recent changes with `[git command or status check]`.
+4. Confirm the next task from `[canonical tracker, spec section, or handoff]`.
+5. If the human is away, continue from the next incomplete `[milestone, task, bug, or analysis work item]`.
+
+If the repo has no specs, point to the closest equivalent source of truth.
+
+## Commands
+
+List only the commands that are actually needed to develop, test, and run the
+project.
+
+Example:
+
+```bash
+[install command]      # install dependencies
+[dev command]          # start the local development environment
+[test command]         # run the main test suite
+[lint command]         # run linting if used
+[build command]        # build production artifacts if relevant
+```
+
+Rules:
+
+- Keep command comments short.
+- Do not include commands that are stale, optional, or one-off debugging
+  helpers unless they are part of normal workflow.
+- Prefer repo-approved tooling over generic alternatives.
+
+## Environment or tooling rules
+
+Document only the tooling conventions the agent must follow.
+
+Examples:
+
+- Use `[package manager or runtime]`, not `[disallowed alternatives]`.
+- Use `[task runner]` for repeatable workflows.
+- Do not edit `[local IDE config path]` without explicit permission.
+- Store secrets in `[expected secret mechanism]`; never commit them.
+
+This section should cover workflow-critical constraints, not every environment
+detail.
+
+## Work discipline
+
+Describe how work should progress in this repo.
+
+Example topics:
+
+- how work maps to specs, milestones, notebooks, or tickets
+- which durable artifacts must be maintained during the work
+- expected commit size or review cadence
+- what must be verified before work counts as done
+- when to update docs or steering artifacts
+- when to stop and ask the human
+
+Good examples:
+
+- Every substantial change should trace to `[spec, task, notebook, issue, or workstream]`.
+- Keep `[requirements, designs, tasks, milestones, feature status, documentation, experiment logs]` current as part of the work.
+- Keep changes scoped to one verified work unit when practical.
+- Update durable status docs when workflow state changes.
+- Before ending substantial work, update the handoff section in this file.
+
+## Verification standards
+
+State what counts as meaningful verification in this repo.
+
+Examples:
+
+- Do not add empty or symbolic tests.
+- Prefer tests that exercise real behavior and would fail if the feature broke.
+- Use unit tests for isolated logic, integration tests for system boundaries, and end-to-end tests for user workflows.
+- When a UI or browser flow exists, use available tools such as Agent Browser or Playwright for real end-to-end coverage.
+- Record honest verification status in `[status doc or tracker path]`.
+
+If the repo already has a testing pyramid or verification policy, point to it
+here and summarize only the operational part.
+
+## Architecture pointers
+
+Point to the important parts of the repo. Keep this section shallow.
+
+Example:
+
+- `[path]` - `[what lives here]`
+- `[path]` - `[what lives here]`
+- `[path]` - `[what lives here]`
+
+Rules:
+
+- Prefer pointers, not deep explanation.
+- Put detailed architecture in specs or dedicated docs, then link to them.
+- Include only the areas an agent needs to orient quickly.
+
+## Key project rules
+
+Record hard constraints and invariants that the agent must not violate.
+
+Examples:
+
+1. `[canonical data/workspace rule]`
+2. `[required integration path or API usage rule]`
+3. `[validation, schema, or persistence rule]`
+4. `[configuration or secrets rule]`
+5. `[UI, packaging, deployment, or runtime rule]`
+
+Good rules are concrete and testable.
+
+## What to maintain
+
+List the durable artifacts that must stay current.
+
+Example:
+
+After every substantial piece of work, update:
+
+1. `[spec or task tracker path]` - update milestone or task state.
+2. `[status doc path]` - record real verification status.
+3. `CLAUDE.md` - refresh the session handoff section below.
+4. `[project knowledge doc path]` - update only if conventions or architecture
+   changed.
+
+Keep this section short. If the user names mandatory maintenance categories,
+encode them here explicitly.
+
+Common development categories:
+
+1. requirements or designs
+2. tasks or milestones
+3. feature or verification status
+4. project knowledge or documentation
+
+Common analysis categories:
+
+1. question or hypothesis
+2. assumptions and data provenance
+3. run artifacts or experiment records
+4. summary of findings and next decision
+
+## Loop behavior when the human is away
+
+Describe how the agent should continue work without waiting for prompts.
+
+Examples:
+
+- Continue from the next incomplete spec milestone or task.
+- Fix failing tests or known errors before starting unrelated work.
+- Prefer maintainability refactors when they reduce duplication, clarify module boundaries, or make the next task easier to verify.
+- Stop only for real blockers: missing decisions, missing credentials, missing data, or conflicting source-of-truth documents.
+- Update the handoff before stopping.
+
+## What not to put in this file
+
+This section prevents `CLAUDE.md` from turning into a dumping ground.
+
+Examples:
+
+- deep architecture details -> `[spec or architecture doc path]`
+- project-specific schemas or domain knowledge -> `[domain knowledge doc path]`
+- long milestone history -> `[specs, tickets, or changelog path]`
+- implementation patterns that already live in code -> code and tests
+
+## Session handoff
+
+This section is the durable continuity layer for long-running work.
+
+Keep it brief and structured.
+
+Suggested fields:
+
+- date
+- current objective
+- current status
+- open tasks
+- active milestone or workstream
+- known blockers or pending decisions
+- files changed recently
+- files to read first next time
+- exact next action
+
+Example:
+
+### Session handoff ([YYYY-MM-DD])
+
+#### Current objective
+- `[what the project is currently trying to accomplish]`
+
+#### Current status
+- `[what is already working or completed]`
+
+#### Open tasks
+- `[task 1]`
+- `[task 2]`
+
+#### Active milestone or workstream
+- `[name or path]`
+
+#### Known blockers or decisions
+- `[blocker or pending decision]`
+
+#### Files changed recently
+- `[path]`
+- `[path]`
+
+#### Files to read first next time
+- `[path]`
+- `[path]`
+
+#### Exact next action
+- `[the next concrete work unit; do not say "continue from here"]`
+
+## Authoring guidance for the agent creating `CLAUDE.md`
+
+When generating a real `CLAUDE.md` from this reference:
+
+1. Inspect the repo before writing anything.
+2. Prefer the project's existing structure and language.
+3. Keep repo truth in repo docs, not in chat memory.
+4. Use exact paths, commands, and doc names from the repo.
+5. Do not copy placeholder text once repo-specific facts are available.
+6. Keep the final file concise enough that future sessions will read it.
+7. If the repo already has a good steering file, refine it instead of replacing
+   it wholesale.
+8. Make the maintenance categories, verification standard, and looping behavior
+   explicit enough that another agent can continue without extra coaching.
