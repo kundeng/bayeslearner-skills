@@ -1,14 +1,15 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development: plan → go → review loop with spec lifecycle states and a project-level feature ledger. Use for planning features, implementing from specs, refining specs, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, feature ledger, FEATURES.md, spec-ledger, `.kiro`. IMPORTANT: Never edit spec files without first reading this skill."
+description: "Spec-driven development: plan → go → review → project loop with spec lifecycle states, YAML frontmatter, an AI-operated feature projection grounded in code reality, and AI-operated refresh of project documentation against that same grounding. Use for planning features, implementing from specs, refining specs, regenerating the project-level feature ledger, bringing README / docs/ / CHANGELOG up to date with specs and code, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, spec-project, spec-docs, feature ledger, FEATURES.md, spec-link, `.kiro`, `specs/`, refreshing or syncing docs from specs, updating README to match reality, or any ask to audit, project, or refresh the state of features and docs in the project. IMPORTANT: Never edit spec files without first reading this skill. Never hand-edit FEATURES.md — it is a derived projection. Never regenerate managed doc sections without reading `references/docs-refresh-playbook.md`."
 metadata:
   author: kundeng
-  version: "2.1.1"
+  version: "3.1.0"
 ---
 
 ## Spec-Driven Development
 
-Specs live in `.kiro/specs/<NN-name>/`. Numeric prefixes for ordering (`01-auth`, `02-api-layer`). Two modes:
+Specs live under `<SPECS_ROOT>/<NN-name>/`. Numeric prefixes for ordering
+(`01-auth`, `02-api-layer`). Two modes:
 
 - **Full ceremony** (requirements.md → design.md → tasks.md): formal traceability, approval gates, multi-team
 - **Fast-track** (single `spec.md`): one scratchpad for planner/builder/reviewer — no gates, cycle freely between hats
@@ -17,10 +18,65 @@ Specs live in `.kiro/specs/<NN-name>/`. Numeric prefixes for ordering (`01-auth`
 **Small work:** Add to an existing spec as tasks, or create a fast-track spec.
 **Upgrade:** Fast-track → full when >20 tasks or traceability needed: Context → requirements.md, Decisions → design.md, Tasks → tasks.md.
 
+### SPECS_ROOT resolution
+
+Different projects use different conventions. Resolve once at entry, never
+hard-code a path.
+
+Resolution order (first match wins):
+
+1. `specs_root:` line in `CLAUDE.md` or `AGENTS.md` at the repo root.
+2. `.kiro/specs/` if it exists.
+3. `specs/` at the repo root if it exists.
+4. Brand-new project with neither: default to `.kiro/specs/`.
+
+Sibling artifacts live alongside the chosen specs directory:
+
+| Specs root           | Ledger                   | Steering docs        |
+|----------------------|--------------------------|----------------------|
+| `.kiro/specs/`       | `.kiro/FEATURES.md`      | `.kiro/steering/`    |
+| `specs/` (repo root) | `FEATURES.md` (repo root)| `steering/` (repo root)|
+
+Throughout this skill, **SPECS_ROOT** is the resolved specs directory and
+**LEDGER** is the resolved `FEATURES.md` path. Commands resolve these once
+per invocation.
+
+### Frontmatter schema
+
+Every top-level spec file (`spec.md` or `requirements.md`) starts with a YAML
+frontmatter block. The frontmatter is the **uncontroversial factual truth**
+that the projection and all tooling read from.
+
+```yaml
+---
+spec_id: 01-auth              # directory-matching id
+status: ACTIVE                # DRAFT | ACTIVE | SHIPPED | SUPERSEDED | OBSOLETE
+since: 2025-08-14             # when status entered current value
+until: null                   # set only on SUPERSEDED/OBSOLETE
+epic: auth                    # domain H2 in FEATURES.md (slash-nested: "api/v2")
+features: [email-login, magic-link]
+supersedes: []                # spec_ids this spec replaces
+superseded_by: null           # spec_id that replaces this one
+depends_on: []                # spec_ids whose outputs this spec requires
+---
+```
+
+Rules:
+
+- `spec_id` must match the directory name.
+- `status` values follow the lifecycle state machine below.
+- `superseded_by` on a SUPERSEDED spec must reference a spec whose
+  `supersedes` list includes this `spec_id` (bidirectional integrity).
+- `features` must be unique project-wide (the feature id is stable across
+  specs).
+- `depends_on` entries must reference real `spec_id`s.
+
+See `references/frontmatter-schema.md` for the complete schema, examples,
+and the `spec_lint` validation rules.
+
 ### Spec Lifecycle
 
-Every spec has a status. Write it in the first line of the top-level spec file
-(`spec.md` or `requirements.md`) as `Status: <STATE>` (plus a `Since:` date).
+Every spec has a status. It is the `status:` field in the frontmatter block.
 
 | State | Meaning | Editable? |
 |-------|---------|-----------|
@@ -32,104 +88,57 @@ Every spec has a status. Write it in the first line of the top-level spec file
 
 **Freeze on ship.** Once a spec is SHIPPED, do not retroactively edit it to
 match new reality. Retroactive edits destroy the record of why each decision
-was made. New reality goes into a new spec and into the feature ledger.
+was made. New reality goes into a new spec and into the projection.
 
 **Successor pattern.** When a shipped feature needs rework, create a new spec
-(`NN-name-v2` or `NN-different-name`). Mark the old spec `SUPERSEDED` and add
-a `Superseded-by:` line pointing to the new spec. Update the feature ledger to
-reflect the transition.
+(`NN-name-v2` or `NN-different-name`). Mark the old spec `SUPERSEDED`, set
+`superseded_by:` to the new spec_id, and set the new spec's `supersedes:`
+list to include the old spec_id. The projection reads both fields and emits
+the transition row in the ledger.
 
-### Feature Ledger
+### The Feature Projection (was: Feature Ledger)
 
-A project-level living inventory of features across all specs, organized by
-status. It is the source of truth for *what exists right now*; specs remain
-the source of truth for *why each decision was made*.
+`LEDGER` (`FEATURES.md`) is a **derived projection** of the feature state
+across all specs, grounded in actual code. It is not hand-maintained. It is
+rewritten in place every time `/spec-project` runs.
 
-**Location:** `.kiro/FEATURES.md` (sibling of `specs/` and `steering/`).
-**Read first.** New agents should read this before any individual spec.
-**Updated continuously.** Every time a task ships, deprecates, or removes a
-feature, the corresponding ledger entry must be updated in the same session.
+The file has two layers:
 
-**Structure** is hierarchy-graphable so agents can later parse it into a
-tree or DAG:
+1. **Facts block** — machine-stamped from `scripts/spec_facts.py`. Feature
+   id, owning spec, status, since/until, supersession edges, dependency
+   edges. The facts block cannot be wrong because it is regenerated from
+   frontmatter and task state on every projection, and `--check` mode
+   fails CI if the on-disk block diverges from reality.
+2. **Narrative block** — AI-authored during `/spec-project`, grounded in
+   code reading, with required evidence anchors on every claim. Covers
+   drift flags, recent transitions, friction points, open questions — the
+   content a mechanical projection cannot produce.
 
-- H2 headers are domain paths: `## auth`, `## api/v2`, `## data/ingest`.
-  Nested domains use slash notation in the header.
-- H3 headers are feature ids (stable slugs): `### email-login`.
-- A backticked status tag follows the feature id: `` `ACTIVE` ``.
-- Metadata follows as bold-key bullets (graph-parseable).
-
-**Template:**
-
-```markdown
-# Feature Ledger
-
-Living inventory of features. Read this before any individual spec.
-Each H2 is a domain (slash-nested), each H3 is a feature id with a status
-tag; metadata bullets define graph edges.
-
-**Status values:** DRAFT, PLANNED, IN-PROGRESS, BLOCKED, ACTIVE, DEPRECATED,
-SUPERSEDED, OBSOLETE
-
-Last drift sweep: [YYYY-MM-DD]
-
-## auth
-
-### email-login `ACTIVE`
-
-- **spec**: 01-auth
-- **since**: 2025-08-14
-- **supersedes**: [password-auth]
-- **depends-on**: [session-management]
-- **description**: Email + password login with session cookies.
-
-### magic-link `ACTIVE`
-
-- **spec**: 01-auth
-- **since**: 2025-10-03
-- **description**: Passwordless one-time-link login via email.
-
-### password-auth `SUPERSEDED`
-
-- **spec**: 01-auth
-- **since**: 2025-08-14
-- **until**: 2026-01-20
-- **superseded-by**: [email-login]
-- **description**: Original password-only flow, replaced by email-login.
-
-## api/v2
-
-### bulk-export `IN-PROGRESS`
-
-- **spec**: 05-bulk-export
-- **target**: 2026-Q2
-- **depends-on**: [session-management]
-- **description**: CSV/JSON export endpoint for user data.
-```
+**Location:** `LEDGER` (sibling of SPECS_ROOT).
+**Read first.** New agents read `LEDGER` before any individual spec.
+**Do not hand-edit.** All changes go through `/spec-project`. The header
+warns readers: `<!-- AUTO-GENERATED by /spec-project. Do not edit. -->`
 
 **Graph model** (for downstream tools):
 
-- Domain hierarchy: from H2 path.
-- Feature id: H3 header, unique per project.
-- Parent feature (subfeatures): `**parent**: <id>` bullet.
-- Spec edges: `**spec**: <spec-id>`.
-- Supersession edges: `**supersedes**` / `**superseded-by**`.
-- Dependency edges: `**depends-on**`.
-- Lifecycle edges: derived from status transitions recorded in the ledger's
-  `since` / `until` fields.
+- Domain hierarchy: `epic:` field in frontmatter, slash-nested.
+- Feature id: entry in `features:` list, unique per project.
+- Spec edges: derived from frontmatter (which spec owns which feature).
+- Supersession edges: `supersedes:` / `superseded_by:` fields.
+- Dependency edges: `depends_on:` field.
+- Lifecycle edges: derived from `status:` / `since:` / `until:` transitions
+  (git history on LEDGER provides the sequence).
 
-**Append, don't rewrite.** Status transitions edit the row in place; obsolete
-and superseded entries stay in the ledger. Never delete feature history.
-
-**No separate snapshots needed.** A spec that is no longer the current one —
-`SHIPPED`, `SUPERSEDED`, or `OBSOLETE` — is itself a dated record of what was
-built then and why. Combined with the ledger's `since` / `until` fields and
-git history on the ledger file, the project's state at any past point is
-reconstructible without a separate snapshot artifact.
+**No separate snapshots.** A spec that is no longer current — SHIPPED,
+SUPERSEDED, or OBSOLETE — is itself a dated record of what was built and
+why. Combined with `since:` / `until:` fields and git history on LEDGER,
+any point-in-time state is reconstructible without a snapshot artifact.
 
 ### Spec Resolution
 
-SPEC → `.kiro/specs/*-SPEC/` or `.kiro/specs/SPEC/`. No name → auto-select if exactly one exists. Let **SPEC_DIR** = resolved directory. When creating, assign next available number.
+SPEC → `SPECS_ROOT/*-SPEC/` or `SPECS_ROOT/SPEC/`. No name → auto-select if
+exactly one exists. Let **SPEC_DIR** = resolved directory. When creating,
+assign next available number under SPECS_ROOT.
 
 ### Core Loop
 
@@ -181,17 +190,26 @@ stateDiagram-v2
   }
 
   Replan --> Plan : human reviews new plan
-  Go --> [*] : all tasks done
-  Go --> [*] : stuck
+  Go --> Project : tasks done or checkpoint
+  Project --> [*] : projection verified
+  Project --> Plan : drift compounds → refine or successor
+
+  note right of Project
+    /spec-project (author + verify)
+    regenerates LEDGER from specs + code.
+  end note
 ```
 
-**Concurrency:** Single orchestrator owns spec files, one sequential builder by default. Subagents OK for non-code work (research, docs, website). Parallel builders only when user explicitly requests AND tasks are truly independent.
+**Concurrency:** Single orchestrator owns spec files, one sequential builder
+by default. Subagents OK for non-code work (research, docs, website). Parallel
+builders only when user explicitly requests AND tasks are truly independent.
 
 | State | Entry | Stops when |
 |-------|-------|-----------|
 | **Plan** | `/spec-plan create [--fast]` | User approves (full) or spec generated (fast) |
 | **Go** | `/spec-go`, `/spec-task` | All done, needs human feedback, or stuck |
 | **Review** | `/spec-audit`, `/spec-status`, `/spec-plan refine` | Findings presented |
+| **Project** | `/spec-project` | LEDGER rewritten and verifier passed |
 
 **Resuming** — detect from files on disk:
 
@@ -202,18 +220,23 @@ stateDiagram-v2
 | `requirements.md` only | Plan | Generate design.md |
 | `requirements.md` + `design.md` | Plan | Generate tasks.md |
 | All 3 + `[ ]` tasks | Go | Next task |
-| All tasks `[x]` | Done | Audit or merge |
+| All tasks `[x]` | Project / Done | `/spec-project` then audit or merge |
 
 ### Rules
 
-1. **Read before acting** — feature ledger (`.kiro/FEATURES.md`) first, then all spec files + steering docs if they exist.
+1. **Read before acting** — LEDGER first, then all spec files + steering docs if they exist.
 2. **Re-anchor when uncertain** — re-read spec if next action could deviate.
 3. **Respect dependencies** — never skip ahead.
 4. **Tests are separate tasks.**
 5. **Commit per task** — `feat(<spec>/<task>): [description]`
 6. **Minimal changes** — only what the task requires.
 7. **Respect spec lifecycle** — never edit a SHIPPED / SUPERSEDED / OBSOLETE spec except for forward links or factual fixes. Create a successor spec instead.
-8. **Update the ledger on ship** — every feature transition (added, shipped, deprecated, removed) is reflected in `.kiro/FEATURES.md` in the same session.
+8. **LEDGER is derived** — never hand-edit `FEATURES.md`. Run `/spec-project` after any task that ships/deprecates/supersedes a feature, after frontmatter changes, or when the human asks for fresh state.
+9. **Every projection claim cites an anchor.** Valid anchors: `[spec:NN-name]`, `[task:NN-name#ID]`, `[commit:<short-sha>]`, `[src:path/to/file:Lxx]`. ACTIVE and SHIPPED claims **require** at least one `[src:]` anchor.
+10. **Code-grounding on projection.** `/spec-project` reads actual code for every feature asserted as ACTIVE/SHIPPED. Paper truth (spec + task anchors alone) is insufficient. See `references/spec-code-grounding.md`.
+11. **Escalate on compound drift.** When `/spec-audit` repeats drift findings, or when multiple features land in Drift flags across consecutive projections, escalate to the full 4-pass audit in `skills/workflow-guardrails/refs/ai-code-review.md`.
+12. **This skill's formality is not discovery.** Frontmatter lint, projection-diff, and the other mechanical consistency checks are CI gates — they fail when YOU just made the graph inconsistent, and they silently pass when the repo is healthy. Do not loop on them as a "what to do next" mechanism. When a task says "actively discover work," read DK comments on the ledger, failing tests, user's git state, deferred milestones, and doubt-flagged SHIPPED features. Reserve the mechanical tooling for its narrow purpose: pre-commit / CI, and right after a `/spec-project` regen to confirm the regen was clean.
+13. **Docs are grounded too.** `/spec-docs` applies the same evidence-anchor discipline as `/spec-project`. Claims without anchors are flagged, not rewritten. Sections wrapped in `<!-- managed-by: spec-docs -->` ... `<!-- /managed-by -->` are regenerated fully; everything else gets targeted factual corrections only. Always run `/spec-project` before `/spec-docs` so LEDGER is fresh.
 
 ---
 
@@ -225,7 +248,10 @@ Auto-detected: **create** if spec doesn't exist, **refine** if it does.
 
 #### Create (full ceremony)
 
-**Scaffold:** Create `.kiro/specs/NN-SPEC/`.
+**Scaffold:** Create `SPECS_ROOT/NN-SPEC/`. Seed YAML frontmatter:
+`spec_id`, `status: DRAFT`, `since:` today, `epic`, `features: []`, empty
+`supersedes`/`superseded_by`/`depends_on`.
+
 **Scan:** Read README, manifests, source structure, tests, CI, steering docs. Align with conventions.
 
 **Generate requirements.md** — template below. **Generate first, iterate second.** EARS format:
@@ -245,7 +271,9 @@ Write the file, then ask: *"Please review requirements.md. Ready for design?"*
 
 #### Create (fast-track)
 
-Same scaffold and scan. Generate `spec.md` (template below): Context, Decisions (can start empty), Tasks by P1/P2/P3. Iterate if feedback, then move on.
+Same scaffold and scan. Generate `spec.md` (template below) with YAML
+frontmatter, then Context, Decisions (can start empty), Tasks by P1/P2/P3.
+Iterate if feedback, then move on.
 
 // turbo
 Commit: `git add -A && git commit -m "spec(SPEC): create fast-track spec"`
@@ -277,7 +305,7 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 **This is a loop — do NOT stop after one task.** Keep cycling build→self-review→build until: all tasks done, human feedback needed, or stuck on repeated failures. Optional count limits tasks per session.
 
 **Build phase:**
-1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md. Also read `.kiro/FEATURES.md` if present.
+1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md. Also read LEDGER if present.
 2. **Pick next task** — first `[ ]` with all deps satisfied. Only optional left → STOP.
 3. **Announce** — "Starting task [ID]: [TITLE]"
 4. **Implement** — read relevant code first. Test tasks: Red-Green-Refactor. Implementation tasks: write code, run existing tests.
@@ -285,15 +313,13 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 // turbo
 6. **Lint** if configured.
 7. **Update** — mark task `[x]`.
-8. **Update the feature ledger** — if the task ships, deprecates, supersedes, or removes a feature, update the corresponding entry in `.kiro/FEATURES.md`. Add new features as `IN-PROGRESS` → `ACTIVE` when fully shipped. Never delete prior entries; mark them SUPERSEDED / OBSOLETE with a forward link.
 // turbo
-9. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
+8. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
 
 **Self-review phase** (every 3 tasks or after a BLOCKED):
-10. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
-11. **Ledger consistency check** — features marked ACTIVE in `.kiro/FEATURES.md` must correspond to shipped tasks; features marked IN-PROGRESS must have an open task. Fix inconsistencies inline.
-12. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
-13. **Report checkpoint:**
+9. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
+10. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
+11. **Report checkpoint:**
 ```
 Checkpoint: SPEC — N/TOTAL tasks done
   Completed this session:
@@ -307,11 +333,19 @@ Checkpoint: SPEC — N/TOTAL tasks done
 ```
 **DO NOT STOP HERE.** Go back to Build phase step 2 and pick the next task. Only stop when: all tasks `[x]`, a task needs human input, or stuck on repeated failures.
 
+**On session exit** (all tasks done OR stuck OR checkpoint before handoff):
+12. Run `/spec-project` to regenerate LEDGER. This is non-optional — the
+    projection is how shipped work becomes visible to the next session.
+13. After a spec ships, do not idle. Immediately check for doubt-flagged
+    features in LEDGER, skipped tests, and known gaps in the just-shipped spec
+    before stopping or scheduling a long wait. Apply the `workflow-guardrails`
+    skill Rule 12 discovery order to find the next concrete work item.
+
 ---
 
 ### `/spec-task <name> <task>`
 
-Single task build. Same as `/spec-go` build steps 1–9 for one task. Verify deps first — if unmet, STOP. When run by a subagent in a parallel worktree, **never modify spec files or the feature ledger** — only write code, tests, docs. Orchestrator updates status and ledger after merge.
+Single task build. Same as `/spec-go` build steps 1–8 for one task. Verify deps first — if unmet, STOP. When run by a subagent in a parallel worktree, **never modify spec files or LEDGER** — only write code, tests, docs. Orchestrator updates status and runs `/spec-project` after merge.
 
 **→ Report:**
 ```
@@ -323,19 +357,194 @@ Task [ID] complete: [title]
 
 ---
 
+### `/spec-link [<name>] [--dry-run]`
+
+Back-fills YAML frontmatter on existing specs. Reads the current (legacy)
+`Status:` / `Since:` / `Features:` lines and `Superseded-by:` annotations,
+prompts where ambiguous, writes the YAML block at the top of each top-level
+spec file. Idempotent.
+
+- `/spec-link` — sweep every spec under SPECS_ROOT.
+- `/spec-link <name>` — single spec.
+- `/spec-link --dry-run` — report what would change, write nothing.
+
+Fails if bidirectional supersession cannot be reconciled; reports the
+conflict and asks the user which side is authoritative.
+
+// turbo
+Commit: `git add -A && git commit -m "spec: back-fill frontmatter via /spec-link"`
+
+---
+
+### `/spec-project [--verify | --verify-inline | --check]`
+
+**Regenerates LEDGER** from spec frontmatter + task state + code reality.
+AI-authored narrative over a mechanically-gated facts floor.
+
+**IMPORTANT — read before authoring:**
+- `references/projection-playbook.md` — structural contract, evidence rules, regeneration triggers.
+- `references/spec-code-grounding.md` — per-feature code-reading protocol.
+
+**Author phase** (default invocation):
+
+1. Run `scripts/spec_facts.py > .facts.json`. This is the canonical facts
+   block. The AI cannot deviate from it.
+2. Read, in order: every spec's YAML frontmatter → every `tasks.md` state
+   (or fast-track `spec.md` Tasks section) → last N commits touching
+   SPECS_ROOT or `src/` → last `/spec-audit` output if present → steering
+   docs.
+3. For every feature listed as ACTIVE or SHIPPED, perform **code
+   grounding** per `spec-code-grounding.md`: find the implementation
+   locus, read the actual code, confirm behavior matches the spec, record
+   `[src:]` anchor(s). If the code is a confident stub, missing, or
+   divergent, log it in Drift flags.
+4. Write LEDGER with the structural contract from the playbook: provenance
+   header → facts block (from `.facts.json`) → narrative per epic →
+   Recent transitions → Drift flags → Open questions. Every narrative
+   claim carries an evidence anchor; ACTIVE/SHIPPED require `[src:]`.
+5. Self-check that every `(inferred)` / hedged claim has two anchors.
+
+**Verifier phase** (always runs after author phase; flag controls how):
+
+- Default — fresh-context verifier. Instruct the human or a fresh agent
+  session to re-read LEDGER alone and confirm every anchor.
+- `--verify-inline` — same agent re-reads its own output against the
+  evidence. Cheaper, faster, weaker. Use for fast iteration.
+- `--verify` on its own — verifier-only pass on the existing LEDGER
+  (skip re-authoring). Useful when someone edited by hand and you want to
+  re-audit.
+
+Verifier output: a report of anchors confirmed / unsupported / contradicted.
+Unsupported claims are struck through in LEDGER. Contradicted claims kick
+back to the author phase (a contradicted anchor is a bug — either the spec
+is wrong or the code is wrong; either way, a human decision).
+
+**`--check` mode** (CI gate):
+
+1. Run `scripts/spec_facts.py`.
+2. Run `scripts/projection_diff.py` comparing the fresh facts against the
+   current LEDGER's facts block.
+3. Exit 0 if identical; non-zero with a diff if not.
+
+`--check` does not re-author; it only asserts the facts block has not
+silently drifted from frontmatter reality.
+
+**What `--check` is NOT:** it is not a discovery tool. Mechanical consistency
+between spec frontmatter and LEDGER's facts block does not surface
+value-driven work. Do not reach for `--check` or `spec_facts`/`projection_diff`
+when looking for "what to do next" — those are CI gates that silently pass on
+a healthy repo and produce formality churn on a slightly-drifted one. Real
+discovery lives in DK comments on the ledger, deferred milestones, failing
+tests, user in-flight git state, `TODO`/`XXX`/`FIXME` greps, and doubt-flagged
+SHIPPED features. See
+[`skills/workflow-guardrails/SKILL.md` Rule 12](../workflow-guardrails/SKILL.md)
+for the full discovery hierarchy.
+
+// turbo (author phase)
+Commit: `git add LEDGER && git commit -m "feat(projection): refresh LEDGER"`
+
+---
+
+### `/spec-docs [<path-glob>] [--dry-run] [--verify | --verify-inline]`
+
+**Refreshes existing project documentation** — README.md, CHANGELOG.md,
+`docs/**/*.md` — so its factual claims match specs, LEDGER, and code. Does
+**not** write docs from scratch. Does **not** touch voice, tone, tutorials,
+or narrative structure. This is targeted correction, not a rewrite.
+
+**IMPORTANT — read before running:**
+- `references/docs-refresh-playbook.md` — scope, managed-section convention, claim shapes, failure modes.
+- Run `/spec-project` first. `/spec-docs` reads LEDGER as its primary source of truth.
+
+**Default scope:** `README.md`, `CHANGELOG.md`, `docs/**/*.md` at the repo
+root. Override with a glob: `/spec-docs "docs/api/**/*.md"`.
+
+**What it touches:**
+
+- Feature lists, status badges, version strings.
+- Supported-configuration and module tables.
+- File paths and module names mentioned in prose.
+- Links between docs and to specs (broken link repair).
+- Sections inside `<!-- managed-by: spec-docs -->` … `<!-- /managed-by -->` (full regeneration).
+
+**What it flags but does not auto-edit:**
+
+- Code examples that call symbols which no longer exist.
+- Prose claims with no discoverable evidence (`[spec:]`, `[src:]`, or LEDGER).
+- Conflicts where two sources of truth disagree (defer to human).
+
+**Phases:**
+
+1. **Discover** — resolve glob; for each file, parse factual claims and managed-section fences.
+2. **Ground** — for each claim, resolve against LEDGER facts block first, then spec frontmatter, then code per `spec-code-grounding.md`. Each accepted edit carries an evidence anchor.
+3. **Plan** — emit an edit plan: `file:line: old → new [spec:…] [src:…]`. In `--dry-run`, stop here and print.
+4. **Apply** — make minimal, git-visible edits. Managed sections get full-body regeneration plus a provenance stamp.
+5. **Verify** — same flag semantics as `/spec-project`. Fresh verifier by default; `--verify-inline` for fast iteration; `--verify` alone re-audits without re-editing.
+
+**Managed-section fence:**
+
+```markdown
+<!-- managed-by: spec-docs
+     last refresh: 2025-11-02
+     source: LEDGER + spec:05-bulk-export -->
+| Feature | Status | Spec |
+|---------|--------|------|
+| bulk-export | SHIPPED | 05-bulk-export |
+| request-id-propagation | ACTIVE | 02-api-layer |
+<!-- /managed-by -->
+```
+
+Everything between the fences is owned by `/spec-docs` and may be rewritten
+on every run. Everything outside the fences is author-owned and gets only
+targeted factual corrections with anchors.
+
+**First-run expectation:** the first `/spec-docs` run on an existing
+project typically produces a big diff. Review with `--dry-run`, accept
+what's correct, fix the specs for the rest. Subsequent runs are
+incremental.
+
+// turbo
+Commit: `git add -A && git commit -m "docs: refresh via /spec-docs"`
+
+---
+
+### `/spec-lint [<name>]`
+
+Validates frontmatter schema across specs. Called by `/spec-audit`; can run
+standalone; can wire to pre-commit. Implemented by `scripts/spec_lint.py`.
+
+Checks:
+
+- Every top-level spec file has a valid YAML frontmatter block.
+- `spec_id` matches the directory name.
+- `status` ∈ {DRAFT, ACTIVE, SHIPPED, SUPERSEDED, OBSOLETE}.
+- `since` present and parseable; `until` present only on SUPERSEDED/OBSOLETE.
+- `superseded_by` resolves to a real spec_id whose `supersedes` list
+  includes this `spec_id` (bidirectional).
+- `features` entries are unique project-wide.
+- `depends_on` and `supersedes` entries reference real spec_ids.
+
+`/spec-lint` — sweep. `/spec-lint <name>` — single spec.
+
+---
+
 ### `/spec-audit <name>`
 
-Read requirements.md, design.md, tasks.md, and the feature ledger. Run checks:
-1. **Traceability** — orphan requirements, orphan properties, broken references
-2. **Redundancy** — duplicates, subset properties, implementation details in requirements
-3. **Stale language** — future tense on done tasks, checked goals with unchecked subs
-4. **Spec↔disk drift** — design directory vs actual repo
-5. **Doc sync** — README/docs vs spec
-6. **Ledger sync** — features referenced in this spec must appear in the ledger with consistent status; shipped tasks must correspond to ACTIVE ledger entries
+Read requirements.md, design.md, tasks.md, and LEDGER. Run checks:
+
+1. **Frontmatter** — invoke `/spec-lint` for this spec.
+2. **Traceability** — orphan requirements, orphan properties, broken references.
+3. **Redundancy** — duplicates, subset properties, implementation details in requirements.
+4. **Stale language** — future tense on done tasks, checked goals with unchecked subs.
+5. **Spec↔disk drift** — design directory vs actual repo.
+6. **Doc sync** — README/docs vs spec.
+7. **Ledger sync** — features referenced in this spec must appear in LEDGER with consistent status; shipped tasks must correspond to ACTIVE ledger entries. If `--check` mode fails on LEDGER, surface it here.
+8. **Drift escalation** — if findings recur across audits, or if Drift flags in LEDGER are compounding, recommend the full 4-pass audit in `skills/workflow-guardrails/refs/ai-code-review.md`. This is the trigger for `/spec-audit --full`.
 
 **→ Print report:**
 ```
 Audit: SPEC
+  Frontmatter: OK / X errors (see /spec-lint)
   Traceability:
     ✓ N requirements → M properties → K tasks
     ⚠ R[N] has no validating property
@@ -348,15 +557,34 @@ Audit: SPEC
     ✗ spec lists "[path]" — not on disk
   Doc sync:
     ⚠ README says "[X]" but spec says "[Y]"
+  Ledger sync:
+    ⚠ LEDGER --check would fail: fresh vs on-disk differ on [feature]
+  Escalation:
+    → Drift compounding — recommend /spec-audit --full
   Summary: E errors, W warnings
 ```
-Suggest `/spec-plan SPEC refine`.
+Suggest `/spec-plan SPEC refine`, `/spec-project`, or `/spec-docs` as
+appropriate. Doc-sync warnings point at `/spec-docs`; traceability /
+frontmatter / stale-language findings point at `/spec-plan refine`;
+ledger-sync findings point at `/spec-project`.
+
+---
+
+### `/spec-audit --full <name>`
+
+Escalates to the full 4-pass coherence audit in
+`skills/workflow-guardrails/refs/ai-code-review.md`. Heavier than a regular
+audit; reach for it when code, docs, and intent have visibly drifted, or on
+release gates. Produces: constitutional layer → ground-truth extraction →
+intent reconciliation → coherence assessment + remediation. Its decision
+queue output feeds into `/spec-plan refine` or a successor spec.
 
 ---
 
 ### `/spec-status`
 
-Discover all specs in `.kiro/specs/`. Read tasks, count status marks, compute completion. Also read each spec's `Status:` lifecycle line and report it.
+Discover all specs in SPECS_ROOT. Read tasks, count status marks, compute
+completion. Read each spec's `status:` frontmatter field and report it.
 
 **→ Print dashboard:**
 ```
@@ -373,46 +601,29 @@ SPEC STATUS
     Progress: ███████ 3/5 (historical)
 ```
 
-### `/spec-ledger [audit | add <feature> <spec> | update <feature> <status> | drift-sweep]`
-
-Manage the project feature ledger at `.kiro/FEATURES.md`.
-
-- **No args:** print the ledger grouped by status.
-- **`audit`:** check every feature entry against code and specs. Flag:
-  - ghost features (ACTIVE in ledger but not in code)
-  - orphan features (in code but missing from ledger)
-  - lifecycle mismatches (SHIPPED spec with non-ACTIVE feature)
-  - broken supersession chains (superseded-by points to missing id)
-- **`add <feature-id> <spec-id>`:** append a new feature entry as `PLANNED`
-  or `IN-PROGRESS` (depending on task state), under the appropriate domain H2.
-- **`update <feature-id> <STATUS>`:** transition a feature. Sets `until:` for
-  DEPRECATED / SUPERSEDED / OBSOLETE; prompts for `superseded-by:` if needed.
-- **`drift-sweep`:** run `audit`, resolve non-ambiguous entries automatically,
-  report the ambiguous ones, then stamp `Last drift sweep: <date>` in the
-  ledger header.
-
-Never delete prior entries. Status transitions edit in place; superseded and
-obsolete entries remain as historical record. Point-in-time reconstruction
-comes from the frozen shipped specs + git history on `FEATURES.md` — no
-separate snapshot artifact is maintained.
-
-// turbo
-Commit: `git add .kiro/FEATURES.md && git commit -m "feat(ledger): <change summary>"`
+---
 
 ### `/spec-merge <name>`
 
 // turbo
-Find branches (`git branch --list "task/*"`, `git worktree list`), ask which to merge. Merge each (`git merge <branch> --no-edit`), resolve conflicts intelligently. Clean up branches/worktrees (confirm). Verify tasks status, tests, lint. Commit fixes: `git add -A && git commit -m "chore(SPEC): post-merge fixes"`
+Find branches (`git branch --list "task/*"`, `git worktree list`), ask which
+to merge. Merge each (`git merge <branch> --no-edit`), resolve conflicts
+intelligently. Clean up branches/worktrees (confirm). Verify tasks status,
+tests, lint. Commit fixes: `git add -A && git commit -m "chore(SPEC):
+post-merge fixes"`. Run `/spec-project` as the final merge step.
 
 ### `/spec-reset <name>`
 
-Confirm with user. Reset all status marks (`[x]`/`[~]`/`[!]` → `[ ]`, preserve `*`).
+Confirm with user. Reset all status marks (`[x]`/`[~]`/`[!]` → `[ ]`,
+preserve `*`). Frontmatter untouched.
+
 // turbo
 Commit: `git add -A && git commit -m "chore(SPEC): reset progress"`
 
 ### `/spec-help`
 
-Print the Core Loop diagram and command table from this skill, then ask what the user wants to do.
+Print the Core Loop diagram and command table from this skill, then ask what
+the user wants to do.
 
 ---
 
@@ -421,13 +632,24 @@ Print the Core Loop diagram and command table from this skill, then ask what the
 ### requirements.md
 
 ```markdown
+---
+spec_id: NN-name
+status: DRAFT
+since: YYYY-MM-DD
+until: null
+epic: <domain>
+features: []
+supersedes: []
+superseded_by: null
+depends_on: []
+---
+
 # Requirements Document
 
-Status: DRAFT
-Since: [YYYY-MM-DD]
-Features: [feature-id, feature-id]
-<!-- Status values: DRAFT, ACTIVE, SHIPPED, SUPERSEDED, OBSOLETE -->
-<!-- Once SHIPPED, this file is frozen except for forward links or factual fixes. -->
+<!-- The YAML above is the single source of truth for status and
+     relationships. Never edit it outside /spec-plan or /spec-link. -->
+<!-- Once status is SHIPPED, the whole file is frozen except for forward
+     links or factual corrections. -->
 
 ## Introduction
 <!-- What this spec covers and why -->
@@ -590,13 +812,24 @@ sequenceDiagram
 This is the single working scratchpad for all three hats: **planner** (Context + Constraints + Tasks), **builder** (check off tasks + append Log), **reviewer** (Decisions + flag issues + add test tasks in Log). No gates — cycle freely between hats throughout the work.
 
 ```markdown
+---
+spec_id: NN-name
+status: DRAFT
+since: YYYY-MM-DD
+until: null
+epic: <domain>
+features: []
+supersedes: []
+superseded_by: null
+depends_on: []
+---
+
 # [SPEC NAME]
 
-Status: DRAFT
-Since: [YYYY-MM-DD]
-Features: [feature-id, feature-id]
-<!-- Status values: DRAFT, ACTIVE, SHIPPED, SUPERSEDED, OBSOLETE -->
-<!-- Once SHIPPED, this file is frozen except for forward links or factual fixes. -->
+<!-- The YAML above is the single source of truth for status and
+     relationships. Never edit it outside /spec-plan or /spec-link. -->
+<!-- Once status is SHIPPED, the whole file is frozen except for forward
+     links or factual corrections. -->
 
 ## Context
 <!-- Why this work exists, who it's for, what success looks like. -->
@@ -651,12 +884,37 @@ Features: [feature-id, feature-id]
 
 ---
 
+## Migration (from v2 hand-maintained ledger)
+
+If a project already has a hand-maintained `FEATURES.md`:
+
+1. Run `/spec-link` — back-fills YAML frontmatter on every spec based on
+   existing `Status:` lines and `Superseded-by:` annotations.
+2. Run `/spec-lint` — reports inconsistencies between specs and the old
+   ledger. Resolve them manually (one-time cost).
+3. Delete the existing `FEATURES.md` content (keep the file, empty it).
+4. Run `/spec-project` — regenerates LEDGER from frontmatter + tasks +
+   code. First run is the slowest; thereafter it is incremental.
+5. Git-diff the first generated LEDGER against the git history of the old
+   ledger — anything important that was lost goes into the narrative block
+   of the new LEDGER as a backfilled "Recent transitions" entry.
+
+After migration, the `append, don't rewrite` rule from v2 no longer
+applies. LEDGER is rewritten on every projection.
+
+---
+
 ## Steering Docs (optional)
 
-Read-only project context at `.kiro/steering/` (root, not inside `specs/`):
+Read-only project context at `<SPECS_ROOT>/../steering/`:
 `product.md` (vision), `structure.md` (repo layout), `tech.md` (stack decisions).
 Read during planning and before implementing. Never modify during execution.
 
 ## Analytic Specs
 
-When analytic/notebook/experiment-oriented, pair with `analytic-workbench`. Requirements should cover artifact outputs, review checkpoints, promotion criteria. Design should make notebook vs module boundaries explicit. Tasks should separate exploratory → review → promotion stages.
+When analytic/notebook/experiment-oriented, pair with `analytic-workbench`.
+Requirements should cover artifact outputs, review checkpoints, promotion
+criteria. Design should make notebook vs module boundaries explicit. Tasks
+should separate exploratory → review → promotion stages. `/spec-project`
+grounding still applies — artifact paths and notebook modules are valid
+`[src:]` anchors.

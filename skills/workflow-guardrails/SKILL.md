@@ -140,14 +140,24 @@ Before substantive changes:
 
 ### 12. Loop Forward When the Human Is Away
 
-- If a canonical queue exists, keep moving through the next concrete work item.
-- Drive from incomplete milestones, next tasks, failing tests, known bugs, or
-  named follow-up items.
-- Real loop work includes implementation, verification, bug fixing,
-  maintainability refactors, and artifact maintenance.
-- Stop for real blockers only: missing decisions, missing credentials, missing
-  data, or exhausted queue.
-- Document stop conditions when automation or scheduled prompts are involved.
+When the queue appears empty, actively discover work before idling. Check in
+this priority order:
+
+1. Explicit doubt or concern markers left by prior sessions — the project's
+   CLAUDE.md names the specific artifact and marker convention.
+2. Recent git activity and working-tree intent — what was the human last
+   touching?
+3. Deferred or incomplete milestones and tasks.
+4. Failing or skipped tests.
+5. Inline TODO / FIXME / XXX markers in code.
+6. Doubt-flagged shipped features that may not be working as claimed.
+
+The project's CLAUDE.md names the specific artifacts for each category.
+Real loop work includes implementation, verification, bug fixing,
+maintainability refactors, and artifact maintenance.
+Stop only for real blockers: missing decisions, missing credentials, missing
+data, or genuinely exhausted queue.
+Document stop conditions when automation or scheduled prompts are involved.
 
 ### 13. Work Efficiently Without Cheating
 
@@ -183,6 +193,27 @@ Pause and re-check the repo before changing:
 - If the user corrects a recurring omission, encode that into the durable
   workflow.
 
+### 16. Verify Before Dispatching Next
+
+Before firing the next agent or advancing to the next milestone, confirm the
+prior work actually landed:
+
+- The commit exists on the target branch.
+- Tests pass against that commit.
+- The project's canonical status artifacts were updated — not just code.
+
+An agent's report of success is not verified success. Do not skip this step
+on the assumption the prior agent was correct.
+
+### 17. Escalation Proportionality
+
+When a problem has a minimal targeted fix, name that as option A before
+proposing a larger refactor or architectural response.
+
+Do not silently inflate a bug fix into a pre-existing desired refactor. State
+the scope of the proposed change explicitly so the human can choose the right
+level of intervention.
+
 ## CLAUDE.md Reference
 
 This skill includes `claude.template` as a reference implementation for a
@@ -213,6 +244,10 @@ Load these on demand when the relevant kind of work is active:
 - [`refs/ai-artifact-update.md`](refs/ai-artifact-update.md) — how to keep
   specs, design docs, steering docs, user docs, and analysis records honest as
   code evolves. Surgical edits, not rewrites.
+- [`../spec-driven-dev/SKILL.md`](../spec-driven-dev/SKILL.md) — the
+  development ceremony layer: spec lifecycle, planning, implementation loop,
+  and feature projection. Apply alongside these guardrails for any project
+  using structured spec work.
 
 ## Umbrella Role
 

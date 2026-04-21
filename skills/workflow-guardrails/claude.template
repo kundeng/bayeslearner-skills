@@ -68,6 +68,10 @@ Example:
 4. Check recent changes with `[git command or status check]`.
 5. Confirm the next work item from `[spec, tracker, or handoff]`.
 6. If the human is away, continue from the next incomplete work item.
+7. Apply the `workflow-guardrails` skill for execution discipline and subagent
+   patterns throughout the session.
+8. If the project uses specs, apply the `spec-driven-dev` skill for planning
+   and implementation ceremony.
 
 ## Commands
 
@@ -149,11 +153,22 @@ Project-specific list:
 
 ## Loop behavior when the human is away
 
-- Continue from the next incomplete milestone, task, failing test, known bug, or named follow-up item.
-- Real progress includes implementation, verification, bug fixing, maintainability refactors, and artifact maintenance.
-- Prefer refactors that reduce duplication, improve module boundaries, or make the next task easier to verify.
-- Stop only for real blockers: missing decisions, missing credentials, missing data, or exhausted queue.
-- Update the handoff before stopping.
+When the queue appears empty, actively discover work before idling. Check in
+this priority order — fill in the specific artifacts for this project under
+each category:
+
+1. Explicit doubt or concern markers left by prior sessions: `[artifact and marker convention]`
+2. Recent git activity and working-tree intent: `[git log command]`
+3. Deferred or incomplete milestones and tasks: `[spec or tracker path]`
+4. Failing or skipped tests: `[test command]`
+5. Inline TODO / FIXME / XXX markers: `[grep command or path]`
+6. Doubt-flagged shipped features: `[ledger or status doc path]`
+
+Real progress includes implementation, verification, bug fixing, maintainability
+refactors, and artifact maintenance.
+Stop only for real blockers: missing decisions, missing credentials, missing
+data, or genuinely exhausted queue.
+Update the handoff before stopping.
 
 ## What not to put in this file
 
