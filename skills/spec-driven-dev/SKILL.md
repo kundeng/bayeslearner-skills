@@ -1,9 +1,9 @@
 ---
 name: spec-driven-dev
-description: "Spec-driven development: plan → go → review → project loop with spec lifecycle states, YAML frontmatter, an AI-operated feature projection grounded in code reality, and AI-operated refresh of project documentation against that same grounding. Use for planning features, implementing from specs, refining specs, regenerating the project-level feature ledger, bringing README / docs/ / CHANGELOG up to date with specs and code, tracking what features exist across specs, and resuming work. Trigger on requests mentioning specs, requirements/design/tasks, spec-help, spec-plan, spec-project, spec-docs, feature ledger, FEATURES.md, spec-link, `.kiro`, `specs/`, refreshing or syncing docs from specs, updating README to match reality, or any ask to audit, project, or refresh the state of features and docs in the project. IMPORTANT: Never edit spec files without first reading this skill. Never hand-edit FEATURES.md — it is a derived projection. Never regenerate managed doc sections without reading `references/docs-refresh-playbook.md`."
+description: "Spec-driven development loop (plan → go → review → project) with lifecycle states, YAML frontmatter, a code-grounded feature projection (FEATURES.md), and docs refresh. ALWAYS LOAD THIS SKILL when working on any project that has a `.kiro/specs/` or `specs/` directory, or any CLAUDE.md/AGENTS.md that mentions specs. Use for planning, implementing, refining, or auditing specs, regenerating the feature ledger, or syncing README/docs/CHANGELOG with specs and code. Trigger on: any implementation work in a spec-managed project, specs, requirements/design/tasks, spec-plan, spec-go, spec-project, spec-docs, spec-audit, feature ledger, `.kiro`, `specs/`, 'keep working', 'continue', or resuming prior work. Never hand-edit FEATURES.md — it is derived."
 metadata:
   author: kundeng
-  version: "3.1.0"
+  version: "3.2.0"
 ---
 
 ## Spec-Driven Development
@@ -234,7 +234,7 @@ builders only when user explicitly requests AND tasks are truly independent.
 8. **LEDGER is derived** — never hand-edit `FEATURES.md`. Run `/spec-project` after any task that ships/deprecates/supersedes a feature, after frontmatter changes, or when the human asks for fresh state.
 9. **Every projection claim cites an anchor.** Valid anchors: `[spec:NN-name]`, `[task:NN-name#ID]`, `[commit:<short-sha>]`, `[src:path/to/file:Lxx]`. ACTIVE and SHIPPED claims **require** at least one `[src:]` anchor.
 10. **Code-grounding on projection.** `/spec-project` reads actual code for every feature asserted as ACTIVE/SHIPPED. Paper truth (spec + task anchors alone) is insufficient. See `references/spec-code-grounding.md`.
-11. **Escalate on compound drift.** When `/spec-audit` repeats drift findings, or when multiple features land in Drift flags across consecutive projections, escalate to the full 4-pass audit in `skills/workflow-guardrails/refs/ai-code-review.md`.
+11. **Escalate on compound drift.** When `/spec-audit` repeats drift findings, or when multiple features land in Drift flags across consecutive projections, escalate to the full audit in `references/CODE_REVIEW.md`.
 12. **This skill's formality is not discovery.** Frontmatter lint, projection-diff, and the other mechanical consistency checks are CI gates — they fail when YOU just made the graph inconsistent, and they silently pass when the repo is healthy. Do not loop on them as a "what to do next" mechanism. When a task says "actively discover work," read DK comments on the ledger, failing tests, user's git state, deferred milestones, and doubt-flagged SHIPPED features. Reserve the mechanical tooling for its narrow purpose: pre-commit / CI, and right after a `/spec-project` regen to confirm the regen was clean.
 13. **Docs are grounded too.** `/spec-docs` applies the same evidence-anchor discipline as `/spec-project`. Claims without anchors are flagged, not rewritten. Sections wrapped in `<!-- managed-by: spec-docs -->` ... `<!-- /managed-by -->` are regenerated fully; everything else gets targeted factual corrections only. Always run `/spec-project` before `/spec-docs` so LEDGER is fresh.
 
@@ -306,6 +306,7 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 
 **Build phase:**
 1. **Read spec** — full: requirements.md, design.md, tasks.md (+ steering). Fast-track: spec.md. Also read LEDGER if present.
+1b. **Load code review reference** — read [`references/CODE_REVIEW.md`](references/CODE_REVIEW.md) §Axioms + §AI Code Smell Catalog + §Pass 1.5C Anti-Patterns. Internalize before writing code. This primes you to avoid anti-patterns during implementation, not just catch them in review.
 2. **Pick next task** — first `[ ]` with all deps satisfied. Only optional left → STOP.
 3. **Announce** — "Starting task [ID]: [TITLE]"
 4. **Implement** — read relevant code first. Test tasks: Red-Green-Refactor. Implementation tasks: write code, run existing tests.
@@ -317,7 +318,7 @@ Also triggered by: "run the spec", "implement the spec", "loop the spec", "build
 8. **Commit** — `git add -A && git commit -m "feat(SPEC/[ID]): [description]"`
 
 **Self-review phase** (every 3 tasks or after a BLOCKED):
-9. Re-read spec, check for drift. **Primary job: ensure test coverage** — for each completed task, verify a test task exists that covers it. If not, append a test task so the builder implements and runs it next. Tests must pass before the reviewer signs off.
+9. Re-read spec, check for drift. **Primary job: ensure verification coverage** — for each completed task, verify a verification task exists that covers it. The type of verification must match the project's testing strategy defined in design.md (e.g., VM deployment, E2E scripts, integration tests, property tests). Do NOT default to unit tests — unit tests are optional and only appropriate for complex pure-function logic. If the project's testing strategy specifies system-level verification (e.g., multipass VM deployment, Docker-based E2E), append that kind of verification task instead. Verification tasks must pass before the reviewer signs off.
 10. **Minor fixes** (add/drop/tweak tasks, add test tasks) → apply inline, continue. **Drastic changes** (wrong requirements, architecture rethink, scope shift) → STOP, go to Plan for human review.
 11. **Report checkpoint:**
 ```
@@ -572,12 +573,20 @@ ledger-sync findings point at `/spec-project`.
 
 ### `/spec-audit --full <name>`
 
-Escalates to the full 4-pass coherence audit in
-`skills/workflow-guardrails/refs/ai-code-review.md`. Heavier than a regular
-audit; reach for it when code, docs, and intent have visibly drifted, or on
-release gates. Produces: constitutional layer → ground-truth extraction →
-intent reconciliation → coherence assessment + remediation. Its decision
-queue output feeds into `/spec-plan refine` or a successor spec.
+Escalates to the **unified code review** at
+[`references/CODE_REVIEW.md`](references/CODE_REVIEW.md). This consolidates
+the former 4-pass coherence audit and DEEP_CRITICAL_CODE_REVIEW into one
+process (v3.0). Reach for it when code, docs, and intent have visibly
+drifted, or on release gates.
+
+Produces: constitutional layer (Pass 0) → ground-truth extraction (Pass 1) →
+code quality (Pass 1.5) → intent reconciliation (Pass 2) → coherence
+assessment + remediation (Pass 3). Its decision queue output feeds into
+`/spec-plan refine` or a successor spec.
+
+The same reference is also loaded during `/spec-go` (step 1b) in
+**implementation mode** — the axioms and anti-pattern catalog prime the
+builder to avoid mistakes during writing, not just catch them in review.
 
 ---
 
@@ -736,9 +745,14 @@ sequenceDiagram
 ## Error Handling Strategy
 
 ## Testing Strategy
-- **Property tests**: Verify design invariants (required)
-- **E2E tests**: Validate user stories end-to-end (required)
-- **Unit tests**: Complex internal logic only (optional)
+<!-- Define what verification means for THIS project. The self-review phase
+     uses this section to decide what kind of verification tasks to append.
+     Do NOT default to unit tests — choose the verification method that
+     actually proves the feature works (VM deployment, E2E scripts,
+     integration tests, property tests, etc.). -->
+- **System/E2E tests**: [Primary verification method — e.g., VM deployment, Docker E2E, Playwright] (required)
+- **Property tests**: Verify design invariants (required where applicable)
+- **Unit tests**: Complex pure-function logic only (optional — do NOT use as default)
 - **Test command**: `[command]`
 - **Lint command**: `[command]`
 
